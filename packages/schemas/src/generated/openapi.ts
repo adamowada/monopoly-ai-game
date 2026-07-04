@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/ai/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Profiles */
+        get: operations["get_ai_profiles_games__game_id__ai_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/ai/step": {
         parameters: {
             query?: never;
@@ -452,6 +469,65 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIProfileResponse */
+        AIProfileResponse: {
+            /** Aggressiveness */
+            aggressiveness: number;
+            /**
+             * Ai Profile Id
+             * Format: uuid
+             */
+            ai_profile_id: string;
+            /** Cooperation */
+            cooperation: number;
+            /** Created At */
+            created_at: unknown;
+            /** Debt Appetite */
+            debt_appetite: number;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Liquidity Preference */
+            liquidity_preference: number;
+            /** Monopoly Focus */
+            monopoly_focus: number;
+            /** Negotiation Creativity */
+            negotiation_creativity: number;
+            /** Persona Name */
+            persona_name: string;
+            /** Persona Summary */
+            persona_summary: string;
+            /** Personality */
+            personality: string;
+            /** Play Style */
+            play_style: string;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Risk Tolerance */
+            risk_tolerance: number;
+            /** Strategy Profile */
+            strategy_profile: {
+                [key: string]: unknown;
+            };
+            /** Traits */
+            traits: string[];
+            /** Trust */
+            trust: number;
+            /** Updated At */
+            updated_at: unknown;
+        };
+        /** AIProfilesResponse */
+        AIProfilesResponse: {
+            /** Profiles */
+            profiles: components["schemas"]["AIProfileResponse"][];
+        };
         /** AcceptedEventResponse */
         AcceptedEventResponse: {
             /** Actor Player Id */
@@ -1307,6 +1383,37 @@ export interface operations {
                     "application/json": components["schemas"]["ActionAcceptedResponse"] | {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_profiles_games__game_id__ai_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIProfilesResponse"];
                 };
             };
             /** @description Validation Error */

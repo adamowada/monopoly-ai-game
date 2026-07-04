@@ -1,6 +1,135 @@
 {
   "components": {
     "schemas": {
+      "AIProfileResponse": {
+        "properties": {
+          "aggressiveness": {
+            "title": "Aggressiveness",
+            "type": "number"
+          },
+          "ai_profile_id": {
+            "format": "uuid",
+            "title": "Ai Profile Id",
+            "type": "string"
+          },
+          "cooperation": {
+            "title": "Cooperation",
+            "type": "number"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "debt_appetite": {
+            "title": "Debt Appetite",
+            "type": "number"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "liquidity_preference": {
+            "title": "Liquidity Preference",
+            "type": "number"
+          },
+          "monopoly_focus": {
+            "title": "Monopoly Focus",
+            "type": "number"
+          },
+          "negotiation_creativity": {
+            "title": "Negotiation Creativity",
+            "type": "number"
+          },
+          "persona_name": {
+            "title": "Persona Name",
+            "type": "string"
+          },
+          "persona_summary": {
+            "title": "Persona Summary",
+            "type": "string"
+          },
+          "personality": {
+            "title": "Personality",
+            "type": "string"
+          },
+          "play_style": {
+            "title": "Play Style",
+            "type": "string"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "risk_tolerance": {
+            "title": "Risk Tolerance",
+            "type": "number"
+          },
+          "strategy_profile": {
+            "additionalProperties": true,
+            "title": "Strategy Profile",
+            "type": "object"
+          },
+          "traits": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Traits",
+            "type": "array"
+          },
+          "trust": {
+            "title": "Trust",
+            "type": "number"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "ai_profile_id",
+          "game_id",
+          "player_id",
+          "display_name",
+          "persona_name",
+          "strategy_profile",
+          "persona_summary",
+          "traits",
+          "personality",
+          "play_style",
+          "risk_tolerance",
+          "liquidity_preference",
+          "debt_appetite",
+          "aggressiveness",
+          "cooperation",
+          "negotiation_creativity",
+          "trust",
+          "monopoly_focus",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AIProfileResponse",
+        "type": "object"
+      },
+      "AIProfilesResponse": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/AIProfileResponse"
+            },
+            "title": "Profiles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profiles"
+        ],
+        "title": "AIProfilesResponse",
+        "type": "object"
+      },
       "AcceptedEventResponse": {
         "properties": {
           "actor_player_id": {
@@ -2134,6 +2263,49 @@
           }
         },
         "summary": "Submit Action",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/ai/profiles": {
+      "get": {
+        "operationId": "get_ai_profiles_games__game_id__ai_profiles_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIProfilesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Profiles",
         "tags": [
           "games"
         ]

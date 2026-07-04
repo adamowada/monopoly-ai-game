@@ -15,6 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette import status
 
+from app.ai.profiles import (
+    AIProfile,
+    AIProfileGameNotFoundError,
+    ensure_ai_profiles_for_game,
+)
 from app.contracts.execution import (
     ContractCreationResult,
     ContractExecutionError,
@@ -500,6 +505,33 @@ class AiStepNotImplementedResponse(BaseModel):
     message: str
 
 
+class AIProfileResponse(BaseModel):
+    ai_profile_id: UUID
+    game_id: UUID
+    player_id: UUID
+    display_name: str
+    persona_name: str
+    strategy_profile: Mapping[str, Any]
+    persona_summary: str
+    traits: list[str]
+    personality: str
+    play_style: str
+    risk_tolerance: float
+    liquidity_preference: float
+    debt_appetite: float
+    aggressiveness: float
+    cooperation: float
+    negotiation_creativity: float
+    trust: float
+    monopoly_focus: float
+    created_at: Any
+    updated_at: Any
+
+
+class AIProfilesResponse(BaseModel):
+    profiles: list[AIProfileResponse]
+
+
 @router.post("", response_model=GameMetadataResponse, status_code=status.HTTP_201_CREATED)
 async def create_game(request: Request, payload: CreateGameRequest) -> GameMetadataResponse:
     session_factory = _session_factory(request)
@@ -537,6 +569,7 @@ async def create_game(request: Request, payload: CreateGameRequest) -> GameMetad
                         state=player_state.model_dump(mode="json"),
                     )
                 )
+            await ensure_ai_profiles_for_game(session, game_id=game_id)
 
     return await _load_game_metadata(session_factory, game_id)
 
@@ -1702,6 +1735,19 @@ async def record_negotiation_ai_decision_attempt(
                     detail="negotiation not found",
                 )
     return _negotiation_response(updated)
+
+
+@router.get("/{game_id}/ai/profiles", response_model=AIProfilesResponse)
+async def get_ai_profiles(game_id: UUID, request: Request) -> AIProfilesResponse:
+    session_factory = _session_factory(request)
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                profile_records = await ensure_ai_profiles_for_game(session, game_id=game_id)
+    except AIProfileGameNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
+
+    return AIProfilesResponse(profiles=[_ai_profile_response(profile) for profile in profile_records])
 
 
 @router.post(
@@ -3392,6 +3438,31 @@ def _state_payload(state: GameState) -> dict[str, Any]:
 
 def _event_response(record: AcceptedEventRecord) -> AcceptedEventResponse:
     return AcceptedEventResponse.model_validate(record.model_dump())
+
+
+def _ai_profile_response(profile: AIProfile) -> AIProfileResponse:
+    return AIProfileResponse(
+        ai_profile_id=profile.id,
+        game_id=profile.game_id,
+        player_id=profile.player_id,
+        display_name=profile.display_name,
+        persona_name=profile.persona_name,
+        strategy_profile=profile.strategy_profile,
+        persona_summary=profile.persona_summary,
+        traits=list(profile.traits),
+        personality=profile.personality,
+        play_style=profile.play_style,
+        risk_tolerance=profile.risk_tolerance,
+        liquidity_preference=profile.liquidity_preference,
+        debt_appetite=profile.debt_appetite,
+        aggressiveness=profile.aggressiveness,
+        cooperation=profile.cooperation,
+        negotiation_creativity=profile.negotiation_creativity,
+        trust=profile.trust,
+        monopoly_focus=profile.monopoly_focus,
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
+    )
 
 
 def _rejected_response(record: RejectedActionRecord) -> RejectedActionResponse:

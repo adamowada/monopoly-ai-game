@@ -399,6 +399,10 @@ function configureAiAuditSeed(game) {
       index === 0
         ? "Builds cash buffers before auctions and chooses the smallest legal tempo-preserving action."
         : "Uses retrieved context to probe trades while avoiding actions outside the legal snapshot.",
+    persona_summary:
+      index === 0
+        ? `${player.name} is a careful analyst who preserves cash before pressing for trades.`
+        : `${player.name} is a fast negotiator who looks for pressure without leaving the legal snapshot.`,
     created_at: createdAt,
   }));
 

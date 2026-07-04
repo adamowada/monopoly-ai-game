@@ -176,6 +176,10 @@ function ProfilesView({
                 <dd className="mt-1 text-neutral-950">{profile.play_style}</dd>
               </div>
             </dl>
+            <div className="mt-3 rounded-md border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+              <p className="text-[11px] font-semibold uppercase text-neutral-500">Persona summary</p>
+              <p className="mt-1 text-neutral-950">{profile.persona_summary}</p>
+            </div>
           </article>
         ))}
       </div>

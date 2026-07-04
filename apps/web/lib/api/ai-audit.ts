@@ -16,6 +16,7 @@ export const AiProfileSchema = z.object({
   traits: z.array(z.string().min(1)),
   personality: z.string().min(1),
   play_style: z.string().min(1),
+  persona_summary: z.string().min(1),
   created_at: z.coerce.string().min(1),
 });
 
