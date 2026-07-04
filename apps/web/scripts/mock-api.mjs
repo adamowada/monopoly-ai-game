@@ -9,6 +9,7 @@ let gameCounter = 0;
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const classicData = JSON.parse(readFileSync(resolve(scriptDir, "../../../content/rules/classic_monopoly.json"), "utf8"));
 const propertyData = classicData.properties;
+const auctionFallbackPropertyId = "property_mediterranean_avenue";
 
 const corsHeaders = {
   "access-control-allow-headers": "accept, content-type, Idempotency-Key",
@@ -174,6 +175,7 @@ function createGame(payload) {
     rejected_actions: [],
     property_ownership: createDefaultPropertyOwnership(),
     bank_inventory: { houses: 32, hotels: 12 },
+    active_auction: null,
     stream_clients: new Set(),
     created_at: createdAt,
     updated_at: createdAt,
@@ -214,6 +216,27 @@ function isPropertyManagementSeed(seed) {
 
 function propertyOwnership(game, propertyId) {
   return game.property_ownership.find((ownership) => ownership.property_id === propertyId) ?? null;
+}
+
+function propertyById(propertyId) {
+  return propertyData.find((property) => property.id === propertyId) ?? null;
+}
+
+function propertyAtPosition(position) {
+  return propertyData.find((property) => property.board_position === position) ?? null;
+}
+
+function purchasablePropertyId(game) {
+  const actor = activePlayer(game);
+  if (!actor) {
+    return null;
+  }
+  const property = propertyAtPosition(actor.state.position) ?? propertyById(auctionFallbackPropertyId);
+  if (!property) {
+    return null;
+  }
+  const ownership = propertyOwnership(game, property.id);
+  return ownership?.owner_id === null ? property.id : null;
 }
 
 function setPropertyOwnership(game, propertyId, patch) {
@@ -279,6 +302,7 @@ function gameState(game) {
       })),
       property_ownership: game.property_ownership,
       bank_inventory: game.bank_inventory,
+      active_auction: game.active_auction,
       turn: {
         phase: game.current_phase,
         current_player_index: 0,
@@ -298,10 +322,13 @@ function activePlayer(game) {
   return game.players[0] ?? null;
 }
 
-function legalAction(game, type, payload = {}) {
-  const actor = activePlayer(game);
+function playerById(game, playerId) {
+  return game.players.find((player) => player.id === playerId) ?? null;
+}
+
+function legalAction(game, type, payload = {}, actorPlayerId = activePlayer(game)?.id ?? "") {
   return {
-    actor_id: actor?.id ?? "",
+    actor_id: actorPlayerId,
     type,
     payload,
     expected_state_hash: stateHash(game),
@@ -312,20 +339,67 @@ function legalAction(game, type, payload = {}) {
 }
 
 function legalActionsFor(game, actorPlayerId) {
-  const actor = activePlayer(game);
-  if (!actor || actor.id !== actorPlayerId) {
+  const actor = playerById(game, actorPlayerId);
+  if (!actor) {
+    return [];
+  }
+  if (game.active_auction) {
+    return auctionLegalActionsFor(game, actor);
+  }
+  const turnActor = activePlayer(game);
+  if (!turnActor || turnActor.id !== actorPlayerId) {
     return [];
   }
   if (isPropertyManagementSeed(game.seed) && game.current_phase === "PRE_ROLL_MANAGEMENT") {
     return propertyManagementLegalActionsFor(game);
   }
   if (game.current_phase === "PURCHASE_OR_AUCTION") {
+    const propertyId = purchasablePropertyId(game);
+    if (!propertyId) {
+      return [];
+    }
+    const price = propertyById(propertyId)?.price;
     return [
-      legalAction(game, "BUY_PROPERTY", { property_id: "property_chance_7" }),
-      legalAction(game, "START_AUCTION", { property_id: "property_chance_7" }),
+      legalAction(game, "BUY_PROPERTY", { property_id: propertyId, ...(price ? { price } : {}) }, actor.id),
+      legalAction(game, "START_AUCTION", { property_id: propertyId }, actor.id),
     ];
   }
-  return [legalAction(game, "ROLL_DICE")];
+  return [legalAction(game, "ROLL_DICE", {}, actor.id)];
+}
+
+function auctionMinimumBid(game) {
+  const highBidAmount = game.active_auction?.high_bid_amount;
+  return Number.isInteger(highBidAmount) ? highBidAmount + 1 : 1;
+}
+
+function bidSchema(minimumBid) {
+  return {
+    type: "object",
+    properties: {
+      amount: {
+        type: "integer",
+        minimum: minimumBid,
+      },
+    },
+    required: ["amount"],
+  };
+}
+
+function auctionLegalActionsFor(game, actor) {
+  const auction = game.active_auction;
+  if (!auction || actor.status !== "active" || auction.passed_player_ids.includes(actor.id)) {
+    return [];
+  }
+  const minimumBid = auctionMinimumBid(game);
+  const actions = [];
+  if ((actor.state.cash ?? 0) >= minimumBid) {
+    actions.push({
+      ...legalAction(game, "BID_AUCTION", { property_id: auction.property_id, amount: minimumBid }, actor.id),
+      schema: bidSchema(minimumBid),
+    });
+  }
+  actions.push(legalAction(game, "PASS_AUCTION", { property_id: auction.property_id }, actor.id));
+  return actions;
 }
 
 function propertyManagementLegalActionsFor(game) {
@@ -414,8 +488,14 @@ function broadcastSse(game, event) {
 function acceptRollDice(game, action) {
   const actor = activePlayer(game);
   const fromPosition = actor?.state.position ?? 0;
-  const toPosition = 7;
-  const rolled = createAcceptedEvent(game, "DICE_ROLLED", { dice: [3, 4], total: 7 }, actor?.id ?? null);
+  const isAuctionSeed = typeof game.seed === "string" && game.seed.startsWith("stage-5-auction");
+  const toPosition = isAuctionSeed ? 1 : 7;
+  const rolled = createAcceptedEvent(
+    game,
+    "DICE_ROLLED",
+    isAuctionSeed ? { dice: [1], total: 1 } : { dice: [3, 4], total: 7 },
+    actor?.id ?? null,
+  );
 
   if (actor) {
     actor.state = {
@@ -475,7 +555,7 @@ function actionMatchesLegalAction(candidate, action) {
   return true;
 }
 
-function createManagementAcceptedResponse(game, acceptedEvents) {
+function createAcceptedResponse(game, acceptedEvents) {
   game.updated_at = nowIso();
   for (const event of acceptedEvents) {
     broadcastSse(game, event);
@@ -488,6 +568,224 @@ function createManagementAcceptedResponse(game, acceptedEvents) {
     state_hash: stateHash(game),
     event_sequence: game.event_sequence,
   };
+}
+
+function createManagementAcceptedResponse(game, acceptedEvents) {
+  return createAcceptedResponse(game, acceptedEvents);
+}
+
+function activeAuctionPlayerIds(game) {
+  return game.players.filter((player) => player.status === "active").map((player) => player.id);
+}
+
+function shouldCloseAuction(game) {
+  const auction = game.active_auction;
+  if (!auction) {
+    return false;
+  }
+  const unpassedPlayerIds = activeAuctionPlayerIds(game).filter((playerId) => !auction.passed_player_ids.includes(playerId));
+  if (!auction.high_bidder_id) {
+    return unpassedPlayerIds.length === 0;
+  }
+  return unpassedPlayerIds.filter((playerId) => playerId !== auction.high_bidder_id).length === 0;
+}
+
+function activeAuctionSetEvent(game, actorPlayerId, auction) {
+  return createAcceptedEvent(
+    game,
+    "ACTIVE_AUCTION_SET",
+    auction
+      ? {
+          active: true,
+          property_id: auction.property_id,
+          high_bidder_id: auction.high_bidder_id,
+          high_bid_amount: auction.high_bid_amount,
+          passed_player_ids: auction.passed_player_ids,
+        }
+      : { active: false },
+    actorPlayerId,
+  );
+}
+
+function closeAuctionEvents(game, actorPlayerId) {
+  const auction = game.active_auction;
+  if (!auction) {
+    return [];
+  }
+
+  const events = [];
+  if (auction.high_bidder_id && Number.isInteger(auction.high_bid_amount)) {
+    const winner = playerById(game, auction.high_bidder_id);
+    if (winner) {
+      winner.state = {
+        ...winner.state,
+        cash: (winner.state.cash ?? 0) - auction.high_bid_amount,
+      };
+      winner.updated_at = nowIso();
+      setPropertyOwnership(game, auction.property_id, { owner_id: winner.id });
+      events.push(
+        createAcceptedEvent(
+          game,
+          "PLAYER_CASH_DELTA",
+          { player_id: winner.id, amount: -auction.high_bid_amount },
+          actorPlayerId,
+        ),
+      );
+      events.push(
+        createAcceptedEvent(
+          game,
+          "PROPERTY_OWNER_SET",
+          { property_id: auction.property_id, owner_id: winner.id },
+          actorPlayerId,
+        ),
+      );
+      events.push(
+        createAcceptedEvent(
+          game,
+          "AUCTION_RESULT",
+          {
+            property_id: auction.property_id,
+            winner_id: winner.id,
+            winning_bid: auction.high_bid_amount,
+            passed_player_ids: auction.passed_player_ids,
+          },
+          actorPlayerId,
+        ),
+      );
+    }
+  } else {
+    events.push(
+      createAcceptedEvent(
+        game,
+        "AUCTION_RESULT",
+        {
+          property_id: auction.property_id,
+          winner_id: null,
+          winning_bid: null,
+          passed_player_ids: auction.passed_player_ids,
+        },
+        actorPlayerId,
+      ),
+    );
+  }
+
+  game.active_auction = null;
+  events.push(activeAuctionSetEvent(game, actorPlayerId, null));
+  return events;
+}
+
+function acceptStartAuction(game, action) {
+  const propertyId = action.payload.property_id;
+  const ownership = propertyOwnership(game, propertyId);
+  if (!propertyById(propertyId) || ownership?.owner_id !== null || game.active_auction) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "auction can only start for an unowned property", "payload.property_id"),
+    };
+  }
+  game.active_auction = {
+    property_id: propertyId,
+    high_bidder_id: null,
+    high_bid_amount: null,
+    passed_player_ids: [],
+  };
+  return {
+    statusCode: 200,
+    payload: createAcceptedResponse(game, [activeAuctionSetEvent(game, action.actor_id, game.active_auction)]),
+  };
+}
+
+function acceptBidAuction(game, action) {
+  const auction = game.active_auction;
+  const actor = playerById(game, action.actor_id);
+  if (!auction || !actor) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "there is no active auction for this bidder", "type"),
+    };
+  }
+  const amount = action.payload.amount;
+  if (!Number.isInteger(amount)) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "malformed_action", "auction bid amount must be an integer", "payload.amount"),
+    };
+  }
+  if (amount <= (auction.high_bid_amount ?? 0)) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "auction bid must increase the current high bid", "payload.amount"),
+    };
+  }
+  if ((actor.state.cash ?? 0) < amount) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "insufficient cash for auction bid", "payload.amount"),
+    };
+  }
+  if (auction.passed_player_ids.includes(actor.id)) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "bidder has already passed this auction", "actor_id"),
+    };
+  }
+
+  game.active_auction = {
+    ...auction,
+    high_bidder_id: actor.id,
+    high_bid_amount: amount,
+  };
+  const events = [activeAuctionSetEvent(game, actor.id, game.active_auction)];
+  if (shouldCloseAuction(game)) {
+    events.push(...closeAuctionEvents(game, actor.id));
+  }
+  return {
+    statusCode: 200,
+    payload: createAcceptedResponse(game, events),
+  };
+}
+
+function acceptPassAuction(game, action) {
+  const auction = game.active_auction;
+  const actor = playerById(game, action.actor_id);
+  if (!auction || !actor) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "there is no active auction for this bidder", "type"),
+    };
+  }
+  if (auction.passed_player_ids.includes(actor.id)) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "bidder has already passed this auction", "actor_id"),
+    };
+  }
+
+  game.active_auction = {
+    ...auction,
+    passed_player_ids: [...auction.passed_player_ids, actor.id],
+  };
+  const events = [activeAuctionSetEvent(game, actor.id, game.active_auction)];
+  if (shouldCloseAuction(game)) {
+    events.push(...closeAuctionEvents(game, actor.id));
+  }
+  return {
+    statusCode: 200,
+    payload: createAcceptedResponse(game, events),
+  };
+}
+
+function acceptAuctionAction(game, action) {
+  if (action.type === "START_AUCTION") {
+    return acceptStartAuction(game, action);
+  }
+  if (action.type === "BID_AUCTION") {
+    return acceptBidAuction(game, action);
+  }
+  if (action.type === "PASS_AUCTION") {
+    return acceptPassAuction(game, action);
+  }
+  return null;
 }
 
 function acceptBankInventory(game, actorPlayerId, houses, hotels) {
@@ -782,6 +1080,12 @@ const server = createServer(async (request, response) => {
 
       if (action.type === "ROLL_DICE") {
         json(response, 200, acceptRollDice(game, action));
+        return;
+      }
+
+      const auctionResponse = acceptAuctionAction(game, action);
+      if (auctionResponse) {
+        json(response, auctionResponse.statusCode, auctionResponse.payload);
         return;
       }
 

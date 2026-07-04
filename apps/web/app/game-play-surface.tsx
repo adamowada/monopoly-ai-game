@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Banknote,
@@ -35,6 +35,7 @@ import {
 import { readGame, type GameMetadata } from "../lib/api/games";
 import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
+import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
 import { ClassicGameBoard, getPlayerColor } from "./game-board";
 import { PropertyManagementPanel } from "./property-management";
 
@@ -158,6 +159,22 @@ function eventPayloadSummary(event: AcceptedEvent): string {
     const propertyId = event.payload.property_id;
     return typeof propertyId === "string" ? propertyId : "";
   }
+  if (event.event_type === "PROPERTY_OWNER_SET") {
+    const propertyId = event.payload.property_id;
+    const ownerId = event.payload.owner_id;
+    const propertyText = typeof propertyId === "string" ? propertyId : "";
+    const ownerText = typeof ownerId === "string" ? `owner ${ownerId}` : "unowned";
+    return `${propertyText} ${ownerText}`.trim();
+  }
+  if (event.event_type === "AUCTION_RESULT") {
+    const propertyId = event.payload.property_id;
+    const winnerId = event.payload.winner_id;
+    const bid = event.payload.winning_bid;
+    const propertyText = typeof propertyId === "string" ? propertyId : "";
+    const winnerText = typeof winnerId === "string" ? `winner ${winnerId}` : "no winner";
+    const bidText = typeof bid === "number" ? `bid ${bid}` : "";
+    return `${propertyText} ${winnerText} ${bidText}`.trim();
+  }
   return "";
 }
 
@@ -174,6 +191,20 @@ function latestRejectedAction(records: RejectedActionRecord[]): RejectedActionRe
     return null;
   }
   return [...records].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0] ?? null;
+}
+
+function uniqueLegalActions(actions: LegalAction[]): LegalAction[] {
+  const seen = new Set<string>();
+  const unique: LegalAction[] = [];
+  for (const action of actions) {
+    const key = `${action.actor_id}:${action.type}:${JSON.stringify(action.payload)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(action);
+  }
+  return unique;
 }
 
 function rejectionMessages(rejection: ActionRejectedResponse | RejectedActionRecord): string[] {
@@ -547,6 +578,17 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     enabled: Boolean(currentPlayer?.id),
   });
 
+  const activeAuction = readActiveAuction(stateQuery.data);
+  const auctionLegalActionsQueries = useQueries({
+    queries: activeAuction
+      ? game.players.map((player) => ({
+          queryKey: ["legal-actions", gameId, player.id, "auction"],
+          queryFn: () => readLegalActions({ gameId, actorPlayerId: player.id, baseUrl }),
+          enabled: Boolean(player.id),
+        }))
+      : [],
+  });
+
   const eventsQuery = useQuery({
     queryKey: ["events", gameId],
     queryFn: () => readEvents({ gameId, baseUrl }),
@@ -626,6 +668,14 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   });
 
   const legalActions = legalActionsQuery.data?.legal_actions ?? [];
+  const auctionLegalActions = useMemo(
+    () =>
+      uniqueLegalActions([
+        ...legalActions.filter(isAuctionAction),
+        ...auctionLegalActionsQueries.flatMap((query) => query.data?.legal_actions.filter(isAuctionAction) ?? []),
+      ]),
+    [auctionLegalActionsQueries, legalActions],
+  );
   const actionsByGroup = useMemo(() => {
     const grouped: Record<ActionGroup, LegalAction[]> = {
       turn: [],
@@ -635,7 +685,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     };
     for (const action of legalActions) {
       const model = actionModels[action.type];
-      if (!model || action.type === "END_TURN") {
+      if (!model || action.type === "END_TURN" || isAuctionAction(action)) {
         continue;
       }
       grouped[model.group].push(action);
@@ -647,6 +697,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
   const controlsDisabled = legalActionsQuery.isLoading || legalActionsQuery.isFetching || submitAction.isPending;
+  const auctionControlsDisabled =
+    controlsDisabled || (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
 
   function handleSubmit(action: LegalAction) {
     submitAction.mutate(action);
@@ -668,6 +720,16 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
       <aside className="grid content-start gap-4">
         <ActivePlayerPanel player={currentPlayer} phase={phase} />
+
+        <AuctionPanel
+          controlsDisabled={auctionControlsDisabled}
+          events={visibleEvents}
+          game={game}
+          legalActions={auctionLegalActions}
+          onSubmit={handleSubmit}
+          pendingActionType={pendingActionType}
+          snapshot={stateQuery.data}
+        />
 
         <section aria-label="Turn controls" className="rounded-md border border-neutral-200 bg-white p-4">
           <div className="flex items-start justify-between gap-3">
