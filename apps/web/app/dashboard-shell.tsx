@@ -14,7 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
-import { GameApiPanel } from "./game-api-panel";
+import { GameSetupPanel } from "./game-setup";
 import { RejectedActionAuditView } from "./rejected-action-audit";
 import { Button } from "../components/ui/button";
 import { HealthSnapshotSchema, type HealthSnapshot } from "../lib/api/health";
@@ -29,18 +29,18 @@ type DashboardShellProps = {
 
 const navigation = [
   { name: "Overview", href: "#overview", icon: Activity },
-  { name: "Game API", href: "#game-api", icon: Gamepad2 },
+  { name: "Game setup", href: "#game-setup", icon: Gamepad2 },
   { name: "Tier health", href: "#tier-health", icon: BadgeCheck },
   { name: "Rejected actions", href: "#rejected-actions", icon: ShieldAlert },
   { name: "Workspace", href: "#workspace", icon: Blocks },
-  { name: "Setup filters", href: "#setup-filters", icon: Settings2 },
+  { name: "Cutoffs", href: "#game-setup", icon: Settings2 },
 ];
 
 const workspaceRows = [
   {
     name: "Game table",
-    status: "Planned",
-    detail: "Reserved for the playable board and legal action controls after rules endpoints exist.",
+    status: "Shell ready",
+    detail: "Created games open into a table-based board shell until the SVG board stage starts.",
     icon: Gamepad2,
   },
   {
@@ -167,13 +167,13 @@ export function DashboardShell({
             </div>
             <div>
               <p className="text-sm font-semibold text-neutral-950">Monopoly AI</p>
-              <p className="text-xs text-neutral-500">Local research stack</p>
+              <p className="text-xs text-neutral-500">Local game console</p>
             </div>
           </div>
           <nav aria-label="Stack navigation" className="flex flex-1 flex-col gap-1 px-4 py-5">
             {navigation.map((item) => (
               <a
-                key={item.href}
+                key={`${item.name}-${item.href}`}
                 href={item.href}
                 className="group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
               >
@@ -189,18 +189,20 @@ export function DashboardShell({
             <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase text-teal-700">Phase 1 Stage 1.4</p>
+                  <p className="text-xs font-semibold uppercase text-teal-700" data-scaffold-stage="Phase 1 Stage 1.4">
+                    Phase 5 Stage 5.1
+                  </p>
                   <h1 className="mt-1 text-2xl font-semibold tracking-normal text-neutral-950">
                     {title}
                   </h1>
                 </div>
                 <nav
                   aria-label="Stack navigation"
-                  className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5 lg:hidden"
+                  className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:hidden"
                 >
                   {navigation.map((item) => (
                     <a
-                      key={item.href}
+                      key={`${item.name}-${item.href}`}
                       href={item.href}
                       className="flex items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 font-medium text-neutral-700 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
                     >
@@ -221,8 +223,8 @@ export function DashboardShell({
                     Stack status
                   </h2>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
-                    Monitor the local frontend, FastAPI service, and database readiness before game
-                    rules, AI runtime, negotiations, and generated API contracts are introduced.
+                    Monitor the local stack and create a backend-owned game before using the board
+                    shell, legal actions, negotiations, and audit views.
                   </p>
                 </div>
 
@@ -287,7 +289,7 @@ export function DashboardShell({
               </div>
             </section>
 
-            <GameApiPanel />
+            <GameSetupPanel />
 
             <section id="tier-health" aria-labelledby="tier-health-title" className="bg-[var(--color-page)]">
               <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
@@ -380,30 +382,14 @@ export function DashboardShell({
                   </div>
                 </div>
 
-                <form id="setup-filters" aria-labelledby="setup-filters-title" className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
-                  <fieldset disabled aria-describedby="setup-filters-note" className="space-y-4">
-                    <div>
-                      <legend id="setup-filters-title" className="text-sm font-semibold text-neutral-950">
-                        Setup filters
-                      </legend>
-                      <p id="setup-filters-note" className="mt-2 text-sm leading-6 text-neutral-600">
-                        Settings controls are intentionally disabled until setup and filter endpoints exist.
-                      </p>
-                    </div>
-                    <label className="grid gap-1 text-sm font-medium text-neutral-700">
-                      Player count
-                      <select className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-500 disabled:cursor-not-allowed disabled:bg-neutral-100">
-                        <option>2-5 players later</option>
-                      </select>
-                    </label>
-                    <label className="grid gap-1 text-sm font-medium text-neutral-700">
-                      Stack view
-                      <select className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-500 disabled:cursor-not-allowed disabled:bg-neutral-100">
-                        <option>Health records only</option>
-                      </select>
-                    </label>
-                  </fieldset>
-                </form>
+                <aside className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
+                  <h3 className="text-sm font-semibold text-neutral-950">Stage boundary</h3>
+                  <p className="mt-2 text-sm leading-6 text-neutral-600">
+                    This stage creates games and opens the board shell. SVG board art, turn controls,
+                    property actions, auctions, and negotiations remain reserved for later Phase 5
+                    stages.
+                  </p>
+                </aside>
               </div>
             </section>
           </main>

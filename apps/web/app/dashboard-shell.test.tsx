@@ -1,9 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DashboardShell } from "./dashboard-shell";
 import type { RejectedActionRecord } from "../lib/api/rejected-actions";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+  }),
+}));
 
 const rejectedAction: RejectedActionRecord = {
   id: "11111111-1111-1111-1111-111111111111",
