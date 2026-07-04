@@ -83,13 +83,18 @@ function stateFixture(position = 0, eventSequence = 0) {
   };
 }
 
-function legalAction(type: string, payload: Record<string, unknown> = {}) {
+function legalAction(
+  type: string,
+  payload: Record<string, unknown> = {},
+  expectedStateHash = "state-0",
+  expectedEventSequence = 0,
+) {
   return {
     actor_id: adaId,
     type,
     payload,
-    expected_state_hash: "state-0",
-    expected_event_sequence: 0,
+    expected_state_hash: expectedStateHash,
+    expected_event_sequence: expectedEventSequence,
     description: null,
     schema: {},
   };
@@ -130,6 +135,69 @@ function acceptedRollResponse() {
       },
     ],
     state: stateFixture(7, 2).state,
+    state_hash: "state-2",
+    event_sequence: 2,
+  };
+}
+
+function auctionPurchaseStateFixture() {
+  return {
+    game_id: gameId,
+    state: {
+      game_id: gameId,
+      seed: "turn-controls-auction",
+      players: [
+        { id: adaId, cash: 1500, position: 1 },
+        { id: graceId, cash: 1500, position: 0 },
+      ],
+      property_ownership: [
+        {
+          property_id: "property_mediterranean_avenue",
+          owner_id: null,
+          mortgaged: false,
+          houses: 0,
+          hotels: 0,
+          hotel: false,
+        },
+      ],
+      active_auction: null,
+      turn: {
+        phase: "PURCHASE_OR_AUCTION",
+        current_player_index: 0,
+        current_player_id: adaId,
+      },
+    },
+    state_hash: "state-2",
+    event_sequence: 2,
+  };
+}
+
+function acceptedAuctionRollResponse() {
+  return {
+    ...acceptedRollResponse(),
+    accepted_events: [
+      {
+        id: "event-1",
+        game_id: gameId,
+        sequence: 1,
+        actor_player_id: adaId,
+        event_type: "DICE_ROLLED",
+        payload: { dice: [1], total: 1 },
+        state_hash: "state-1",
+        created_at: "2026-07-04T00:01:00.000Z",
+      },
+      {
+        id: "event-2",
+        game_id: gameId,
+        sequence: 2,
+        actor_player_id: adaId,
+        event_type: "TOKEN_MOVED",
+        payload: { player_id: adaId, from_position: 0, to_position: 1 },
+        state_hash: "state-2",
+        created_at: "2026-07-04T00:01:01.000Z",
+      },
+    ],
+    state: auctionPurchaseStateFixture().state,
     state_hash: "state-2",
     event_sequence: 2,
   };
@@ -292,6 +360,56 @@ describe("GamePlaySurface turn controls", () => {
     expect(within(log).getByText(/TOKEN_MOVED/)).toBeInTheDocument();
   });
 
+  it("refreshes auction start controls from post-roll legal actions", async () => {
+    let accepted = false;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(accepted ? gameFixture(1) : gameFixture(0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(accepted ? auctionPurchaseStateFixture() : stateFixture(0, 0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: accepted
+            ? [
+                legalAction(
+                  "START_AUCTION",
+                  { property_id: "property_mediterranean_avenue" },
+                  "state-2",
+                  2,
+                ),
+              ]
+            : [legalAction("ROLL_DICE")],
+          state_hash: accepted ? "state-2" : "state-0",
+          event_sequence: accepted ? 2 : 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(accepted ? eventsFixture(acceptedAuctionRollResponse().accepted_events) : eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        accepted = true;
+        return Response.json(acceptedAuctionRollResponse());
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
+
+    const auction = await screen.findByRole("region", { name: "Auction" });
+    await waitFor(() => expect(auction).toHaveTextContent("Mediterranean Avenue"));
+    expect(within(auction).getByRole("button", { name: "Start auction" })).toBeEnabled();
+  });
+
   it("shows a Rejected action alert and leaves prior visible board state intact after rejection", async () => {
     renderSurface(
       baseFetchMock({
@@ -311,9 +429,9 @@ describe("GamePlaySurface turn controls", () => {
   });
 
   it("disables controls while legal actions load and while an action submission is pending", async () => {
-    let resolveLegalActions: (response: Response) => void = () => {};
+    let resolveLegalActions: (payload: unknown) => void = () => {};
     let resolveAction: (response: Response) => void = () => {};
-    const legalActionsPromise = new Promise<Response>((resolve) => {
+    const legalActionsPayloadPromise = new Promise<unknown>((resolve) => {
       resolveLegalActions = resolve;
     });
     const actionPromise = new Promise<Response>((resolve) => {
@@ -328,7 +446,7 @@ describe("GamePlaySurface turn controls", () => {
         return jsonResponse(stateFixture());
       }
       if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
-        return legalActionsPromise;
+        return legalActionsPayloadPromise.then((payload) => Response.json(payload));
       }
       if (url === `${apiBaseUrl}/games/${gameId}/events`) {
         return jsonResponse(eventsFixture());
@@ -348,15 +466,13 @@ describe("GamePlaySurface turn controls", () => {
     expect(within(controls).getByRole("button", { name: "End turn" })).toBeDisabled();
     expect(within(controls).getByText("Loading legal actions")).toBeInTheDocument();
 
-    resolveLegalActions(
-      Response.json({
-        game_id: gameId,
-        actor_player_id: adaId,
-        legal_actions: [legalAction("ROLL_DICE")],
-        state_hash: "state-0",
-        event_sequence: 0,
-      }),
-    );
+    resolveLegalActions({
+      game_id: gameId,
+      actor_player_id: adaId,
+      legal_actions: [legalAction("ROLL_DICE")],
+      state_hash: "state-0",
+      event_sequence: 0,
+    });
 
     const rollButton = await within(controls).findByRole("button", { name: "Roll dice" });
     fireEvent.click(rollButton);

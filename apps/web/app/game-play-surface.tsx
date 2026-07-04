@@ -572,9 +572,11 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const game = gameQuery.data;
   const currentPlayer = activePlayer(game, stateQuery.data);
   const phase = activePhase(game, stateQuery.data);
+  const stateHash = stateQuery.data?.state_hash ?? "pending-state";
+  const eventSequence = stateQuery.data?.event_sequence ?? "pending-sequence";
 
   const legalActionsQuery = useQuery({
-    queryKey: ["legal-actions", gameId, currentPlayer?.id],
+    queryKey: ["legal-actions", gameId, currentPlayer?.id, stateHash, eventSequence],
     queryFn: () => readLegalActions({ gameId, actorPlayerId: currentPlayer?.id ?? "", baseUrl }),
     enabled: Boolean(currentPlayer?.id),
   });
@@ -583,7 +585,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const auctionLegalActionsQueries = useQueries({
     queries: activeAuction
       ? game.players.map((player) => ({
-          queryKey: ["legal-actions", gameId, player.id, "auction"],
+          queryKey: ["legal-actions", gameId, player.id, "auction", stateHash, eventSequence],
           queryFn: () => readLegalActions({ gameId, actorPlayerId: player.id, baseUrl }),
           enabled: Boolean(player.id),
         }))
@@ -643,10 +645,16 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       setLocalRejectedAction(null);
       setPendingActionType(action.type);
     },
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       if (result.status === "accepted") {
         setAcceptedEvents(result.accepted_events);
-        await Promise.all([
+        queryClient.setQueryData<GameStateResponse>(["game-state", gameId], {
+          game_id: gameId,
+          state: result.state,
+          state_hash: result.state_hash,
+          event_sequence: result.event_sequence,
+        });
+        void Promise.all([
           queryClient.invalidateQueries({ queryKey: ["game", gameId] }),
           queryClient.invalidateQueries({ queryKey: ["game-state", gameId] }),
           queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
@@ -657,7 +665,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       }
 
       setLocalRejectedAction(result);
-      await Promise.all([
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
         queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
         queryClient.invalidateQueries({ queryKey: ["rejected-actions", gameId] }),
@@ -697,7 +705,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const latestAuditRejection = latestRejectedAction(rejectedActionsQuery.data ?? []);
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
-  const controlsDisabled = legalActionsQuery.isLoading || legalActionsQuery.isFetching || submitAction.isPending;
+  const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading || legalActionsQuery.isFetching;
+  const controlsDisabled = legalActionsLoading || submitAction.isPending;
   const auctionControlsDisabled =
     controlsDisabled || (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
 
@@ -739,7 +748,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
               <h2 className="text-sm font-semibold text-neutral-950">Turn controls</h2>
               <p className="mt-1 text-xs text-neutral-600">Only actions returned by /legal-actions are enabled.</p>
             </div>
-            {legalActionsQuery.isLoading || legalActionsQuery.isFetching ? (
+            {legalActionsLoading ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
                 <Hourglass aria-hidden="true" className="size-3" />
                 Loading legal actions
