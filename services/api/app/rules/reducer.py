@@ -281,7 +281,23 @@ def _updates_for_event(state: GameState, event: GameEvent) -> dict[str, Any]:
 
     if event.type == "ACTIVE_AUCTION_SET":
         payload = _expect_payload(event, ActiveAuctionSetPayload)
-        return {"active_auction": ActiveAuctionState() if payload.active else None}
+        if not payload.active:
+            return {"active_auction": None}
+        if payload.property_id is None:
+            raise InvalidEventError("active auction property id is required")
+        _property_by_id(state, payload.property_id)
+        if payload.high_bidder_id is not None:
+            _player_by_id(state, payload.high_bidder_id)
+        for passed_player_id in payload.passed_player_ids:
+            _player_by_id(state, passed_player_id)
+        return {
+            "active_auction": ActiveAuctionState(
+                property_id=payload.property_id,
+                high_bidder_id=payload.high_bidder_id,
+                high_bid_amount=payload.high_bid_amount,
+                passed_player_ids=payload.passed_player_ids,
+            )
+        }
 
     if event.type == "ACTIVE_NEGOTIATION_SET":
         payload = _expect_payload(event, ActiveNegotiationSetPayload)

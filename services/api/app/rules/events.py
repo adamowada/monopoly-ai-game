@@ -164,6 +164,30 @@ class ActivePaymentSetPayload(EventModel):
 
 class ActiveAuctionSetPayload(EventModel):
     active: bool
+    property_id: str | None = None
+    high_bidder_id: str | None = None
+    high_bid_amount: int | None = Field(default=None, gt=0)
+    passed_player_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_auction_shape(self) -> Self:
+        if not self.active:
+            if (
+                self.property_id is not None
+                or self.high_bidder_id is not None
+                or self.high_bid_amount is not None
+                or self.passed_player_ids
+            ):
+                raise ValueError("inactive auction payload cannot include auction details")
+            return self
+
+        if self.property_id is None:
+            raise ValueError("active auction payload must include property_id")
+        if (self.high_bidder_id is None) != (self.high_bid_amount is None):
+            raise ValueError("active auction high bidder and high bid amount must be set together")
+        if len(set(self.passed_player_ids)) != len(self.passed_player_ids):
+            raise ValueError("active auction passed player ids must be unique")
+        return self
 
 
 class ActiveNegotiationSetPayload(EventModel):

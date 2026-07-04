@@ -103,7 +103,18 @@ class ActivePaymentState(StateModel):
 
 
 class ActiveAuctionState(StateModel):
-    pass
+    property_id: str = Field(min_length=1)
+    high_bidder_id: str | None = None
+    high_bid_amount: int | None = Field(default=None, gt=0)
+    passed_player_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_high_bid_shape(self) -> Self:
+        if (self.high_bidder_id is None) != (self.high_bid_amount is None):
+            raise ValueError("active auction high bidder and high bid amount must be set together")
+        if len(set(self.passed_player_ids)) != len(self.passed_player_ids):
+            raise ValueError("active auction passed player ids must be unique")
+        return self
 
 
 class ActiveNegotiationState(StateModel):
@@ -155,6 +166,19 @@ class GameState(StateModel):
         for ownership in self.property_ownership:
             if ownership.owner_id is not None and ownership.owner_id not in owner_ids:
                 raise ValueError(f"{ownership.property_id} owner must reference an existing player")
+
+        if self.active_auction is not None:
+            property_ids_set = set(property_ids)
+            if self.active_auction.property_id not in property_ids_set:
+                raise ValueError("active auction property must reference an existing property")
+            if (
+                self.active_auction.high_bidder_id is not None
+                and self.active_auction.high_bidder_id not in owner_ids
+            ):
+                raise ValueError("active auction high bidder must reference an existing player")
+            unknown_passed_ids = set(self.active_auction.passed_player_ids) - owner_ids
+            if unknown_passed_ids:
+                raise ValueError("active auction passed player ids must reference existing players")
 
         if len(self.applied_event_ids) != self.event_sequence:
             raise ValueError("applied event id count must match event sequence")
