@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.api.rejected_actions import router as rejected_actions_router
+from app.api.games import router as games_router
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.db.session import create_database_engine, create_session_factory
@@ -60,7 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.include_router(rejected_actions_router)
+    app.include_router(games_router)
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

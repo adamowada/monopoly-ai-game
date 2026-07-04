@@ -325,7 +325,7 @@ async def test_rejection_records_are_queryable_by_game_and_actor(
 
 
 @pytest.mark.asyncio
-async def test_legal_action_execution_out_of_scope_creates_no_rejection_or_fake_event(
+async def test_legal_action_creates_accepted_event_without_rejection(
     api_app: FastAPI,
     session_factory: async_sessionmaker,
 ) -> None:
@@ -340,10 +340,10 @@ async def test_legal_action_execution_out_of_scope_creates_no_rejection_or_fake_
                 json=action_payload(fixture, fixture.player_ids[0], "ROLL_DICE"),
             )
 
-        assert response.status_code == 501
-        assert response.json()["reason_code"] == "action_execution_not_implemented"
+        assert response.status_code == 200
+        assert response.json()["status"] == "accepted"
+        assert response.json()["accepted_events"][0]["event_type"] == "DICE_ROLLED"
         assert await fetch_rejections(session_factory, fixture.game_id) == []
-        assert await count_events(session_factory, fixture.game_id) == 0
-        assert await count_snapshots(session_factory, fixture.game_id) == 0
+        assert await count_events(session_factory, fixture.game_id) >= 1
     finally:
         await delete_game(session_factory, fixture.game_id)

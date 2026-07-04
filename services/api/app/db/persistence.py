@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -9,7 +10,7 @@ import sqlalchemy as sa
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.metadata import game_events, game_snapshots, games
+from app.db.metadata import game_events, game_snapshots, games, players
 from app.rules.events import EventModel, GameEvent
 from app.rules.reducer import InvalidEventError, apply_event
 from app.rules.state import GameState
@@ -40,6 +41,44 @@ class EventAppendResult:
     sequence: int
     state_hash: str
     snapshot_created: bool
+    state: GameState
+
+
+@dataclass(frozen=True)
+class AcceptedEventTemplate:
+    event_type: str
+    payload: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class AcceptedEventRecord:
+    id: UUID
+    game_id: UUID
+    sequence: int
+    actor_player_id: UUID | None
+    event_type: str
+    payload: Mapping[str, Any]
+    state_hash: str
+    created_at: datetime
+
+    def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
+        return {
+            "id": str(self.id) if mode == "json" else self.id,
+            "game_id": str(self.game_id) if mode == "json" else self.game_id,
+            "sequence": self.sequence,
+            "actor_player_id": str(self.actor_player_id)
+            if mode == "json" and self.actor_player_id is not None
+            else self.actor_player_id,
+            "event_type": self.event_type,
+            "payload": dict(self.payload),
+            "state_hash": self.state_hash,
+            "created_at": self.created_at.isoformat() if mode == "json" else self.created_at,
+        }
+
+
+@dataclass(frozen=True)
+class EventAppendManyResult:
+    events: tuple[AcceptedEventRecord, ...]
     state: GameState
 
 
@@ -134,6 +173,94 @@ class EventPersistence:
                     snapshot_created=snapshot_created,
                     state=next_state,
                 )
+
+    async def append_accepted_events(
+        self,
+        *,
+        game_id: UUID | str,
+        event_templates: Sequence[AcceptedEventTemplate],
+        actor_player_id: UUID | str | None = None,
+        expected_base_sequence: int | None = None,
+        expected_base_state_hash: str | None = None,
+        snapshot_interval: int | None = None,
+    ) -> EventAppendManyResult:
+        if not event_templates:
+            raise EventPersistenceError("at least one accepted event is required")
+
+        normalized_game_id = _coerce_uuid(game_id)
+        normalized_actor_player_id = (
+            None if actor_player_id is None else _coerce_uuid(actor_player_id)
+        )
+        effective_snapshot_interval = (
+            self._snapshot_interval
+            if snapshot_interval is None
+            else _validate_snapshot_interval(snapshot_interval)
+        )
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                state = await self._replay_current_state_for_append(session, normalized_game_id)
+                if expected_base_sequence is not None and state.event_sequence != expected_base_sequence:
+                    raise StaleEventSequenceError(
+                        f"expected base sequence {expected_base_sequence} does not match current "
+                        f"sequence {state.event_sequence}"
+                    )
+                if expected_base_state_hash is not None and state.state_hash() != expected_base_state_hash:
+                    raise StaleEventSequenceError(
+                        "expected base state hash does not match current state"
+                    )
+
+                records: list[AcceptedEventRecord] = []
+                for template in event_templates:
+                    next_sequence = state.event_sequence + 1
+                    event_id = uuid4()
+                    event = _build_game_event(
+                        event_id=event_id,
+                        sequence=next_sequence,
+                        event_type=template.event_type,
+                        payload=template.payload,
+                    )
+                    next_state = apply_event(state, event)
+                    state_hash = next_state.state_hash()
+
+                    result = await session.execute(
+                        game_events.insert()
+                        .values(
+                            id=event_id,
+                            game_id=normalized_game_id,
+                            sequence=next_sequence,
+                            actor_player_id=normalized_actor_player_id,
+                            event_type=event.type,
+                            payload=_payload_for_storage(event.payload),
+                            state_hash=state_hash,
+                        )
+                        .returning(game_events)
+                    )
+                    records.append(_accepted_event_record_from_row(dict(result.mappings().one())))
+
+                    if next_sequence % effective_snapshot_interval == 0:
+                        await session.execute(
+                            game_snapshots.insert().values(
+                                game_id=normalized_game_id,
+                                last_event_id=event_id,
+                                event_sequence=next_sequence,
+                                state_payload=next_state.model_dump(mode="json"),
+                                state_hash=state_hash,
+                            )
+                        )
+
+                    state = next_state
+
+                await _update_game_current_state(session, normalized_game_id, state)
+
+                return EventAppendManyResult(events=tuple(records), state=state)
+
+    async def list_accepted_events(self, game_id: UUID | str) -> list[AcceptedEventRecord]:
+        normalized_game_id = _coerce_uuid(game_id)
+        async with self._session_factory() as session:
+            await _load_initial_state(session, normalized_game_id)
+            rows = await _load_event_rows_after(session, normalized_game_id, sequence=0)
+            return [_accepted_event_record_from_row(row) for row in rows]
 
     async def replay_from_event_zero(self, game_id: UUID | str) -> GameState:
         normalized_game_id = _coerce_uuid(game_id)
@@ -366,6 +493,41 @@ def _payload_for_storage(payload: EventModel) -> dict[str, Any]:
     return payload.model_dump(mode="json")
 
 
+async def _update_game_current_state(
+    session: AsyncSession,
+    game_id: UUID,
+    state: GameState,
+) -> None:
+    await session.execute(
+        games.update()
+        .where(games.c.id == game_id)
+        .values(current_phase=state.turn.phase.value, updated_at=sa.func.now())
+    )
+    for player_state in state.players:
+        await session.execute(
+            players.update()
+            .where(players.c.game_id == game_id, players.c.id == _coerce_uuid(player_state.id))
+            .values(
+                status="bankrupt" if player_state.is_bankrupt else "active",
+                state=player_state.model_dump(mode="json"),
+                updated_at=sa.func.now(),
+            )
+        )
+
+
+def _accepted_event_record_from_row(row: Mapping[str, Any]) -> AcceptedEventRecord:
+    return AcceptedEventRecord(
+        id=row["id"],
+        game_id=row["game_id"],
+        sequence=int(row["sequence"]),
+        actor_player_id=row["actor_player_id"],
+        event_type=row["event_type"],
+        payload=row["payload"],
+        state_hash=row["state_hash"],
+        created_at=row["created_at"],
+    )
+
+
 def _coerce_uuid(value: UUID | str) -> UUID:
     if isinstance(value, UUID):
         return value
@@ -380,7 +542,10 @@ def _validate_snapshot_interval(snapshot_interval: int) -> int:
 
 __all__ = [
     "DEFAULT_SNAPSHOT_INTERVAL",
+    "AcceptedEventRecord",
+    "AcceptedEventTemplate",
     "EventAppendResult",
+    "EventAppendManyResult",
     "EventPersistence",
     "EventPersistenceError",
     "GameNotFoundError",

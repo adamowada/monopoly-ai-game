@@ -14,6 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+import { GameApiPanel } from "./game-api-panel";
 import { RejectedActionAuditView } from "./rejected-action-audit";
 import { Button } from "../components/ui/button";
 import { HealthSnapshotSchema, type HealthSnapshot } from "../lib/api/health";
@@ -28,6 +29,7 @@ type DashboardShellProps = {
 
 const navigation = [
   { name: "Overview", href: "#overview", icon: Activity },
+  { name: "Game API", href: "#game-api", icon: Gamepad2 },
   { name: "Tier health", href: "#tier-health", icon: BadgeCheck },
   { name: "Rejected actions", href: "#rejected-actions", icon: ShieldAlert },
   { name: "Workspace", href: "#workspace", icon: Blocks },
@@ -284,6 +286,8 @@ export function DashboardShell({
                 </div>
               </div>
             </section>
+
+            <GameApiPanel />
 
             <section id="tier-health" aria-labelledby="tier-health-title" className="bg-[var(--color-page)]">
               <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
