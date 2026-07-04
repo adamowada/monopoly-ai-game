@@ -17,6 +17,7 @@
     "test:e2e": "uv run --no-sync python scripts/phase0_check.py e2e && uv run --no-sync python scripts/scaffold_check.py e2e",
     "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke && uv run --no-sync python scripts/scaffold_check.py smoke",
     "test:scaffold": "uv run --no-sync python scripts/scaffold_check.py check",
+    "test:stack": "uv run --no-sync python scripts/docker_stack_check.py",
     "test:web": "pnpm --filter @monopoly-ai-game/web run test",
     "test:api": "pnpm --filter @monopoly-ai-game/api run test",
     "lint": "uv run --no-sync python scripts/phase0_check.py lint && uv run --no-sync python scripts/scaffold_check.py lint && pnpm --filter @monopoly-ai-game/web run lint && pnpm --filter @monopoly-ai-game/api run lint",

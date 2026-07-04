@@ -20,6 +20,29 @@ This branch is `feature/phase-1-local-3-tier-foundation`. Phase 1 Stage 1.1 adds
 
 This stage does not add Docker, docker-compose, database schema, Alembic migrations, generated OpenAPI clients, rules engine behavior, negotiation behavior, AI runtime, RAG, or MCP implementation.
 
+## Phase 1 Stage 1.2 Status
+
+Phase 1 Stage 1.2 adds the local Docker Compose runtime stack:
+
+- `postgres`: Postgres with pgvector using `pgvector/pgvector:pg17`.
+- `api`: FastAPI container built from `services/api/Dockerfile` on `python:3.14.6-slim`.
+- `web`: Next.js container built from `apps/web/Dockerfile`.
+- `monopoly-postgres-data`: named volume for local database persistence.
+
+Copy or reference `.env.example` for non-secret local defaults. The API connects to Postgres through `DATABASE_URL=postgresql://monopoly:monopoly@postgres:5432/monopoly_ai_game`. The web container can reach the API at `INTERNAL_API_BASE_URL=http://api:8000`, while browser-facing code defaults to `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`.
+
+Start the local stack:
+
+```powershell
+docker compose --env-file .env.example up --build
+```
+
+Run the Stage 1.2 stack contract check:
+
+```powershell
+pnpm run test:stack
+```
+
 ## Local-Only Architecture
 
 The finished product is a local 3-tier application:
