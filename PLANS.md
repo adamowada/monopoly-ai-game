@@ -132,6 +132,8 @@ One repository bootstrap commit seeds `main` with `AGENTS.md` and `PLANS.md`. Th
 
 Each phase uses a dedicated feature branch created from `main`.
 
+One worker process may perform at most one stage of a given phase. After completing a stage, that worker must stop instead of continuing into another stage of the same phase.
+
 Phase branch map:
 
 - Phase 0: `feature/phase-0-project-control`

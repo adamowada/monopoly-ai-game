@@ -4,6 +4,8 @@
 
 `PLANS.md` is the authoritative product plan, architecture plan, phase plan, stage plan, acceptance checklist, and technical decision record for this repository. Codex must follow `PLANS.md` throughout the long-running build.
 
+One worker process may perform at most one stage of a given phase. After completing a stage, that worker must stop instead of continuing into another stage of the same phase.
+
 This project must use test-driven development. Codex writes or updates tests before implementing behavior, then implements until those tests pass.
 
 The project must maintain a comprehensive testing suite, including:
@@ -29,6 +31,8 @@ Use `git add`, `git commit`, and `git push` throughout development. Commits must
 One repository bootstrap commit seeds `main` with `AGENTS.md` and `PLANS.md`. This bootstrap commit is not a numbered phase. After that bootstrap commit, all numbered phases use feature branches and pull requests.
 
 Each phase must be developed on the dedicated feature branch listed in the `PLANS.md` phase branch map, created from `main`.
+
+The feature-branch, pull request, merge, and no-direct-main rules in this file must remain aligned with `PLANS.md`.
 
 Start each phase with:
 
