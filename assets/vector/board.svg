@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Original 40-space board layout</title>
+  <desc id="desc">A vector-only Monopoly-style board reference with forty spaces and original property color bands.</desc>
+  <defs>
+    <style>
+      .board-bg{fill:#f6f7f5}
+      .center{fill:#eef2f1;stroke:#171717;stroke-width:3}
+      .space{fill:#fff;stroke:#171717;stroke-width:2}
+      .label{font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;fill:#171717}
+      .small{font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;fill:#525866}
+      .corner{fill:#e7eeee}
+      .band-brown{fill:#6d4c41}
+      .band-sky{fill:#64b5f6}
+      .band-pink{fill:#d81b60}
+      .band-orange{fill:#f57c00}
+      .band-red{fill:#d32f2f}
+      .band-yellow{fill:#fdd835}
+      .band-green{fill:#388e3c}
+      .band-blue{fill:#1e40af}
+      .band-rail{fill:#3f3f46}
+      .band-util{fill:#0f766e}
+      .band-card{fill:#7c3aed}
+      .band-chest{fill:#0f766e}
+      .band-tax{fill:#ca8a04}
+    </style>
+  </defs>
+  <rect class="board-bg" width="1100" height="1100"/>
+  <rect class="center" x="100" y="100" width="900" height="900" rx="10"/>
+  <g id="center-art">
+    <rect x="332" y="314" width="176" height="112" rx="14" fill="#fff" stroke="#0f766e" stroke-width="4"/>
+    <rect x="592" y="314" width="176" height="112" rx="14" fill="#fff" stroke="#7c3aed" stroke-width="4"/>
+    <path d="M372 382c34-42 69 42 104 0" fill="none" stroke="#0f766e" stroke-width="9" stroke-linecap="round"/>
+    <path d="M632 382c34-42 69 42 104 0" fill="none" stroke="#7c3aed" stroke-width="9" stroke-linecap="round"/>
+    <text class="label" x="550" y="535" text-anchor="middle">LOCAL RESEARCH BOARD</text>
+    <text class="small" x="550" y="566" text-anchor="middle">original vector layout, no scanned artwork</text>
+  </g>
+  <g id="spaces">
+    <rect class="space corner" x="1000" y="1000" width="100" height="100"/><text class="label" x="1050" y="1054" text-anchor="middle">GO</text>
+    <rect class="space" x="900" y="1000" width="100" height="100"/><rect class="band-brown" x="900" y="1000" width="100" height="14"/><text class="small" x="950" y="1052" text-anchor="middle">Medit.</text>
+    <rect class="space" x="800" y="1000" width="100" height="100"/><rect class="band-chest" x="800" y="1000" width="100" height="14"/><text class="small" x="850" y="1052" text-anchor="middle">Chest</text>
+    <rect class="space" x="700" y="1000" width="100" height="100"/><rect class="band-brown" x="700" y="1000" width="100" height="14"/><text class="small" x="750" y="1052" text-anchor="middle">Baltic</text>
+    <rect class="space" x="600" y="1000" width="100" height="100"/><rect class="band-tax" x="600" y="1000" width="100" height="14"/><text class="small" x="650" y="1052" text-anchor="middle">Income</text>
+    <rect class="space" x="500" y="1000" width="100" height="100"/><rect class="band-rail" x="500" y="1000" width="100" height="14"/><text class="small" x="550" y="1052" text-anchor="middle">Reading</text>
+    <rect class="space" x="400" y="1000" width="100" height="100"/><rect class="band-sky" x="400" y="1000" width="100" height="14"/><text class="small" x="450" y="1052" text-anchor="middle">Oriental</text>
+    <rect class="space" x="300" y="1000" width="100" height="100"/><rect class="band-card" x="300" y="1000" width="100" height="14"/><text class="small" x="350" y="1052" text-anchor="middle">Chance</text>
+    <rect class="space" x="200" y="1000" width="100" height="100"/><rect class="band-sky" x="200" y="1000" width="100" height="14"/><text class="small" x="250" y="1052" text-anchor="middle">Vermont</text>
+    <rect class="space" x="100" y="1000" width="100" height="100"/><rect class="band-sky" x="100" y="1000" width="100" height="14"/><text class="small" x="150" y="1052" text-anchor="middle">Conn.</text>
+    <rect class="space corner" x="0" y="1000" width="100" height="100"/><text class="small" x="50" y="1048" text-anchor="middle">Jail /</text><text class="small" x="50" y="1068" text-anchor="middle">Visit</text>
+
+    <rect class="space" x="0" y="900" width="100" height="100"/><rect class="band-pink" x="0" y="900" width="14" height="100"/><text class="small" x="50" y="954" text-anchor="middle">St. Charles</text>
+    <rect class="space" x="0" y="800" width="100" height="100"/><rect class="band-util" x="0" y="800" width="14" height="100"/><text class="small" x="50" y="854" text-anchor="middle">Electric</text>
+    <rect class="space" x="0" y="700" width="100" height="100"/><rect class="band-pink" x="0" y="700" width="14" height="100"/><text class="small" x="50" y="754" text-anchor="middle">States</text>
+    <rect class="space" x="0" y="600" width="100" height="100"/><rect class="band-pink" x="0" y="600" width="14" height="100"/><text class="small" x="50" y="654" text-anchor="middle">Virginia</text>
+    <rect class="space" x="0" y="500" width="100" height="100"/><rect class="band-rail" x="0" y="500" width="14" height="100"/><text class="small" x="50" y="554" text-anchor="middle">Penn Rail</text>
+    <rect class="space" x="0" y="400" width="100" height="100"/><rect class="band-orange" x="0" y="400" width="14" height="100"/><text class="small" x="50" y="454" text-anchor="middle">St. James</text>
+    <rect class="space" x="0" y="300" width="100" height="100"/><rect class="band-chest" x="0" y="300" width="14" height="100"/><text class="small" x="50" y="354" text-anchor="middle">Chest</text>
+    <rect class="space" x="0" y="200" width="100" height="100"/><rect class="band-orange" x="0" y="200" width="14" height="100"/><text class="small" x="50" y="254" text-anchor="middle">Tennessee</text>
+    <rect class="space" x="0" y="100" width="100" height="100"/><rect class="band-orange" x="0" y="100" width="14" height="100"/><text class="small" x="50" y="154" text-anchor="middle">New York</text>
+    <rect class="space corner" x="0" y="0" width="100" height="100"/><text class="small" x="50" y="48" text-anchor="middle">Free</text><text class="small" x="50" y="68" text-anchor="middle">Parking</text>
+
+    <rect class="space" x="100" y="0" width="100" height="100"/><rect class="band-red" x="100" y="86" width="100" height="14"/><text class="small" x="150" y="48" text-anchor="middle">Kentucky</text>
+    <rect class="space" x="200" y="0" width="100" height="100"/><rect class="band-card" x="200" y="86" width="100" height="14"/><text class="small" x="250" y="48" text-anchor="middle">Chance</text>
+    <rect class="space" x="300" y="0" width="100" height="100"/><rect class="band-red" x="300" y="86" width="100" height="14"/><text class="small" x="350" y="48" text-anchor="middle">Indiana</text>
+    <rect class="space" x="400" y="0" width="100" height="100"/><rect class="band-red" x="400" y="86" width="100" height="14"/><text class="small" x="450" y="48" text-anchor="middle">Illinois</text>
+    <rect class="space" x="500" y="0" width="100" height="100"/><rect class="band-rail" x="500" y="86" width="100" height="14"/><text class="small" x="550" y="48" text-anchor="middle">B&amp;O Rail</text>
+    <rect class="space" x="600" y="0" width="100" height="100"/><rect class="band-yellow" x="600" y="86" width="100" height="14"/><text class="small" x="650" y="48" text-anchor="middle">Atlantic</text>
+    <rect class="space" x="700" y="0" width="100" height="100"/><rect class="band-yellow" x="700" y="86" width="100" height="14"/><text class="small" x="750" y="48" text-anchor="middle">Ventnor</text>
+    <rect class="space" x="800" y="0" width="100" height="100"/><rect class="band-util" x="800" y="86" width="100" height="14"/><text class="small" x="850" y="48" text-anchor="middle">Water</text>
+    <rect class="space" x="900" y="0" width="100" height="100"/><rect class="band-yellow" x="900" y="86" width="100" height="14"/><text class="small" x="950" y="48" text-anchor="middle">Marvin</text>
+    <rect class="space corner" x="1000" y="0" width="100" height="100"/><text class="small" x="1050" y="48" text-anchor="middle">Go To</text><text class="small" x="1050" y="68" text-anchor="middle">Jail</text>
+
+    <rect class="space" x="1000" y="100" width="100" height="100"/><rect class="band-green" x="1086" y="100" width="14" height="100"/><text class="small" x="1050" y="154" text-anchor="middle">Pacific</text>
+    <rect class="space" x="1000" y="200" width="100" height="100"/><rect class="band-green" x="1086" y="200" width="14" height="100"/><text class="small" x="1050" y="254" text-anchor="middle">N. Carolina</text>
+    <rect class="space" x="1000" y="300" width="100" height="100"/><rect class="band-chest" x="1086" y="300" width="14" height="100"/><text class="small" x="1050" y="354" text-anchor="middle">Chest</text>
+    <rect class="space" x="1000" y="400" width="100" height="100"/><rect class="band-green" x="1086" y="400" width="14" height="100"/><text class="small" x="1050" y="454" text-anchor="middle">Penn Ave</text>
+    <rect class="space" x="1000" y="500" width="100" height="100"/><rect class="band-rail" x="1086" y="500" width="14" height="100"/><text class="small" x="1050" y="554" text-anchor="middle">Short Line</text>
+    <rect class="space" x="1000" y="600" width="100" height="100"/><rect class="band-card" x="1086" y="600" width="14" height="100"/><text class="small" x="1050" y="654" text-anchor="middle">Chance</text>
+    <rect class="space" x="1000" y="700" width="100" height="100"/><rect class="band-blue" x="1086" y="700" width="14" height="100"/><text class="small" x="1050" y="754" text-anchor="middle">Park</text>
+    <rect class="space" x="1000" y="800" width="100" height="100"/><rect class="band-tax" x="1086" y="800" width="14" height="100"/><text class="small" x="1050" y="854" text-anchor="middle">Luxury</text>
+    <rect class="space" x="1000" y="900" width="100" height="100"/><rect class="band-blue" x="1086" y="900" width="14" height="100"/><text class="small" x="1050" y="954" text-anchor="middle">Boardwalk</text>
+  </g>
+</svg>

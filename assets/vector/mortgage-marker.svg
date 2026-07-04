@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
+  <title id="title">Original mortgage marker</title>
+  <desc id="desc">A vector lock and diagonal slash marker for mortgaged properties.</desc>
+  <rect x="24" y="40" width="48" height="38" rx="7" fill="#525866" stroke="#171717" stroke-width="6"/>
+  <path d="M34 40V29a14 14 0 0 1 28 0v11" fill="none" stroke="#171717" stroke-width="6" stroke-linecap="round"/>
+  <path d="M20 80 78 22" stroke="#dc2626" stroke-width="9" stroke-linecap="round"/>
+</svg>
