@@ -119,6 +119,8 @@ class GameState(StateModel):
     active_auction: ActiveAuctionState | None = None
     active_negotiation: ActiveNegotiationState | None = None
     active_bankruptcy: ActiveBankruptcyState | None = None
+    event_sequence: int = Field(default=0, ge=0)
+    applied_event_ids: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_game_state_shape(self) -> Self:
@@ -140,6 +142,13 @@ class GameState(StateModel):
         for ownership in self.property_ownership:
             if ownership.owner_id is not None and ownership.owner_id not in owner_ids:
                 raise ValueError(f"{ownership.property_id} owner must reference an existing player")
+
+        if len(self.applied_event_ids) != self.event_sequence:
+            raise ValueError("applied event id count must match event sequence")
+        if len(set(self.applied_event_ids)) != len(self.applied_event_ids):
+            raise ValueError("applied event ids must be unique")
+        if any(not event_id for event_id in self.applied_event_ids):
+            raise ValueError("applied event ids cannot be empty")
 
         return self
 
