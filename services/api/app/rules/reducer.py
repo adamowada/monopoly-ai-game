@@ -29,6 +29,7 @@ from app.rules.events import (
     TurnStateSetPayload,
     payload_model_for_event_type,
 )
+from app.rules.phases import assert_valid_phase_transition
 from app.rules.static_data import load_classic_monopoly_data
 from app.rules.state import (
     ActiveAuctionState,
@@ -435,8 +436,10 @@ def _validate_turn_payload(state: GameState, payload: TurnStateSetPayload) -> No
         raise InvalidEventError(f"unknown player {payload.current_player_id}")
     if state.players[payload.current_player_index].id != payload.current_player_id:
         raise InvalidEventError("current player id must match current player index")
-    if payload.phase != "START_TURN":
-        raise InvalidEventError(f"unsupported turn phase {payload.phase}")
+    try:
+        assert_valid_phase_transition(state.turn.phase, payload.phase)
+    except ValueError as exc:
+        raise InvalidEventError(str(exc)) from exc
 
 
 def _card_ids_for_deck(deck_name: str) -> set[str]:

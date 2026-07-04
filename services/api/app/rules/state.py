@@ -7,11 +7,11 @@ from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.rules.phases import TurnPhase
 from app.rules.static_data import load_classic_monopoly_data
 
 
 PlayerKind: TypeAlias = Literal["human", "ai"]
-TurnPhase: TypeAlias = Literal["START_TURN"]
 
 INITIAL_PLAYER_CASH = 1500
 GAME_STATE_SCHEMA_VERSION = "game-state-v1"
@@ -259,7 +259,7 @@ def create_initial_game_state(
             turn_number=1,
             current_player_index=0,
             current_player_id=player_states[0].id,
-            phase="START_TURN",
+            phase=TurnPhase.START_TURN,
             consecutive_doubles=0,
         ),
         active_payment=None,
