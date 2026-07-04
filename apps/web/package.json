@@ -7,19 +7,32 @@
     "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "node scripts/start.mjs",
-    "test": "node scripts/scaffold-check.mjs",
+    "test": "pnpm run test:unit && pnpm run test:e2e",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.3.0",
+    "@tanstack/react-query": "^5.101.2",
+    "lucide-react": "^1.23.0",
     "next": "16.2.10",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "26.1.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "typescript": "6.0.3"
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.3.2",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9"
   }
 }

@@ -26,7 +26,9 @@ WEB_PACKAGE_SCRIPTS = {
     "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "node scripts/start.mjs",
-    "test": "node scripts/scaffold-check.mjs",
+    "test": "pnpm run test:unit && pnpm run test:e2e",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
 }
@@ -146,14 +148,19 @@ def check_documentation() -> None:
 
 def check_web_surface() -> None:
     page = read_text("apps/web/app/page.tsx")
+    dashboard = read_text("apps/web/app/dashboard-shell.tsx")
     for marker in [
         "Local Game Research Console",
-        "Phase 1 Stage 1.1",
-        "Web tier",
-        "API tier",
-        "Database tier",
+        "readBackendHealth",
     ]:
         require(marker in page, f"apps/web/app/page.tsx missing {marker!r}")
+    for marker in [
+        "Phase 1 Stage 1.4",
+        "Next.js app",
+        "FastAPI service",
+        "Postgres",
+    ]:
+        require(marker in dashboard, f"apps/web/app/dashboard-shell.tsx missing {marker!r}")
 
 
 def check_api_surface() -> None:
