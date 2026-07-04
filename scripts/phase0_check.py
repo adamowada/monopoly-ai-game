@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+REQUIRED_SCRIPTS = {
+    "dev",
+    "test",
+    "test:unit",
+    "test:integration",
+    "test:e2e",
+    "test:smoke",
+    "lint",
+    "format",
+    "typecheck",
+    "review",
+}
+
+REQUIRED_FILES = {
+    "AGENTS.md",
+    "PLANS.md",
+    "README.md",
+    ".gitignore",
+    ".python-version",
+    "package.json",
+    "pnpm-workspace.yaml",
+    "Makefile",
+}
+
+GITIGNORE_RULES = {
+    "node_modules/",
+    ".venv/",
+    "__pycache__/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".mypy_cache/",
+    ".hypothesis/",
+    "playwright-report/",
+    "test-results/",
+    ".env",
+    ".env.*",
+    "postgres-data/",
+    "docker-data/",
+    "*.sqlite3",
+    ".codex-supervisor/",
+}
+
+README_MARKERS = {
+    "local-only",
+    "Next.js",
+    "FastAPI",
+    "Postgres",
+    "pnpm",
+    "uv",
+    "docker compose up --build",
+    "feature/phase-0-project-control",
+    "codex-supervisor",
+}
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def read_text(relative_path: str) -> str:
+    return (ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def check_required_files() -> None:
+    missing = sorted(path for path in REQUIRED_FILES if not (ROOT / path).exists())
+    require(not missing, f"Missing required files: {', '.join(missing)}")
+
+
+def check_python_version() -> None:
+    require(read_text(".python-version").strip() == "3.14.6", ".python-version must contain exactly 3.14.6")
+
+
+def check_package_scripts() -> None:
+    package = json.loads(read_text("package.json"))
+    scripts = set(package.get("scripts", {}))
+    missing = sorted(REQUIRED_SCRIPTS - scripts)
+    require(not missing, f"package.json missing scripts: {', '.join(missing)}")
+    require(package.get("packageManager") == "pnpm@11.7.0", "packageManager must be pnpm@11.7.0")
+
+
+def check_gitignore() -> None:
+    rules = set()
+    for line in read_text(".gitignore").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            rules.add(stripped)
+    missing = sorted(GITIGNORE_RULES - rules)
+    require(not missing, f".gitignore missing rules: {', '.join(missing)}")
+
+
+def check_readme() -> None:
+    readme = read_text("README.md")
+    readme_lower = readme.lower()
+    missing = sorted(marker for marker in README_MARKERS if marker.lower() not in readme_lower)
+    require(not missing, f"README.md missing required content markers: {', '.join(missing)}")
+
+
+def check_makefile() -> None:
+    makefile = read_text("Makefile")
+    require("pnpm run test" in makefile, "Makefile must delegate test to pnpm")
+    require("uv python install 3.14.6" in makefile, "Makefile must expose uv Python install")
+    require("uv sync --python 3.14.6" in makefile, "Makefile must expose uv sync")
+
+
+def run_gate(gate: str) -> None:
+    check_required_files()
+    check_python_version()
+    check_package_scripts()
+    check_gitignore()
+    check_readme()
+    check_makefile()
+    print(f"phase0 {gate}: ok")
+
+
+def main() -> int:
+    gate = sys.argv[1] if len(sys.argv) > 1 else "check"
+    allowed_gates = {
+        "check",
+        "dev",
+        "unit",
+        "integration",
+        "e2e",
+        "smoke",
+        "lint",
+        "format",
+        "typecheck",
+    }
+    if gate not in allowed_gates:
+        print(f"Unknown phase0 gate: {gate}", file=sys.stderr)
+        return 2
+    run_gate(gate)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

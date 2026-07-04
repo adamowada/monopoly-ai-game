@@ -1,40 +1,45 @@
-# Dependencies
+# Node and package manager artifacts
 node_modules/
 .pnpm-store/
 .yarn/
+.next/
+out/
+dist/
+build/
+coverage/
 
-# Python
+# Python artifacts
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.pyright/
 .hypothesis/
 .coverage
+.coverage.*
 htmlcov/
 
-# Next.js
-.next/
-out/
-
-# Build and test artifacts
-dist/
-build/
-coverage/
+# Test and report artifacts
 playwright-report/
 test-results/
+junit.xml
+reports/
 *.log
 
-# Environment and local state
+# Local environment and secrets
 .env
 .env.*
 !.env.example
 *.local
 
-# Docker and database local data
+# Docker, Postgres, and local runtime state
 postgres-data/
 docker-data/
+*.pid
+*.sqlite
+*.sqlite3
 
 # OS and editor files
 .DS_Store
@@ -42,7 +47,8 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Codex/local caches
+# Codex and local supervisor state
 .codex-cache/
+.codex-supervisor/
 tmp/
 temp/
