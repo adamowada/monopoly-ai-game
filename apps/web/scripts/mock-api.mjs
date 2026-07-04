@@ -5,7 +5,7 @@ const games = new Map();
 let gameCounter = 0;
 
 const corsHeaders = {
-  "access-control-allow-headers": "accept, content-type",
+  "access-control-allow-headers": "accept, content-type, Idempotency-Key",
   "access-control-allow-methods": "GET, POST, OPTIONS",
   "access-control-allow-origin": "*",
   vary: "origin",
@@ -163,6 +163,10 @@ function createGame(payload) {
     seed,
     current_phase: "START_TURN",
     settings: payload.settings ?? {},
+    event_sequence: 0,
+    events: [],
+    rejected_actions: [],
+    stream_clients: new Set(),
     created_at: createdAt,
     updated_at: createdAt,
     players: payload.players.map((player, index) => ({
@@ -190,16 +194,168 @@ function gameState(game) {
     state: {
       game_id: game.id,
       seed: game.seed,
-      players: game.players.map((player) => player.state),
+      players: game.players.map((player) => ({
+        id: player.id,
+        ...player.state,
+      })),
       turn: {
         phase: game.current_phase,
         current_player_index: 0,
         current_player_id: game.players[0]?.id ?? null,
       },
     },
-    state_hash: `mock-state-${game.id}`,
-    event_sequence: 0,
+    state_hash: stateHash(game),
+    event_sequence: game.event_sequence,
   };
+}
+
+function stateHash(game) {
+  return `mock-state-${game.id}-${game.event_sequence}`;
+}
+
+function activePlayer(game) {
+  return game.players[0] ?? null;
+}
+
+function legalAction(game, type, payload = {}) {
+  const actor = activePlayer(game);
+  return {
+    actor_id: actor?.id ?? "",
+    type,
+    payload,
+    expected_state_hash: stateHash(game),
+    expected_event_sequence: game.event_sequence,
+    description: null,
+    schema: {},
+  };
+}
+
+function legalActionsFor(game, actorPlayerId) {
+  const actor = activePlayer(game);
+  if (!actor || actor.id !== actorPlayerId) {
+    return [];
+  }
+  if (game.current_phase === "PURCHASE_OR_AUCTION") {
+    return [
+      legalAction(game, "BUY_PROPERTY", { property_id: "property_chance_7" }),
+      legalAction(game, "START_AUCTION", { property_id: "property_chance_7" }),
+    ];
+  }
+  return [legalAction(game, "ROLL_DICE")];
+}
+
+function createAcceptedEvent(game, eventType, payload, actorPlayerId) {
+  game.event_sequence += 1;
+  const event = {
+    id: `${game.id}-event-${game.event_sequence}`,
+    game_id: game.id,
+    sequence: game.event_sequence,
+    actor_player_id: actorPlayerId,
+    event_type: eventType,
+    payload,
+    state_hash: stateHash(game),
+    created_at: nowIso(),
+  };
+  game.events.push(event);
+  return event;
+}
+
+function createRejectedAction(game, submittedAction, reasonCode, validationErrors) {
+  const actor = typeof submittedAction?.actor_id === "string" ? submittedAction.actor_id : null;
+  const actionType = typeof submittedAction?.type === "string" ? submittedAction.type : "UNKNOWN";
+  const record = {
+    id: `${game.id}-rejection-${game.rejected_actions.length + 1}`,
+    game_id: game.id,
+    actor_player_id: actor,
+    action_type: actionType,
+    payload: isObject(submittedAction?.payload) ? submittedAction.payload : {},
+    reason_code: reasonCode,
+    validation_errors: validationErrors,
+    legal_action_context: {
+      phase: game.current_phase,
+      legal_actions: legalActionsFor(game, actor ?? "").map((action) => action.type),
+    },
+    phase: game.current_phase,
+    state_hash: stateHash(game),
+    created_at: nowIso(),
+  };
+  game.rejected_actions.unshift(record);
+  return record;
+}
+
+function rejectedPayload(record, submittedAction) {
+  return {
+    status: "rejected",
+    rejected_action_id: record.id,
+    reason_code: record.reason_code,
+    validation_errors: record.validation_errors,
+    legal_action_context: record.legal_action_context,
+    submitted_action: submittedAction,
+  };
+}
+
+function writeSse(response, event) {
+  response.write(`id: ${event.sequence ?? Date.now()}\nevent: game_event\ndata: ${JSON.stringify(event)}\n\n`);
+}
+
+function broadcastSse(game, event) {
+  for (const response of game.stream_clients) {
+    if (!response.destroyed) {
+      writeSse(response, event);
+    }
+  }
+}
+
+function acceptRollDice(game, action) {
+  const actor = activePlayer(game);
+  const fromPosition = actor?.state.position ?? 0;
+  const toPosition = 7;
+  const rolled = createAcceptedEvent(game, "DICE_ROLLED", { dice: [3, 4], total: 7 }, actor?.id ?? null);
+
+  if (actor) {
+    actor.state = {
+      ...actor.state,
+      position: toPosition,
+    };
+    actor.updated_at = nowIso();
+  }
+  game.current_phase = "PURCHASE_OR_AUCTION";
+  game.updated_at = nowIso();
+  const moved = createAcceptedEvent(
+    game,
+    "TOKEN_MOVED",
+    { player_id: actor?.id ?? null, from_position: fromPosition, to_position: toPosition },
+    actor?.id ?? null,
+  );
+  const acceptedEvents = [rolled, moved];
+  for (const event of acceptedEvents) {
+    broadcastSse(game, event);
+  }
+  return {
+    status: "accepted",
+    game_id: game.id,
+    accepted_events: acceptedEvents,
+    state: gameState(game).state,
+    state_hash: stateHash(game),
+    event_sequence: game.event_sequence,
+  };
+}
+
+function rejectAction(game, action, reasonCode, message, field = "expected_state_hash") {
+  const validationErrors = [
+    {
+      code: reasonCode,
+      message,
+      field,
+    },
+  ];
+  const record = createRejectedAction(game, action, reasonCode, validationErrors);
+  broadcastSse(game, {
+    sequence: game.event_sequence,
+    event_type: "ACTION_REJECTED",
+    payload: { rejected_action_id: record.id, reason_code: reasonCode },
+  });
+  return rejectedPayload(record, action);
 }
 
 function setMockPlayerPosition(gameId, seatOrder, position) {
@@ -290,6 +446,191 @@ const server = createServer(async (request, response) => {
       return;
     }
     json(response, 200, gameMatch[2] === "state" ? gameState(game) : game);
+    return;
+  }
+
+  const legalActionsMatch = url.pathname.match(/^\/games\/([^/]+)\/legal-actions$/);
+  if (request.method === "GET" && legalActionsMatch) {
+    const gameId = decodeURIComponent(legalActionsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const actorPlayerId = url.searchParams.get("actor_player_id");
+    if (!actorPlayerId) {
+      json(response, 422, { detail: [validationError("actor_player_id is required", "actor_player_id")] });
+      return;
+    }
+    json(response, 200, {
+      game_id: game.id,
+      actor_player_id: actorPlayerId,
+      legal_actions: legalActionsFor(game, actorPlayerId),
+      state_hash: stateHash(game),
+      event_sequence: game.event_sequence,
+    });
+    return;
+  }
+
+  const actionsMatch = url.pathname.match(/^\/games\/([^/]+)\/actions$/);
+  if (request.method === "POST" && actionsMatch) {
+    const gameId = decodeURIComponent(actionsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const idempotencyKey = request.headers["idempotency-key"];
+    if (typeof idempotencyKey !== "string" || idempotencyKey.trim().length === 0) {
+      json(response, 400, {
+        status: "rejected",
+        reason_code: "missing_idempotency_key",
+        validation_errors: [
+          {
+            code: "missing_idempotency_key",
+            message: "POST /games/{game_id}/actions requires an Idempotency-Key header",
+            field: "Idempotency-Key",
+          },
+        ],
+      });
+      return;
+    }
+
+    try {
+      const action = await readBody(request);
+      if (!isObject(action)) {
+        json(response, 422, {
+          status: "rejected",
+          reason_code: "malformed_action",
+          validation_errors: [
+            {
+              code: "malformed_action",
+              message: "request body must be a JSON object",
+              field: "body",
+            },
+          ],
+          submitted_action: action,
+        });
+        return;
+      }
+
+      if (game.seed.startsWith("stage-5-turn-controls-reject")) {
+        json(
+          response,
+          409,
+          rejectAction(
+            game,
+            action,
+            "stale_action",
+            "action expected state no longer matches current state",
+            "expected_state_hash",
+          ),
+        );
+        return;
+      }
+
+      const isCurrentState =
+        action.expected_state_hash === stateHash(game) && action.expected_event_sequence === game.event_sequence;
+      if (!isCurrentState) {
+        json(
+          response,
+          409,
+          rejectAction(
+            game,
+            action,
+            "stale_action",
+            "action expected state no longer matches current state",
+            "expected_state_hash",
+          ),
+        );
+        return;
+      }
+
+      const legalTypes = new Set(legalActionsFor(game, action.actor_id).map((candidate) => candidate.type));
+      if (!legalTypes.has(action.type)) {
+        json(response, 422, rejectAction(game, action, "illegal_action", `${action.type} is not currently legal`, "type"));
+        return;
+      }
+
+      if (action.type === "ROLL_DICE") {
+        json(response, 200, acceptRollDice(game, action));
+        return;
+      }
+
+      json(response, 200, {
+        status: "accepted",
+        game_id: game.id,
+        accepted_events: [],
+        state: gameState(game).state,
+        state_hash: stateHash(game),
+        event_sequence: game.event_sequence,
+      });
+      return;
+    } catch {
+      json(response, 400, { detail: [validationError("request body must be valid JSON")] });
+      return;
+    }
+  }
+
+  const eventsMatch = url.pathname.match(/^\/games\/([^/]+)\/events$/);
+  if (request.method === "GET" && eventsMatch) {
+    const gameId = decodeURIComponent(eventsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { events: game.events });
+    return;
+  }
+
+  const streamMatch = url.pathname.match(/^\/games\/([^/]+)\/events\/stream$/);
+  if (request.method === "GET" && streamMatch) {
+    const gameId = decodeURIComponent(streamMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    response.writeHead(200, {
+      ...corsHeaders,
+      "cache-control": "no-store",
+      "connection": "keep-alive",
+      "content-type": "text/event-stream",
+    });
+    response.write(": connected\n\n");
+    game.stream_clients.add(response);
+    for (const event of game.events) {
+      writeSse(response, event);
+    }
+    setTimeout(() => {
+      if (game.stream_clients.has(response) && !response.destroyed) {
+        writeSse(response, {
+          sequence: game.event_sequence,
+          event_type: "STREAM_CONNECTED",
+          payload: { game_id: game.id },
+        });
+      }
+    }, 100);
+    request.on("close", () => {
+      game.stream_clients.delete(response);
+    });
+    return;
+  }
+
+  const rejectedActionsMatch = url.pathname.match(/^\/games\/([^/]+)\/rejected-actions$/);
+  if (request.method === "GET" && rejectedActionsMatch) {
+    const gameId = decodeURIComponent(rejectedActionsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const actorPlayerId = url.searchParams.get("actor_player_id");
+    const records = actorPlayerId
+      ? game.rejected_actions.filter((record) => record.actor_player_id === actorPlayerId)
+      : game.rejected_actions;
+    json(response, 200, { rejected_actions: records });
     return;
   }
 
