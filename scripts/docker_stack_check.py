@@ -43,17 +43,35 @@ def check_required_files() -> None:
         require((ROOT / relative_path).exists(), f"missing Docker stack file: {relative_path}")
 
 
-def check_no_later_stage_artifacts() -> None:
-    for relative_path in [
-        "services/api/app/rules",
-        "services/api/app/ai",
-        "services/api/app/rag",
-        "services/api/app/mcp",
-        "services/api/app/negotiations",
-    ]:
+def check_no_future_stage_artifacts() -> None:
+    future_stage_artifacts = {
+        "services/api/app/api": "Phase 4 persistence API",
+        "services/api/app/audit": "Phase 4 persistence auditability",
+        "services/api/app/models": "Phase 4 persistence models",
+        "services/api/app/persistence": "Phase 4 persistence layer",
+        "services/api/app/repositories": "Phase 4 persistence repositories",
+        "apps/web/app/game": "Phase 5 frontend game surface",
+        "apps/web/app/games": "Phase 5 frontend game surface",
+        "apps/web/components/board": "Phase 5 frontend board surface",
+        "apps/web/components/game": "Phase 5 frontend game surface",
+        "apps/web/lib/game": "Phase 5 frontend game client",
+        "services/api/app/contracts": "Phase 6 contracts",
+        "services/api/app/deals": "Phase 6 deal primitives",
+        "services/api/app/negotiations": "Phase 6 negotiations",
+        "apps/web/components/contracts": "Phase 6 frontend contract surface",
+        "apps/web/components/negotiations": "Phase 6 frontend negotiation surface",
+        "services/api/app/ai": "Phase 7 AI runtime",
+        "apps/web/components/ai": "Phase 7 frontend AI surface",
+        "services/api/app/memory": "Phase 8 AI memory",
+        "apps/web/components/ai-audit": "Phase 8 frontend AI audit surface",
+        "services/api/app/rag": "Phase 9 RAG",
+        "services/api/app/retrieval": "Phase 9 retrieval",
+        "services/api/app/mcp": "Phase 9 MCP",
+    }
+    for relative_path, planned_stage in future_stage_artifacts.items():
         require(
             not (ROOT / relative_path).exists(),
-            f"Phase 1 stack checks must not create later-stage artifact: {relative_path}",
+            f"Docker stack gate found {planned_stage} artifact before its planned phase: {relative_path}",
         )
 
 
@@ -152,14 +170,14 @@ def check_compose_config_if_available() -> None:
 
 def run_gate(gate: str) -> None:
     check_required_files()
-    check_no_later_stage_artifacts()
+    check_no_future_stage_artifacts()
     check_compose_contract()
     check_env_contract()
     check_dockerfiles()
     check_package_scripts()
     if gate == "config":
         check_compose_config_if_available()
-    print(f"phase1 docker stack {gate}: ok")
+    print(f"docker stack {gate}: ok")
 
 
 def main() -> int:
