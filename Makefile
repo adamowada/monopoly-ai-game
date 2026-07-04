@@ -1,4 +1,4 @@
-.PHONY: dev test test-unit test-integration test-e2e test-smoke lint format typecheck review python-install python-sync
+.PHONY: dev test test-unit test-integration test-e2e test-smoke test-scaffold test-web test-api lint format typecheck review python-install python-sync
 
 dev:
 	pnpm run dev
@@ -17,6 +17,15 @@ test-e2e:
 
 test-smoke:
 	pnpm run test:smoke
+
+test-scaffold:
+	pnpm run test:scaffold
+
+test-web:
+	pnpm run test:web
+
+test-api:
+	pnpm run test:api
 
 lint:
 	pnpm run lint

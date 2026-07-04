@@ -9,15 +9,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_SCRIPT_COMMANDS = {
-    "dev": "uv run --no-sync python scripts/phase0_check.py dev",
+    "dev": "pnpm --recursive --parallel --filter @monopoly-ai-game/web --filter @monopoly-ai-game/api run dev",
     "test": "pnpm run test:unit && pnpm run test:integration && pnpm run test:e2e && pnpm run test:smoke",
-    "test:unit": "uv run --no-sync python scripts/phase0_check.py unit",
-    "test:integration": "uv run --no-sync python scripts/phase0_check.py integration",
-    "test:e2e": "uv run --no-sync python scripts/phase0_check.py e2e",
-    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke",
-    "lint": "uv run --no-sync python scripts/phase0_check.py lint",
+    "test:unit": "uv run --no-sync python scripts/phase0_check.py unit && uv run --no-sync python scripts/scaffold_check.py unit && pnpm run test:web && pnpm run test:api",
+    "test:integration": "uv run --no-sync python scripts/phase0_check.py integration && uv run --no-sync python scripts/scaffold_check.py integration",
+    "test:e2e": "uv run --no-sync python scripts/phase0_check.py e2e && uv run --no-sync python scripts/scaffold_check.py e2e",
+    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke && uv run --no-sync python scripts/scaffold_check.py smoke",
+    "test:scaffold": "uv run --no-sync python scripts/scaffold_check.py check",
+    "test:web": "pnpm --filter @monopoly-ai-game/web run test",
+    "test:api": "pnpm --filter @monopoly-ai-game/api run test",
+    "lint": "uv run --no-sync python scripts/phase0_check.py lint && uv run --no-sync python scripts/scaffold_check.py lint && pnpm --filter @monopoly-ai-game/web run lint && pnpm --filter @monopoly-ai-game/api run lint",
     "format": "uv run --no-sync python scripts/phase0_check.py format",
-    "typecheck": "uv run --no-sync python scripts/phase0_check.py typecheck",
+    "typecheck": "uv run --no-sync python scripts/phase0_check.py typecheck && uv run --no-sync python scripts/scaffold_check.py typecheck && pnpm --filter @monopoly-ai-game/web run typecheck && pnpm --filter @monopoly-ai-game/api run typecheck",
     "review": "pnpm run lint && pnpm run typecheck && pnpm run test",
 }
 

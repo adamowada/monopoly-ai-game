@@ -3,6 +3,7 @@ node_modules/
 .pnpm-store/
 .yarn/
 .next/
+*.tsbuildinfo
 out/
 dist/
 build/

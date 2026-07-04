@@ -1,0 +1,7 @@
+{
+  "name": "@monopoly-ai-game/schemas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared schema generation workspace for frontend and backend contracts."
+}
