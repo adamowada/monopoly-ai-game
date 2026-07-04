@@ -176,6 +176,8 @@ function createGame(payload) {
     negotiations: [],
     negotiation_messages: {},
     deals: [],
+    contracts: [],
+    obligations: [],
     negotiation_counter: 0,
     message_counter: 0,
     deal_counter: 0,
@@ -202,6 +204,7 @@ function createGame(payload) {
   };
   configurePropertyManagementSeed(game);
   configureNegotiationSeed(game);
+  configureContractsLogSeed(game);
   games.set(id, game);
   return game;
 }
@@ -342,6 +345,196 @@ function configureNegotiationSeed(game) {
     body: "Seeded opening message.",
     created_at: nowIso(),
   });
+}
+
+function isContractsLogSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-5-7");
+}
+
+function configureContractsLogSeed(game) {
+  if (!isContractsLogSeed(game.seed) || game.players.length < 2) {
+    return;
+  }
+
+  const ada = game.players[0];
+  const grace = game.players[1];
+  const aiPlayer = game.players.find((player) => player.controller_type === "ai") ?? game.players[2] ?? grace;
+  const agreementId = `${game.id}-agreement-1`;
+  const createdAt = "2026-07-04T00:01:00.000Z";
+  const acceptedAt = "2026-07-04T00:02:00.000Z";
+  const decisionAt = "2026-07-04T00:03:00.000Z";
+  const transferAt = "2026-07-04T00:05:00.000Z";
+  const rejectedAt = "2026-07-04T00:06:00.000Z";
+
+  game.current_phase = "PRE_ROLL_MANAGEMENT";
+  game.negotiation_counter += 1;
+  const negotiation = {
+    id: `${game.id}-negotiation-${game.negotiation_counter}`,
+    game_id: game.id,
+    opened_by_player_id: ada.id,
+    participant_player_ids: [ada.id, grace.id],
+    topic: "Stage 5.7 rent share",
+    context: "Seeded source agreement for contracts, obligations, and game-log UI.",
+    status: "closed",
+    round_number: 1,
+    created_at: createdAt,
+    updated_at: acceptedAt,
+  };
+  game.negotiations.unshift(negotiation);
+  game.message_counter += 1;
+  game.negotiation_messages[negotiation.id] = [
+    {
+      id: `${game.id}-message-${game.message_counter}`,
+      game_id: game.id,
+      negotiation_id: negotiation.id,
+      author_player_id: ada.id,
+      body: "Ada proposes a rent-share source agreement.",
+      created_at: createdAt,
+    },
+  ];
+
+  game.deal_counter += 1;
+  const deal = {
+    id: `${game.id}-deal-${game.deal_counter}`,
+    game_id: game.id,
+    negotiation_id: negotiation.id,
+    proposer_player_id: ada.id,
+    participant_player_ids: [ada.id, grace.id],
+    parent_deal_id: null,
+    version: 1,
+    status: "accepted",
+    terms: [
+      {
+        kind: "rent_share",
+        from_player_id: ada.id,
+        to_player_id: grace.id,
+        amount: 50,
+        due_condition: "next orange rent collection",
+        summary: "Ada pays Grace $50 when the orange rent is collected.",
+      },
+      {
+        kind: "cash_transfer",
+        from_player_id: ada.id,
+        to_player_id: grace.id,
+        amount: 75,
+        due_turn: 4,
+        summary: "Ada settles an existing $75 obligation with Grace.",
+      },
+    ],
+    validation_errors: [],
+    accepted_at: acceptedAt,
+    rejected_at: null,
+    created_at: createdAt,
+    updated_at: acceptedAt,
+  };
+  game.deals.unshift(deal);
+
+  const actionEvent = createAcceptedEvent(game, "DICE_ROLLED", { dice: [3, 4], total: 7 }, ada.id);
+  actionEvent.created_at = "2026-07-04T00:00:30.000Z";
+  const dealEvent = createAcceptedEvent(
+    game,
+    "DEAL_ACCEPTED",
+    { deal_id: deal.id, source_agreement_id: agreementId },
+    ada.id,
+  );
+  dealEvent.created_at = acceptedAt;
+  const aiEvent = createAcceptedEvent(
+    game,
+    "AI_DECISION_RECORDED",
+    {
+      player_id: aiPlayer.id,
+      decision: `${aiPlayer.name} declined a risky rent-share counteroffer.`,
+    },
+    aiPlayer.id,
+  );
+  aiEvent.created_at = decisionAt;
+
+  const contract = {
+    id: `${game.id}-contract-1`,
+    game_id: game.id,
+    deal_id: deal.id,
+    source_agreement_id: agreementId,
+    effective_event_id: dealEvent.id,
+    party_player_ids: [ada.id, grace.id],
+    status: "active",
+    terms: deal.terms,
+    term_summary: "Ada pays Grace $50 when the orange rent is collected.",
+    created_at: acceptedAt,
+    effective_at: acceptedAt,
+  };
+  const settledObligationId = `${game.id}-obligation-settled`;
+  const transferSummary = "Ada paid Grace $75 from the source agreement.";
+  const transferEvent = createAcceptedEvent(
+    game,
+    "CONTRACT_TRIGGERED_TRANSFER",
+    {
+      contract_id: contract.id,
+      obligation_id: settledObligationId,
+      deal_id: deal.id,
+      source_agreement_id: agreementId,
+      from_player_id: ada.id,
+      to_player_id: grace.id,
+      amount: 75,
+      summary: transferSummary,
+    },
+    null,
+  );
+  transferEvent.created_at = transferAt;
+
+  game.contracts = [contract];
+  game.obligations = [
+    {
+      id: `${game.id}-obligation-upcoming`,
+      game_id: game.id,
+      contract_id: contract.id,
+      obligated_player_id: ada.id,
+      counterparty_player_id: grace.id,
+      status: "pending",
+      due_turn: 6,
+      due_condition: "next orange rent collection",
+      amount: 50,
+      asset_summary: "$50 cash transfer",
+      transfer_summary: null,
+      triggering_event_id: null,
+      settled_at: null,
+      created_at: acceptedAt,
+    },
+    {
+      id: settledObligationId,
+      game_id: game.id,
+      contract_id: contract.id,
+      obligated_player_id: ada.id,
+      counterparty_player_id: grace.id,
+      status: "settled",
+      due_turn: 4,
+      due_condition: "first railroad rent collection",
+      amount: 75,
+      asset_summary: "$75 cash transfer",
+      transfer_summary: transferSummary,
+      triggering_event_id: transferEvent.id,
+      settled_at: transferAt,
+      created_at: acceptedAt,
+    },
+  ];
+
+  const rejection = createRejectedAction(
+    game,
+    {
+      actor_id: ada.id,
+      type: "BUY_PROPERTY",
+      payload: { property_id: "property_boardwalk" },
+    },
+    "illegal_action",
+    [
+      {
+        code: "illegal_action",
+        message: "BUY_PROPERTY is not currently legal",
+        field: "type",
+      },
+    ],
+  );
+  rejection.created_at = rejectedAt;
+  game.updated_at = rejectedAt;
 }
 
 function negotiationById(game, negotiationId) {
@@ -1372,6 +1565,30 @@ const server = createServer(async (request, response) => {
         return;
       }
     }
+  }
+
+  const contractsMatch = url.pathname.match(/^\/games\/([^/]+)\/contracts$/);
+  if (request.method === "GET" && contractsMatch) {
+    const gameId = decodeURIComponent(contractsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { contracts: game.contracts ?? [] });
+    return;
+  }
+
+  const obligationsMatch = url.pathname.match(/^\/games\/([^/]+)\/obligations$/);
+  if (request.method === "GET" && obligationsMatch) {
+    const gameId = decodeURIComponent(obligationsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { obligations: game.obligations ?? [] });
+    return;
   }
 
   const acceptDealMatch = url.pathname.match(/^\/games\/([^/]+)\/deals\/([^/]+)\/accept$/);

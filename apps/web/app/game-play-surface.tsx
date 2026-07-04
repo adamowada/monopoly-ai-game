@@ -36,6 +36,7 @@ import { readGame, type GameMetadata } from "../lib/api/games";
 import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
 import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
+import { ContractsPanel } from "./contracts-panel";
 import { ClassicGameBoard, getPlayerColor } from "./game-board";
 import { NegotiationPanel } from "./negotiation-panel";
 import { PropertyManagementPanel } from "./property-management";
@@ -142,41 +143,6 @@ function createIdempotencyKey(action: LegalAction): string {
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   return `${action.actor_id}:${action.type}:${randomValue}`;
-}
-
-function eventPayloadSummary(event: AcceptedEvent): string {
-  if (event.event_type === "DICE_ROLLED") {
-    const dice = event.payload.dice;
-    const total = event.payload.total;
-    const diceText = Array.isArray(dice) ? ` dice ${dice.join(" + ")}` : "";
-    const totalText = typeof total === "number" ? ` total ${total}` : "";
-    return `${diceText}${totalText}`.trim();
-  }
-  if (event.event_type === "TOKEN_MOVED") {
-    const toPosition = event.payload.to_position;
-    return typeof toPosition === "number" ? `to position ${toPosition}` : "";
-  }
-  if (event.event_type === "PROPERTY_PURCHASED") {
-    const propertyId = event.payload.property_id;
-    return typeof propertyId === "string" ? propertyId : "";
-  }
-  if (event.event_type === "PROPERTY_OWNER_SET") {
-    const propertyId = event.payload.property_id;
-    const ownerId = event.payload.owner_id;
-    const propertyText = typeof propertyId === "string" ? propertyId : "";
-    const ownerText = typeof ownerId === "string" ? `owner ${ownerId}` : "unowned";
-    return `${propertyText} ${ownerText}`.trim();
-  }
-  if (event.event_type === "AUCTION_RESULT") {
-    const propertyId = event.payload.property_id;
-    const winnerId = event.payload.winner_id;
-    const bid = event.payload.winning_bid;
-    const propertyText = typeof propertyId === "string" ? propertyId : "";
-    const winnerText = typeof winnerId === "string" ? `winner ${winnerId}` : "no winner";
-    const bidText = typeof bid === "number" ? `bid ${bid}` : "";
-    return `${propertyText} ${winnerText} ${bidText}`.trim();
-  }
-  return "";
 }
 
 function mergeEvents(events: AcceptedEvent[], optimisticEvents: AcceptedEvent[]): AcceptedEvent[] {
@@ -402,45 +368,6 @@ function ActivePlayerPanel({
   );
 }
 
-function GameLog({ events }: Readonly<{ events: AcceptedEvent[] }>) {
-  return (
-    <section aria-label="Game log" className="rounded-md border border-neutral-200 bg-white p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-neutral-950">Game log</h2>
-          <p className="mt-1 text-xs text-neutral-600">Accepted event summaries from the referee.</p>
-        </div>
-        <span className="text-xs font-medium text-neutral-500">{events.length} events</span>
-      </div>
-
-      {events.length === 0 ? (
-        <div className="mt-3 rounded-md border border-dashed border-neutral-200 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
-          No accepted events yet.
-        </div>
-      ) : (
-        <ol className="mt-3 divide-y divide-neutral-200 text-sm">
-          {events.map((event) => {
-            const details = eventPayloadSummary(event);
-            return (
-              <li key={`${event.sequence}-${event.id}`} className="py-2">
-                <div className="flex items-start gap-2">
-                  <span className="mt-0.5 shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-600">
-                    #{event.sequence}
-                  </span>
-                  <p className="min-w-0 text-neutral-800">
-                    <span className="font-semibold text-neutral-950">{event.event_type}</span>
-                    {details ? <span className="text-neutral-600"> {details}</span> : null}
-                  </p>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </section>
-  );
-}
-
 function PlayerTable({ game }: Readonly<{ game: GameMetadata }>) {
   return (
     <section aria-labelledby="players-title" className="overflow-hidden rounded-md border border-neutral-200 bg-white">
@@ -620,6 +547,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       void queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] });
       void queryClient.invalidateQueries({ queryKey: ["events", gameId] });
       void queryClient.invalidateQueries({ queryKey: ["rejected-actions", gameId] });
+      void queryClient.invalidateQueries({ queryKey: ["contracts", gameId] });
+      void queryClient.invalidateQueries({ queryKey: ["obligations", gameId] });
+      void queryClient.invalidateQueries({ queryKey: ["deals", gameId] });
     };
 
     source.addEventListener("message", invalidate);
@@ -660,6 +590,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
           queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
           queryClient.invalidateQueries({ queryKey: ["rejected-actions", gameId] }),
+          queryClient.invalidateQueries({ queryKey: ["contracts", gameId] }),
+          queryClient.invalidateQueries({ queryKey: ["obligations", gameId] }),
+          queryClient.invalidateQueries({ queryKey: ["deals", gameId] }),
         ]);
         return;
       }
@@ -669,6 +602,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
         queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
         queryClient.invalidateQueries({ queryKey: ["rejected-actions", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["contracts", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["obligations", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["deals", gameId] }),
       ]);
     },
     onSettled: () => {
@@ -808,7 +744,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
         {visibleRejection ? <RejectedActionAlert rejection={visibleRejection} /> : null}
 
-        <GameLog events={visibleEvents} />
+        <ContractsPanel
+          apiBaseUrl={baseUrl}
+          events={visibleEvents}
+          game={game}
+          gameId={gameId}
+          rejectedActions={rejectedActionsQuery.data ?? []}
+        />
         <PlayerTable game={game} />
         <GameDetails game={game} phase={phase} />
       </aside>
