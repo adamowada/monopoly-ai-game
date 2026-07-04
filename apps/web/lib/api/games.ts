@@ -43,6 +43,7 @@ export const CreateGamePlayerSchema = z.object({
 export type GameMetadata = z.infer<typeof GameMetadataSchema>;
 export type GameSnapshot = z.infer<typeof GameSnapshotSchema>;
 export type CreateGamePlayer = z.infer<typeof CreateGamePlayerSchema>;
+export type GamePlayer = z.infer<typeof GamePlayerSchema>;
 
 type GameFetcher = (input: string, init: RequestInit) => Promise<Response>;
 

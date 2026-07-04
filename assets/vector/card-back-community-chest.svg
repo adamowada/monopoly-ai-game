@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 260" role="img" aria-labelledby="title desc">
+  <title id="title">Original Community Chest card back</title>
+  <desc id="desc">A teal vector card back with abstract community box marks.</desc>
+  <rect width="180" height="260" rx="18" fill="#0f766e"/>
+  <rect x="12" y="12" width="156" height="236" rx="14" fill="none" stroke="#ffffff" stroke-width="5"/>
+  <rect x="52" y="74" width="76" height="56" rx="8" fill="#ccfbf1"/>
+  <path d="M52 92h76M72 74v56M108 74v56" stroke="#0f766e" stroke-width="6"/>
+  <circle cx="62" cy="164" r="12" fill="#ffffff"/>
+  <circle cx="90" cy="164" r="12" fill="#ffffff"/>
+  <circle cx="118" cy="164" r="12" fill="#ffffff"/>
+  <text x="90" y="214" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="18" font-weight="700" fill="#ffffff">COMMUNITY</text>
+  <text x="90" y="236" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="18" font-weight="700" fill="#ffffff">CHEST</text>
+</svg>

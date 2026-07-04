@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 100" role="img" aria-labelledby="title desc">
+  <title id="title">Original abstract token set</title>
+  <desc id="desc">Five original vector player token markers using abstract shapes.</desc>
+  <g fill="none" stroke-width="5" stroke-linejoin="round">
+    <circle cx="50" cy="50" r="30" fill="#0f766e" stroke="#064e3b"/>
+    <path d="M112 22h56v56h-56z" fill="#2563eb" stroke="#1e3a8a"/>
+    <path d="M230 18l10 22 24 3-18 17 5 24-21-12-21 12 5-24-18-17 24-3z" fill="#7c3aed" stroke="#4c1d95"/>
+    <path d="M320 18l34 32-34 32-34-32z" fill="#dc2626" stroke="#7f1d1d"/>
+    <circle cx="390" cy="50" r="30" fill="#fef3c7" stroke="#ca8a04"/>
+    <circle cx="390" cy="50" r="12" fill="#ca8a04" stroke="#ca8a04"/>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 260" role="img" aria-labelledby="title desc">
+  <title id="title">Original Community Chest card front</title>
+  <desc id="desc">A light vector Community Chest card front with original grant-box geometry.</desc>
+  <rect width="180" height="260" rx="18" fill="#ffffff"/>
+  <rect x="12" y="12" width="156" height="236" rx="14" fill="none" stroke="#0f766e" stroke-width="5"/>
+  <text x="90" y="42" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700" fill="#0f766e">COMMUNITY</text>
+  <text x="90" y="64" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700" fill="#0f766e">CHEST</text>
+  <rect x="48" y="100" width="84" height="62" rx="8" fill="#ccfbf1" stroke="#0f766e" stroke-width="6"/>
+  <path d="M48 122h84M76 100v62M104 100v62" stroke="#0f766e" stroke-width="5"/>
+  <path d="M54 194h72M66 216h48" stroke="#d8dedc" stroke-width="4" stroke-linecap="round"/>
+</svg>

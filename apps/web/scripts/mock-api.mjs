@@ -60,6 +60,10 @@ function validationError(message, field) {
   return { msg: message, loc: field ? ["body", field] : ["body"] };
 }
 
+function validateBoardPosition(value) {
+  return Number.isInteger(value) && value >= 0 && value <= 39;
+}
+
 function validateCreateGamePayload(payload) {
   const errors = [];
   if (!isObject(payload)) {
@@ -198,6 +202,25 @@ function gameState(game) {
   };
 }
 
+function setMockPlayerPosition(gameId, seatOrder, position) {
+  const game = games.get(gameId);
+  if (!game) {
+    return { state: "missing-game" };
+  }
+  const player = game.players.find((candidate) => candidate.seat_order === seatOrder);
+  if (!player) {
+    return { state: "missing-player" };
+  }
+  const updatedAt = nowIso();
+  player.state = {
+    ...player.state,
+    position,
+  };
+  player.updated_at = updatedAt;
+  game.updated_at = updatedAt;
+  return { state: "updated", game };
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
@@ -221,6 +244,36 @@ const server = createServer(async (request, response) => {
         return;
       }
       json(response, 201, createGame(payload));
+      return;
+    } catch {
+      json(response, 400, { detail: [validationError("request body must be valid JSON")] });
+      return;
+    }
+  }
+
+  const positionMatch = url.pathname.match(/^\/__test\/games\/([^/]+)\/players\/(\d+)\/position$/);
+  if (request.method === "POST" && positionMatch) {
+    try {
+      const payload = await readBody(request);
+      const position = payload.position;
+      if (!validateBoardPosition(position)) {
+        json(response, 422, { detail: [validationError("position must be an integer from 0 through 39", "position")] });
+        return;
+      }
+
+      const gameId = decodeURIComponent(positionMatch[1]);
+      const seatOrder = Number.parseInt(positionMatch[2], 10);
+      const result = setMockPlayerPosition(gameId, seatOrder, position);
+      if (result.state === "missing-game") {
+        json(response, 404, { error: "game not found" });
+        return;
+      }
+      if (result.state === "missing-player") {
+        json(response, 404, { error: "player not found" });
+        return;
+      }
+
+      json(response, 200, result.game);
       return;
     } catch {
       json(response, 400, { detail: [validationError("request body must be valid JSON")] });
