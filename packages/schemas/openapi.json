@@ -1,6 +1,517 @@
 {
   "components": {
     "schemas": {
+      "AcceptedEventResponse": {
+        "properties": {
+          "actor_player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Player Id"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "state_hash": {
+            "title": "State Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "sequence",
+          "actor_player_id",
+          "event_type",
+          "payload",
+          "state_hash",
+          "created_at"
+        ],
+        "title": "AcceptedEventResponse",
+        "type": "object"
+      },
+      "ActionAcceptedResponse": {
+        "properties": {
+          "accepted_events": {
+            "items": {
+              "$ref": "#/components/schemas/AcceptedEventResponse"
+            },
+            "title": "Accepted Events",
+            "type": "array"
+          },
+          "event_sequence": {
+            "title": "Event Sequence",
+            "type": "integer"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "state": {
+            "additionalProperties": true,
+            "title": "State",
+            "type": "object"
+          },
+          "state_hash": {
+            "title": "State Hash",
+            "type": "string"
+          },
+          "status": {
+            "const": "accepted",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "game_id",
+          "accepted_events",
+          "state",
+          "state_hash",
+          "event_sequence"
+        ],
+        "title": "ActionAcceptedResponse",
+        "type": "object"
+      },
+      "AiStepNotImplementedResponse": {
+        "properties": {
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "reason_code": {
+            "const": "ai_runtime_not_implemented",
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "status": {
+            "const": "not_implemented",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason_code",
+          "game_id",
+          "player_id",
+          "message"
+        ],
+        "title": "AiStepNotImplementedResponse",
+        "type": "object"
+      },
+      "AiStepRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "request_context": {
+            "additionalProperties": true,
+            "title": "Request Context",
+            "type": "object"
+          }
+        },
+        "required": [
+          "player_id"
+        ],
+        "title": "AiStepRequest",
+        "type": "object"
+      },
+      "CreateDealRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "negotiation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negotiation Id"
+          },
+          "parent_deal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Deal Id"
+          },
+          "proposed_by_player_id": {
+            "format": "uuid",
+            "title": "Proposed By Player Id",
+            "type": "string"
+          },
+          "terms": {
+            "additionalProperties": true,
+            "minProperties": 1,
+            "title": "Terms",
+            "type": "object"
+          }
+        },
+        "required": [
+          "proposed_by_player_id",
+          "terms"
+        ],
+        "title": "CreateDealRequest",
+        "type": "object"
+      },
+      "CreateGameRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerCreateRequest"
+            },
+            "maxItems": 5,
+            "minItems": 2,
+            "title": "Players",
+            "type": "array"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          }
+        },
+        "required": [
+          "players"
+        ],
+        "title": "CreateGameRequest",
+        "type": "object"
+      },
+      "CreateNegotiationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "opened_by_player_id": {
+            "format": "uuid",
+            "title": "Opened By Player Id",
+            "type": "string"
+          },
+          "participant_player_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 2,
+            "title": "Participant Player Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "opened_by_player_id",
+          "participant_player_ids"
+        ],
+        "title": "CreateNegotiationRequest",
+        "type": "object"
+      },
+      "DealResponse": {
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "negotiation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negotiation Id"
+          },
+          "parent_deal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Deal Id"
+          },
+          "proposed_by_player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed By Player Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "terms": {
+            "additionalProperties": true,
+            "title": "Terms",
+            "type": "object"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          },
+          "validation_errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Errors"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "negotiation_id",
+          "proposed_by_player_id",
+          "parent_deal_id",
+          "status",
+          "version",
+          "terms",
+          "validation_errors",
+          "created_at",
+          "updated_at",
+          "accepted_at"
+        ],
+        "title": "DealResponse",
+        "type": "object"
+      },
+      "EventsResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AcceptedEventResponse"
+            },
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "EventsResponse",
+        "type": "object"
+      },
+      "GameMetadataResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At"
+          },
+          "current_phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Phase"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerRecordResponse"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "ruleset_version": {
+            "title": "Ruleset Version",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "ruleset_version",
+          "seed",
+          "current_phase",
+          "settings",
+          "players",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "GameMetadataResponse",
+        "type": "object"
+      },
+      "GameStateResponse": {
+        "properties": {
+          "event_sequence": {
+            "title": "Event Sequence",
+            "type": "integer"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "state": {
+            "additionalProperties": true,
+            "title": "State",
+            "type": "object"
+          },
+          "state_hash": {
+            "title": "State Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "game_id",
+          "state",
+          "state_hash",
+          "event_sequence"
+        ],
+        "title": "GameStateResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "properties": {
           "database": {
@@ -37,6 +548,417 @@
         ],
         "title": "HealthResponse",
         "type": "object"
+      },
+      "LegalActionResponse": {
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "expected_event_sequence": {
+            "title": "Expected Event Sequence",
+            "type": "integer"
+          },
+          "expected_state_hash": {
+            "title": "Expected State Hash",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_id",
+          "type",
+          "payload",
+          "expected_state_hash",
+          "expected_event_sequence",
+          "schema"
+        ],
+        "title": "LegalActionResponse",
+        "type": "object"
+      },
+      "LegalActionsResponse": {
+        "properties": {
+          "actor_player_id": {
+            "format": "uuid",
+            "title": "Actor Player Id",
+            "type": "string"
+          },
+          "event_sequence": {
+            "title": "Event Sequence",
+            "type": "integer"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "legal_actions": {
+            "items": {
+              "$ref": "#/components/schemas/LegalActionResponse"
+            },
+            "title": "Legal Actions",
+            "type": "array"
+          },
+          "state_hash": {
+            "title": "State Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "game_id",
+          "actor_player_id",
+          "legal_actions",
+          "state_hash",
+          "event_sequence"
+        ],
+        "title": "LegalActionsResponse",
+        "type": "object"
+      },
+      "NegotiationResponse": {
+        "properties": {
+          "closed_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "opened_by_player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened By Player Id"
+          },
+          "participant_player_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Participant Player Ids",
+            "type": "array"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "round_number": {
+            "title": "Round Number",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "opened_by_player_id",
+          "participant_player_ids",
+          "status",
+          "phase",
+          "round_number",
+          "context",
+          "created_at",
+          "updated_at",
+          "closed_at"
+        ],
+        "title": "NegotiationResponse",
+        "type": "object"
+      },
+      "PlayerCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "human",
+              "ai"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "PlayerCreateRequest",
+        "type": "object"
+      },
+      "PlayerRecordResponse": {
+        "properties": {
+          "controller_type": {
+            "title": "Controller Type",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "seat_order": {
+            "title": "Seat Order",
+            "type": "integer"
+          },
+          "state": {
+            "additionalProperties": true,
+            "title": "State",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "seat_order",
+          "name",
+          "controller_type",
+          "status",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PlayerRecordResponse",
+        "type": "object"
+      },
+      "RejectedActionResponse": {
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "actor_player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Player Id"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "legal_action_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Action Context"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "state_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Hash"
+          },
+          "validation_errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "actor_player_id",
+          "action_type",
+          "payload",
+          "reason_code",
+          "validation_errors",
+          "legal_action_context",
+          "phase",
+          "state_hash",
+          "created_at"
+        ],
+        "title": "RejectedActionResponse",
+        "type": "object"
+      },
+      "RejectedActionsResponse": {
+        "properties": {
+          "rejected_actions": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedActionResponse"
+            },
+            "title": "Rejected Actions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rejected_actions"
+        ],
+        "title": "RejectedActionsResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
       }
     }
   },
@@ -47,6 +969,548 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/games": {
+      "post": {
+        "operationId": "create_game_games_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameMetadataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Game",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}": {
+      "get": {
+        "operationId": "get_game_games__game_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameMetadataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Game",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/actions": {
+      "post": {
+        "operationId": "submit_action_games__game_id__actions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ActionAcceptedResponse"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  ],
+                  "title": "Response Submit Action Games  Game Id  Actions Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Action",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/ai/step": {
+      "post": {
+        "operationId": "ai_step_games__game_id__ai_step_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiStepNotImplementedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ai Step",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/deals": {
+      "post": {
+        "operationId": "create_deal_games__game_id__deals_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDealRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DealResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Deal",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/events": {
+      "get": {
+        "operationId": "list_events_games__game_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Events",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/events/stream": {
+      "get": {
+        "operationId": "stream_events_games__game_id__events_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Server-sent stream of existing accepted game events."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Events",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/legal-actions": {
+      "get": {
+        "operationId": "get_legal_actions_games__game_id__legal_actions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_player_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Actor Player Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalActionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Legal Actions",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/negotiations": {
+      "post": {
+        "operationId": "create_negotiation_games__game_id__negotiations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNegotiationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NegotiationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Negotiation",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/rejected-actions": {
+      "get": {
+        "operationId": "list_rejections_games__game_id__rejected_actions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_player_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Player Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RejectedActionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Rejections",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/state": {
+      "get": {
+        "operationId": "get_game_state_games__game_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Game State",
+        "tags": [
+          "games"
+        ]
+      }
+    },
     "/health": {
       "get": {
         "operationId": "health_health_get",

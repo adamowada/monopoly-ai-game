@@ -20,6 +20,7 @@ from app.rules.events import (
     PropertyOwnerSetPayload,
     TurnStateSetPayload,
 )
+from app.rules.event_capture import record_rule_event
 from app.rules.reducer import apply_event
 from app.rules.static_data import (
     BoardSpace,
@@ -57,6 +58,7 @@ class _EventStream:
             type=cast(GameEventType, event_type),
             payload=payload,
         )
+        record_rule_event(event)
         return apply_event(state, event)
 
 

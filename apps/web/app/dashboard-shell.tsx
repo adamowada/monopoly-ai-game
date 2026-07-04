@@ -14,18 +14,24 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
+import { GameApiPanel } from "./game-api-panel";
+import { RejectedActionAuditView } from "./rejected-action-audit";
 import { Button } from "../components/ui/button";
 import { HealthSnapshotSchema, type HealthSnapshot } from "../lib/api/health";
+import type { RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
 
 type DashboardShellProps = {
   initialHealth: HealthSnapshot;
+  initialRejectedActions?: RejectedActionRecord[];
   title?: string;
 };
 
 const navigation = [
   { name: "Overview", href: "#overview", icon: Activity },
+  { name: "Game API", href: "#game-api", icon: Gamepad2 },
   { name: "Tier health", href: "#tier-health", icon: BadgeCheck },
+  { name: "Rejected actions", href: "#rejected-actions", icon: ShieldAlert },
   { name: "Workspace", href: "#workspace", icon: Blocks },
   { name: "Setup filters", href: "#setup-filters", icon: Settings2 },
 ];
@@ -39,8 +45,8 @@ const workspaceRows = [
   },
   {
     name: "Research audit",
-    status: "Planned",
-    detail: "Reserved for AI decisions, rejected actions, memory, and local audit trails in later phases.",
+    status: "Active",
+    detail: "Rejected action attempts are visible now; AI decisions and memory remain reserved for later phases.",
     icon: FlaskConical,
   },
   {
@@ -136,7 +142,11 @@ function getTierRows(snapshot: HealthSnapshot) {
   ] as const;
 }
 
-export function DashboardShell({ initialHealth, title = "Local Game Research Console" }: DashboardShellProps) {
+export function DashboardShell({
+  initialHealth,
+  initialRejectedActions = [],
+  title = "Local Game Research Console",
+}: DashboardShellProps) {
   const healthQuery = useQuery({
     queryKey: ["backend-health"],
     queryFn: fetchHealthSnapshot,
@@ -186,7 +196,7 @@ export function DashboardShell({ initialHealth, title = "Local Game Research Con
                 </div>
                 <nav
                   aria-label="Stack navigation"
-                  className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4 lg:hidden"
+                  className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5 lg:hidden"
                 >
                   {navigation.map((item) => (
                     <a
@@ -277,6 +287,8 @@ export function DashboardShell({ initialHealth, title = "Local Game Research Con
               </div>
             </section>
 
+            <GameApiPanel />
+
             <section id="tier-health" aria-labelledby="tier-health-title" className="bg-[var(--color-page)]">
               <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -333,6 +345,16 @@ export function DashboardShell({ initialHealth, title = "Local Game Research Con
                     </table>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            <section
+              id="rejected-actions"
+              aria-labelledby="rejected-actions-title"
+              className="border-t border-neutral-200 bg-[var(--color-page)]"
+            >
+              <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+                <RejectedActionAuditView records={initialRejectedActions} />
               </div>
             </section>
 

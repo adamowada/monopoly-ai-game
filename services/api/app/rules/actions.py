@@ -15,7 +15,8 @@ from app.rules.debt import (
     outstanding_debt_amount,
     settle_debt_with_cash,
 )
-from app.rules.events import DiceRolledPayload
+from app.rules.event_capture import capture_rule_events
+from app.rules.events import DiceRolledPayload, GameEvent
 from app.rules.mechanics import (
     JAIL_FINE,
     IllegalRuleActionError,
@@ -149,6 +150,28 @@ class ValidatedAction:
 
     def model_dump(self, *, mode: str = "python") -> dict[str, object]:
         return {"action": self.action.model_dump(mode=mode)}
+
+
+@dataclass(frozen=True, slots=True)
+class ActionExecutionResult:
+    action: GameAction
+    events: tuple[GameEvent, ...]
+    state: GameState
+
+    def model_dump(self, *, mode: str = "python") -> dict[str, object]:
+        return {
+            "action": self.action.model_dump(mode=mode),
+            "events": [
+                {
+                    "event_id": event.event_id,
+                    "sequence": event.sequence,
+                    "type": event.type,
+                    "payload": event.payload.model_dump(mode=mode),
+                }
+                for event in self.events
+            ],
+            "state": self.state.model_dump(mode=mode),
+        }
 
 
 def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ...]:
@@ -493,6 +516,20 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
         )
 
     _raise_issue("unknown_action", f"unknown action type {action.type}", "type")
+
+
+def execute_action(state: GameState, action: GameAction, event_id_prefix: str) -> ActionExecutionResult:
+    with capture_rule_events() as captured_events:
+        next_state = apply_action(state, action, event_id_prefix)
+
+    if not captured_events:
+        _raise_issue("illegal_action", f"{action.type} produced no rules events", "type")
+
+    return ActionExecutionResult(
+        action=action,
+        events=tuple(captured_events),
+        state=next_state,
+    )
 
 
 def _add_management_actions(
@@ -1103,11 +1140,13 @@ def _thaw_value(value: object, *, mode: str) -> object:
 __all__ = [
     "ActionValidationError",
     "ActionValidationIssue",
+    "ActionExecutionResult",
     "GameAction",
     "LegalAction",
     "SUPPORTED_ACTION_TYPES",
     "ValidatedAction",
     "apply_action",
+    "execute_action",
     "list_legal_actions",
     "validate_action",
 ]

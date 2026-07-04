@@ -45,11 +45,6 @@ def check_required_files() -> None:
 
 def check_no_future_stage_artifacts() -> None:
     future_stage_artifacts = {
-        "services/api/app/api": "Phase 4 persistence API",
-        "services/api/app/audit": "Phase 4 persistence auditability",
-        "services/api/app/models": "Phase 4 persistence models",
-        "services/api/app/persistence": "Phase 4 persistence layer",
-        "services/api/app/repositories": "Phase 4 persistence repositories",
         "apps/web/app/game": "Phase 5 frontend game surface",
         "apps/web/app/games": "Phase 5 frontend game surface",
         "apps/web/components/board": "Phase 5 frontend board surface",
