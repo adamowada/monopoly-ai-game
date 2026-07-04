@@ -178,6 +178,12 @@ function createGame(payload) {
     deals: [],
     contracts: [],
     obligations: [],
+    ai_profiles: [],
+    ai_decisions: [],
+    ai_self_dialogue: [],
+    ai_memory_entries: [],
+    ai_retrieval_records: [],
+    ai_rejected_outputs: [],
     negotiation_counter: 0,
     message_counter: 0,
     deal_counter: 0,
@@ -205,6 +211,7 @@ function createGame(payload) {
   configurePropertyManagementSeed(game);
   configureNegotiationSeed(game);
   configureContractsLogSeed(game);
+  configureAiAuditSeed(game);
   games.set(id, game);
   return game;
 }
@@ -349,6 +356,164 @@ function configureNegotiationSeed(game) {
 
 function isContractsLogSeed(seed) {
   return typeof seed === "string" && seed.startsWith("stage-5-7");
+}
+
+function isAiAuditSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-5-8");
+}
+
+function configureAiAuditSeed(game) {
+  if (!isAiAuditSeed(game.seed)) {
+    return;
+  }
+
+  const aiPlayers = game.players.filter((player) => player.controller_type === "ai");
+  if (aiPlayers.length === 0) {
+    return;
+  }
+
+  const createdAt = "2026-07-04T00:10:00.000Z";
+  const decisionAt = "2026-07-04T00:11:00.000Z";
+  const dialogueAt = "2026-07-04T00:11:01.000Z";
+  const memoryAt = "2026-07-04T00:10:30.000Z";
+  const retrievalAt = "2026-07-04T00:10:45.000Z";
+  const rejectedAt = "2026-07-04T00:11:30.000Z";
+  const profileTraits = [
+    ["risk-aware", "rent-focused", "cash-buffered"],
+    ["opportunistic", "auction-curious", "trade-probing"],
+    ["defensive", "utility-aware", "jail-cautious"],
+  ];
+
+  game.ai_profiles = aiPlayers.map((player, index) => ({
+    ai_profile_id: `${game.id}-ai-profile-${index + 1}`,
+    game_id: game.id,
+    player_id: player.id,
+    display_name: `${player.name} audit profile`,
+    traits: profileTraits[index % profileTraits.length],
+    personality:
+      index === 0
+        ? "Careful analyst that prefers legal certainty before committing cash."
+        : "Fast negotiator that searches for pressure points in short-term liquidity.",
+    play_style:
+      index === 0
+        ? "Builds cash buffers before auctions and chooses the smallest legal tempo-preserving action."
+        : "Uses retrieved context to probe trades while avoiding actions outside the legal snapshot.",
+    created_at: createdAt,
+  }));
+
+  const profile = game.ai_profiles[0];
+  const player = aiPlayers[0];
+  const memoryEntryId = `${game.id}-ai-memory-1`;
+  const retrievalRecordId = `${game.id}-ai-retrieval-1`;
+  const decisionId = `${game.id}-ai-decision-1`;
+  const currentStateHash = stateHash(game);
+
+  game.ai_memory_entries = [
+    {
+      memory_entry_id: memoryEntryId,
+      game_id: game.id,
+      ai_profile_id: profile.ai_profile_id,
+      player_id: player.id,
+      kind: "strategy",
+      content: `${player.name} remembers Ada prefers keeping $200 cash after trades.`,
+      importance: 0.74,
+      created_at: memoryAt,
+    },
+  ];
+
+  game.ai_retrieval_records = [
+    {
+      retrieval_record_id: retrievalRecordId,
+      game_id: game.id,
+      ai_decision_id: decisionId,
+      ai_profile_id: profile.ai_profile_id,
+      memory_entry_id: memoryEntryId,
+      source_type: "memory",
+      source_id: memoryEntryId,
+      score: 0.93,
+      content: "Retrieved context records show Ada usually rejects deals that drain her reserve below $200.",
+      created_at: retrievalAt,
+    },
+  ];
+
+  game.ai_decisions = [
+    {
+      ai_decision_id: decisionId,
+      game_id: game.id,
+      ai_profile_id: profile.ai_profile_id,
+      player_id: player.id,
+      state_hash: currentStateHash,
+      legal_actions: [
+        legalAction(game, "ROLL_DICE", {}, player.id),
+        legalAction(game, "DECLARE_BANKRUPTCY", { reason: "insolvent" }, player.id),
+      ],
+      prompt_context: {
+        phase: game.current_phase,
+        active_player_id: game.players[0]?.id ?? null,
+        inspected_player_id: player.id,
+        legal_action_count: 2,
+        note: "Private local research view; codex exec runtime is scheduled for Phase 7.",
+      },
+      raw_output: "{\"action\":\"ROLL_DICE\",\"rationale\":\"Only tempo-preserving legal move.\"}",
+      parsed_output: {
+        action: "ROLL_DICE",
+        confidence: 0.81,
+        rationale: "Only tempo-preserving legal move.",
+      },
+      validation_errors: [],
+      memory_entry_ids: [memoryEntryId],
+      retrieval_record_ids: [retrievalRecordId],
+      status: "accepted",
+      created_at: decisionAt,
+    },
+  ];
+
+  game.ai_self_dialogue = [
+    {
+      self_dialogue_id: `${game.id}-self-dialogue-1`,
+      game_id: game.id,
+      ai_decision_id: decisionId,
+      ai_profile_id: profile.ai_profile_id,
+      sequence: 1,
+      role: "planner",
+      content: "Legal actions snapshot has ROLL_DICE and DECLARE_BANKRUPTCY; bankruptcy is not appropriate.",
+      created_at: dialogueAt,
+    },
+    {
+      self_dialogue_id: `${game.id}-self-dialogue-2`,
+      game_id: game.id,
+      ai_decision_id: decisionId,
+      ai_profile_id: profile.ai_profile_id,
+      sequence: 2,
+      role: "critic",
+      content: "Memory entries and retrieved context records do not change the legal action boundary.",
+      created_at: dialogueAt,
+    },
+  ];
+
+  game.ai_rejected_outputs = [
+    {
+      rejected_output_id: `${game.id}-rejected-ai-output-1`,
+      game_id: game.id,
+      ai_decision_id: decisionId,
+      ai_profile_id: profile.ai_profile_id,
+      player_id: player.id,
+      state_hash: currentStateHash,
+      raw_output: "{\"action\":\"BUY_PROPERTY\",\"property_id\":\"property_boardwalk\"}",
+      parsed_output: {
+        action: "BUY_PROPERTY",
+        property_id: "property_boardwalk",
+      },
+      validation_errors: [
+        {
+          code: "illegal_action",
+          message: "BUY_PROPERTY is not in the Legal actions snapshot.",
+          field: "parsed_output.action",
+        },
+      ],
+      created_at: rejectedAt,
+    },
+  ];
 }
 
 function configureContractsLogSeed(game) {
@@ -1588,6 +1753,78 @@ const server = createServer(async (request, response) => {
       return;
     }
     json(response, 200, { obligations: game.obligations ?? [] });
+    return;
+  }
+
+  const aiProfilesMatch = url.pathname.match(/^\/games\/([^/]+)\/ai\/profiles$/);
+  if (request.method === "GET" && aiProfilesMatch) {
+    const gameId = decodeURIComponent(aiProfilesMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { profiles: game.ai_profiles ?? [] });
+    return;
+  }
+
+  const aiDecisionsMatch = url.pathname.match(/^\/games\/([^/]+)\/ai\/decisions$/);
+  if (request.method === "GET" && aiDecisionsMatch) {
+    const gameId = decodeURIComponent(aiDecisionsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { decisions: game.ai_decisions ?? [] });
+    return;
+  }
+
+  const aiSelfDialogueMatch = url.pathname.match(/^\/games\/([^/]+)\/ai\/self-dialogue$/);
+  if (request.method === "GET" && aiSelfDialogueMatch) {
+    const gameId = decodeURIComponent(aiSelfDialogueMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { self_dialogue: game.ai_self_dialogue ?? [] });
+    return;
+  }
+
+  const aiMemoryMatch = url.pathname.match(/^\/games\/([^/]+)\/ai\/memory$/);
+  if (request.method === "GET" && aiMemoryMatch) {
+    const gameId = decodeURIComponent(aiMemoryMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { memory_entries: game.ai_memory_entries ?? [] });
+    return;
+  }
+
+  const aiRetrievalRecordsMatch = url.pathname.match(/^\/games\/([^/]+)\/ai\/retrieval-records$/);
+  if (request.method === "GET" && aiRetrievalRecordsMatch) {
+    const gameId = decodeURIComponent(aiRetrievalRecordsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { retrieval_records: game.ai_retrieval_records ?? [] });
+    return;
+  }
+
+  const aiRejectedOutputsMatch = url.pathname.match(/^\/games\/([^/]+)\/ai\/rejected-outputs$/);
+  if (request.method === "GET" && aiRejectedOutputsMatch) {
+    const gameId = decodeURIComponent(aiRejectedOutputsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { rejected_outputs: game.ai_rejected_outputs ?? [] });
     return;
   }
 

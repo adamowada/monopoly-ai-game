@@ -35,6 +35,7 @@ import {
 import { readGame, type GameMetadata } from "../lib/api/games";
 import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
+import { AiAuditPanel } from "./ai-audit-panel";
 import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
 import { ContractsPanel } from "./contracts-panel";
 import { ClassicGameBoard, getPlayerColor } from "./game-board";
@@ -663,6 +664,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           snapshot={stateQuery.data}
         />
         <NegotiationPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
+        <AiAuditPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
       </div>
 
       <aside className="grid content-start gap-4">
