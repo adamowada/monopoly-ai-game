@@ -100,7 +100,20 @@ class TurnState(StateModel):
 
 
 class ActivePaymentState(StateModel):
-    pass
+    debtor_id: str = Field(min_length=1)
+    creditor_id: str | None = Field(default=None, min_length=1)
+    amount_owed: int = Field(gt=0)
+    amount_paid: int = Field(ge=0)
+    reason: str = Field(min_length=1)
+    negotiation_allowed: bool
+
+    @model_validator(mode="after")
+    def validate_payment_state(self) -> Self:
+        if self.creditor_id is not None and self.creditor_id == self.debtor_id:
+            raise ValueError("active payment creditor cannot match debtor")
+        if self.amount_paid > self.amount_owed:
+            raise ValueError("active payment amount_paid cannot exceed amount_owed")
+        return self
 
 
 class ActiveAuctionState(StateModel):
@@ -193,6 +206,15 @@ class GameState(StateModel):
             and self.active_atomic_resolution.actor_id not in owner_ids
         ):
             raise ValueError("active atomic resolution actor must reference an existing player")
+
+        if self.active_payment is not None:
+            if self.active_payment.debtor_id not in owner_ids:
+                raise ValueError("active payment debtor must reference an existing player")
+            if (
+                self.active_payment.creditor_id is not None
+                and self.active_payment.creditor_id not in owner_ids
+            ):
+                raise ValueError("active payment creditor must reference an existing player")
 
         if len(self.applied_event_ids) != self.event_sequence:
             raise ValueError("applied event id count must match event sequence")

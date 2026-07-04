@@ -163,6 +163,54 @@ class TurnStateSetPayload(EventModel):
 
 class ActivePaymentSetPayload(EventModel):
     active: bool
+    debtor_id: str | None = Field(default=None, min_length=1)
+    creditor_id: str | None = Field(default=None, min_length=1)
+    amount_owed: int | None = Field(default=None, gt=0)
+    amount_paid: int | None = Field(default=None, ge=0)
+    reason: str | None = Field(default=None, min_length=1)
+    negotiation_allowed: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_shape(self) -> Self:
+        debt_fields = {
+            "debtor_id",
+            "creditor_id",
+            "amount_owed",
+            "amount_paid",
+            "reason",
+            "negotiation_allowed",
+        }
+        if not self.active:
+            included_fields = sorted(debt_fields & self.model_fields_set)
+            if included_fields:
+                raise ValueError("inactive payment payload cannot include debt details")
+            return self
+
+        missing_fields = [
+            field_name
+            for field_name in (
+                "debtor_id",
+                "amount_owed",
+                "amount_paid",
+                "reason",
+                "negotiation_allowed",
+            )
+            if getattr(self, field_name) is None
+        ]
+        if missing_fields:
+            raise ValueError(
+                "active payment payload must include "
+                f"{', '.join(missing_fields)}"
+            )
+        if self.creditor_id is not None and self.creditor_id == self.debtor_id:
+            raise ValueError("active payment creditor cannot match debtor")
+        if (
+            self.amount_paid is not None
+            and self.amount_owed is not None
+            and self.amount_paid > self.amount_owed
+        ):
+            raise ValueError("active payment amount_paid cannot exceed amount_owed")
+        return self
 
 
 class ActiveAuctionSetPayload(EventModel):

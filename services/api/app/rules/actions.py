@@ -6,6 +6,15 @@ from types import MappingProxyType
 from typing import Final, NoReturn, Protocol, cast
 
 from app.rules.atomic import is_atomic_section_active
+from app.rules.debt import (
+    DEBT_FORBIDDEN_ACTION_TYPES,
+    DEBT_LIQUIDATION_ACTION_TYPES,
+    clear_active_debt,
+    debt_issue_for_action,
+    is_debt_active,
+    outstanding_debt_amount,
+    settle_debt_with_cash,
+)
 from app.rules.events import DiceRolledPayload
 from app.rules.mechanics import (
     JAIL_FINE,
@@ -49,6 +58,7 @@ SUPPORTED_ACTION_TYPES: Final[frozenset[str]] = frozenset(
         "MORTGAGE_PROPERTY",
         "UNMORTGAGE_PROPERTY",
         "DECLARE_BANKRUPTCY",
+        "SETTLE_DEBT",
     }
 )
 
@@ -157,7 +167,7 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
         schema: Mapping[str, object] | None = None,
         description: str | None = None,
     ) -> None:
-        if not is_action_allowed_now(state, action_type):
+        if not is_action_allowed_now(state, action_type, actor_id=actor_id):
             return
         actions.append(
             LegalAction(
@@ -170,6 +180,43 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
                 schema=_empty_payload_schema() if schema is None else schema,
             )
         )
+
+    if is_debt_active(state):
+        active_payment = state.active_payment
+        if active_payment is None or actor_id != active_payment.debtor_id:
+            return ()
+
+        outstanding = outstanding_debt_amount(state)
+        settle_amount = min(player.cash, outstanding)
+        if settle_amount > 0:
+            add(
+                "SETTLE_DEBT",
+                {"amount": settle_amount},
+                schema=_object_schema(
+                    {
+                        "amount": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": settle_amount,
+                        }
+                    },
+                    required=("amount",),
+                ),
+                description=f"Pay {settle_amount} toward {active_payment.reason}.",
+            )
+        _add_management_actions(
+            state,
+            player,
+            add,
+            allowed_action_types=DEBT_LIQUIDATION_ACTION_TYPES,
+        )
+        add(
+            "DECLARE_BANKRUPTCY",
+            {"creditor_id": active_payment.creditor_id},
+            schema=_bankruptcy_schema(state, actor_id),
+            description="Declare bankruptcy and liquidate assets.",
+        )
+        return tuple(actions)
 
     if state.active_auction is not None:
         auction = state.active_auction
@@ -271,11 +318,10 @@ def validate_action(state: GameState, action: GameAction) -> ValidatedAction:
     if stale_issues:
         raise ActionValidationError(stale_issues)
 
-    if not isinstance(action.type, str) or action.type not in SUPPORTED_ACTION_TYPES:
+    if not isinstance(action.type, str):
         _raise_issue("unknown_action", f"unknown action type {action.type}", "type")
 
     payload = _payload_mapping(action)
-    _validate_payload_shape(action.type, payload)
 
     actor = _player_by_id(state, action.actor_id)
     if actor is None:
@@ -283,7 +329,26 @@ def validate_action(state: GameState, action: GameAction) -> ValidatedAction:
     if actor.is_bankrupt:
         _raise_issue("illegal_action", f"{action.actor_id} is bankrupt", "actor_id")
 
-    timing_issue = timing_issue_for_action(state, action.type)
+    early_debt_issue = debt_issue_for_action(state, action.type, action.actor_id)
+    if early_debt_issue is not None and (
+        action.type in SUPPORTED_ACTION_TYPES or action.type in DEBT_FORBIDDEN_ACTION_TYPES
+    ):
+        raise ActionValidationError(
+            (
+                ActionValidationIssue(
+                    code=early_debt_issue.code,
+                    message=early_debt_issue.message,
+                    field=early_debt_issue.field,
+                ),
+            )
+        )
+
+    if action.type not in SUPPORTED_ACTION_TYPES:
+        _raise_issue("unknown_action", f"unknown action type {action.type}", "type")
+
+    _validate_payload_shape(action.type, payload)
+
+    timing_issue = timing_issue_for_action(state, action.type, actor_id=action.actor_id)
     if timing_issue is not None:
         _raise_timing_issue(timing_issue)
 
@@ -335,6 +400,8 @@ def validate_action(state: GameState, action: GameAction) -> ValidatedAction:
         )
     elif action.type == "DECLARE_BANKRUPTCY":
         _validate_bankruptcy_action(state, actor, payload)
+    elif action.type == "SETTLE_DEBT":
+        _validate_settle_debt_action(state, actor, payload)
 
     return ValidatedAction(action=action)
 
@@ -411,8 +478,19 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
         )
 
     if action.type == "DECLARE_BANKRUPTCY":
-        creditor_id = _optional_str_or_none(payload, "creditor_id")
-        return declare_bankruptcy(state, action.actor_id, creditor_id, event_id_prefix)
+        creditor_id = _bankruptcy_creditor_for_payload(state, action.actor_id, payload)
+        next_state = declare_bankruptcy(state, action.actor_id, creditor_id, event_id_prefix)
+        if state.active_payment is not None and state.active_payment.debtor_id == action.actor_id:
+            return clear_active_debt(next_state, event_id_prefix)
+        return next_state
+
+    if action.type == "SETTLE_DEBT":
+        return settle_debt_with_cash(
+            state,
+            action.actor_id,
+            _required_int(payload, "amount"),
+            event_id_prefix,
+        )
 
     _raise_issue("unknown_action", f"unknown action type {action.type}", "type")
 
@@ -421,13 +499,18 @@ def _add_management_actions(
     state: GameState,
     player: PlayerState,
     add: _ActionAdder,
+    *,
+    allowed_action_types: frozenset[str] | None = None,
 ) -> None:
     for ownership in state.property_ownership:
         if ownership.owner_id != player.id:
             continue
 
         property_data = _property_data(ownership.property_id)
-        if _mechanic_accepts(state, player.id, ownership.property_id, "BUY_HOUSE", buy_house):
+        if (
+            _is_management_action_enabled("BUY_HOUSE", allowed_action_types)
+            and _mechanic_accepts(state, player.id, ownership.property_id, "BUY_HOUSE", buy_house)
+        ):
             add(
                 "BUY_HOUSE",
                 {
@@ -443,7 +526,10 @@ def _add_management_actions(
                 ),
                 description=f"Buy an improvement on {property_data.name}.",
             )
-        if _mechanic_accepts(state, player.id, ownership.property_id, "SELL_HOUSE", sell_house):
+        if (
+            _is_management_action_enabled("SELL_HOUSE", allowed_action_types)
+            and _mechanic_accepts(state, player.id, ownership.property_id, "SELL_HOUSE", sell_house)
+        ):
             add(
                 "SELL_HOUSE",
                 {
@@ -459,12 +545,15 @@ def _add_management_actions(
                 ),
                 description=f"Sell an improvement from {property_data.name}.",
             )
-        if _mechanic_accepts(
-            state,
-            player.id,
-            ownership.property_id,
-            "MORTGAGE_PROPERTY",
-            mortgage_property,
+        if (
+            _is_management_action_enabled("MORTGAGE_PROPERTY", allowed_action_types)
+            and _mechanic_accepts(
+                state,
+                player.id,
+                ownership.property_id,
+                "MORTGAGE_PROPERTY",
+                mortgage_property,
+            )
         ):
             add(
                 "MORTGAGE_PROPERTY",
@@ -481,12 +570,15 @@ def _add_management_actions(
                 ),
                 description=f"Mortgage {property_data.name}.",
             )
-        if _mechanic_accepts(
-            state,
-            player.id,
-            ownership.property_id,
-            "UNMORTGAGE_PROPERTY",
-            unmortgage_property,
+        if (
+            _is_management_action_enabled("UNMORTGAGE_PROPERTY", allowed_action_types)
+            and _mechanic_accepts(
+                state,
+                player.id,
+                ownership.property_id,
+                "UNMORTGAGE_PROPERTY",
+                unmortgage_property,
+            )
         ):
             cost = property_data.mortgage_value + _mortgage_interest(property_data.mortgage_value)
             add(
@@ -574,6 +666,11 @@ def _validate_payload_shape(action_type: str, payload: Mapping[str, object]) -> 
         _validate_allowed_fields(payload, ("creditor_id",))
         if "creditor_id" in payload:
             _optional_str_or_none(payload, "creditor_id")
+        return
+
+    if action_type == "SETTLE_DEBT":
+        _validate_allowed_fields(payload, ("amount",))
+        _required_int(payload, "amount")
 
 
 def _validate_roll_timing(state: GameState, actor_id: str) -> None:
@@ -686,7 +783,7 @@ def _validate_bankruptcy_action(
     actor: PlayerState,
     payload: Mapping[str, object],
 ) -> None:
-    creditor_id = _optional_str_or_none(payload, "creditor_id")
+    creditor_id = _bankruptcy_creditor_for_payload(state, actor.id, payload)
     if creditor_id == actor.id:
         _raise_issue("illegal_action", "bankrupt player cannot be their own creditor", "payload.creditor_id")
     if creditor_id is not None:
@@ -695,6 +792,28 @@ def _validate_bankruptcy_action(
             _raise_issue("illegal_action", f"unknown active creditor {creditor_id}", "payload.creditor_id")
     if not _mechanic_accepts_bankruptcy(state, actor.id, creditor_id):
         _raise_issue("illegal_action", "bankruptcy is not legal in the current state", "type")
+
+
+def _validate_settle_debt_action(
+    state: GameState,
+    actor: PlayerState,
+    payload: Mapping[str, object],
+) -> None:
+    active_payment = state.active_payment
+    if active_payment is None:
+        _raise_issue("mistimed_action", "SETTLE_DEBT requires an active debt", "type")
+    if actor.id != active_payment.debtor_id:
+        _raise_issue("mistimed_action", "only the active debtor may settle debt", "actor_id")
+
+    amount = _required_int(payload, "amount")
+    if amount <= 0:
+        _raise_issue("malformed_action", "payload field amount must be a positive integer", "payload.amount")
+
+    outstanding = outstanding_debt_amount(state)
+    if amount > actor.cash:
+        _raise_issue("illegal_action", "settlement amount exceeds debtor cash", "payload.amount")
+    if amount > outstanding:
+        _raise_issue("illegal_action", "settlement amount exceeds outstanding debt", "payload.amount")
 
 
 def _mechanic_accepts(
@@ -717,6 +836,13 @@ def _mechanic_accepts_bankruptcy(state: GameState, actor_id: str, creditor_id: s
     except IllegalRuleActionError:
         return False
     return True
+
+
+def _is_management_action_enabled(
+    action_type: str,
+    allowed_action_types: frozenset[str] | None,
+) -> bool:
+    return allowed_action_types is None or action_type in allowed_action_types
 
 
 def _close_auction_if_resolved(state: GameState, event_id_prefix: str) -> GameState:
@@ -879,6 +1005,17 @@ def _mortgage_interest(mortgage_value: int) -> int:
 
 
 def _bankruptcy_schema(state: GameState, actor_id: str) -> Mapping[str, object]:
+    if state.active_payment is not None and state.active_payment.debtor_id == actor_id:
+        active_creditor_id = state.active_payment.creditor_id
+        return _object_schema(
+            {
+                "creditor_id": {
+                    "type": ["string", "null"],
+                    "enum": [active_creditor_id],
+                }
+            }
+        )
+
     creditor_choices: list[object] = [
         None,
         *(player.id for player in state.players if player.id != actor_id and not player.is_bankrupt),
@@ -891,6 +1028,27 @@ def _bankruptcy_schema(state: GameState, actor_id: str) -> Mapping[str, object]:
             }
         }
     )
+
+
+def _bankruptcy_creditor_for_payload(
+    state: GameState,
+    actor_id: str,
+    payload: Mapping[str, object],
+) -> str | None:
+    active_payment = state.active_payment
+    if active_payment is not None and active_payment.debtor_id == actor_id:
+        active_creditor_id = active_payment.creditor_id
+        if "creditor_id" not in payload:
+            return active_creditor_id
+        creditor_id = _optional_str_or_none(payload, "creditor_id")
+        if creditor_id != active_creditor_id:
+            _raise_issue(
+                "illegal_action",
+                "bankruptcy creditor must match active debt creditor",
+                "payload.creditor_id",
+            )
+        return creditor_id
+    return _optional_str_or_none(payload, "creditor_id")
 
 
 def _empty_payload_schema() -> Mapping[str, object]:

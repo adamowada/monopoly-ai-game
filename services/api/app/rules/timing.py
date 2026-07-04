@@ -6,6 +6,7 @@ from types import MappingProxyType
 from typing import Final
 
 from app.rules.atomic import is_atomic_section_active
+from app.rules.debt import debt_issue_for_action
 from app.rules.phases import TurnPhase
 from app.rules.state import GameState
 
@@ -60,6 +61,9 @@ _JAIL_ACTION_PHASES: Final = frozenset(
 _BANKRUPTCY_ACTION_PHASES: Final = frozenset(
     phase for phase in TurnPhase if phase is not TurnPhase.GAME_OVER
 )
+_DEBT_ACTION_PHASES: Final = frozenset(
+    phase for phase in TurnPhase if phase is not TurnPhase.GAME_OVER
+)
 
 _ACTION_TIMING_WINDOWS: Final[dict[str, frozenset[TurnPhase]]] = {
     "ROLL_DICE": _ROLL_PHASES,
@@ -74,6 +78,7 @@ _ACTION_TIMING_WINDOWS: Final[dict[str, frozenset[TurnPhase]]] = {
     "MORTGAGE_PROPERTY": MANAGEMENT_PHASES | LIQUIDATION_PHASES,
     "UNMORTGAGE_PROPERTY": MANAGEMENT_PHASES | LIQUIDATION_PHASES,
     "DECLARE_BANKRUPTCY": _BANKRUPTCY_ACTION_PHASES,
+    "SETTLE_DEBT": _DEBT_ACTION_PHASES,
     **{
         action_type: MANAGEMENT_PHASES
         for action_type in DEAL_PROPOSAL_ACTION_TYPES | TRADE_RESPONSE_ACTION_TYPES
@@ -113,11 +118,19 @@ def is_action_type_allowed_in_phase(action_type: str, phase: TurnPhase | str) ->
     return parsed_phase in timing_window
 
 
-def is_action_allowed_now(state: GameState, action_type: str) -> bool:
-    return timing_issue_for_action(state, action_type) is None
+def is_action_allowed_now(
+    state: GameState,
+    action_type: str,
+    actor_id: str | None = None,
+) -> bool:
+    return timing_issue_for_action(state, action_type, actor_id=actor_id) is None
 
 
-def timing_issue_for_action(state: GameState, action_type: str) -> ActionTimingIssue | None:
+def timing_issue_for_action(
+    state: GameState,
+    action_type: str,
+    actor_id: str | None = None,
+) -> ActionTimingIssue | None:
     if is_atomic_section_active(state):
         active_atomic = state.active_atomic_resolution
         atomic_kind = "UNKNOWN" if active_atomic is None else active_atomic.kind.value
@@ -140,6 +153,14 @@ def timing_issue_for_action(state: GameState, action_type: str) -> ActionTimingI
             code="mistimed_action",
             message=f"{action_type} is not legal during {phase.value}",
             field="type",
+        )
+
+    debt_issue = debt_issue_for_action(state, action_type, actor_id)
+    if debt_issue is not None:
+        return ActionTimingIssue(
+            code=debt_issue.code,
+            message=debt_issue.message,
+            field=debt_issue.field,
         )
 
     if state.active_auction is not None and action_type not in _ACTIVE_AUCTION_COMPATIBLE_ACTION_TYPES:

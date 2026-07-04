@@ -121,6 +121,8 @@ def _raw_payload_value(payload: object, field_name: str) -> object:
 
 
 def _payload_data(payload: object) -> object:
+    if isinstance(payload, ActivePaymentSetPayload) and not payload.active:
+        return {"active": False}
     if isinstance(payload, EventModel):
         return payload.model_dump(mode="python")
     return payload
@@ -280,7 +282,19 @@ def _updates_for_event(state: GameState, event: GameEvent) -> dict[str, Any]:
 
     if event.type == "ACTIVE_PAYMENT_SET":
         payload = _expect_payload(event, ActivePaymentSetPayload)
-        return {"active_payment": ActivePaymentState() if payload.active else None}
+        if not payload.active:
+            return {"active_payment": None}
+        _validate_active_payment_payload(state, payload)
+        return {
+            "active_payment": ActivePaymentState(
+                debtor_id=cast(str, payload.debtor_id),
+                creditor_id=payload.creditor_id,
+                amount_owed=cast(int, payload.amount_owed),
+                amount_paid=cast(int, payload.amount_paid),
+                reason=cast(str, payload.reason),
+                negotiation_allowed=cast(bool, payload.negotiation_allowed),
+            )
+        }
 
     if event.type == "ACTIVE_AUCTION_SET":
         payload = _expect_payload(event, ActiveAuctionSetPayload)
@@ -380,6 +394,30 @@ def _validate_property_owner_reference(state: GameState, owner_id: str | None) -
         raise InvalidEventError(f"unknown owner {owner_id}")
 
 
+def _validate_active_payment_payload(state: GameState, payload: ActivePaymentSetPayload) -> None:
+    if payload.debtor_id is None:
+        raise InvalidEventError("active payment debtor is required")
+    if payload.amount_owed is None:
+        raise InvalidEventError("active payment amount owed is required")
+    if payload.amount_paid is None:
+        raise InvalidEventError("active payment amount paid is required")
+    if payload.reason is None:
+        raise InvalidEventError("active payment reason is required")
+    if payload.negotiation_allowed is None:
+        raise InvalidEventError("active payment negotiation flag is required")
+    if payload.creditor_id is not None and payload.creditor_id == payload.debtor_id:
+        raise InvalidEventError("active payment creditor cannot match debtor")
+    try:
+        _player_by_id(state, payload.debtor_id)
+    except InvalidEventError as exc:
+        raise InvalidEventError(f"unknown debtor {payload.debtor_id}") from exc
+    if payload.creditor_id is not None:
+        try:
+            _player_by_id(state, payload.creditor_id)
+        except InvalidEventError as exc:
+            raise InvalidEventError(f"unknown creditor {payload.creditor_id}") from exc
+
+
 def _validate_deck_state_payload(payload: DeckStateSetPayload) -> None:
     _validate_full_deck_membership(payload.deck, (*payload.draw_pile, *payload.discard_pile))
 
@@ -461,6 +499,11 @@ def _validate_turn_payload(state: GameState, payload: TurnStateSetPayload) -> No
         assert_valid_phase_transition(state.turn.phase, payload.phase)
     except ValueError as exc:
         raise InvalidEventError(str(exc)) from exc
+    if state.active_payment is not None and payload.phase in {
+        TurnPhase.END_TURN,
+        TurnPhase.START_TURN,
+    }:
+        raise InvalidEventError("cannot transition to turn start or end while active payment is unresolved")
 
 
 def _card_ids_for_deck(deck_name: str) -> set[str]:
