@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 GameEventType: TypeAlias = Literal[
+    "DICE_ROLLED",
+    "DECK_SHUFFLED",
+    "CARD_DRAWN",
     "PLAYER_CASH_DELTA",
     "PLAYER_POSITION_SET",
     "PLAYER_JAIL_SET",
@@ -112,6 +115,41 @@ class DeckStateSetPayload(EventModel):
         return self
 
 
+class DiceRolledPayload(EventModel):
+    player_id: str = Field(min_length=1)
+    die_1: int = Field(ge=1, le=6)
+    die_2: int = Field(ge=1, le=6)
+    total: int = Field(ge=2, le=12)
+    is_doubles: bool
+    roll_counter: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_dice_outcome(self) -> Self:
+        if self.total != self.die_1 + self.die_2:
+            raise ValueError("dice total must equal die_1 plus die_2")
+        if self.is_doubles != (self.die_1 == self.die_2):
+            raise ValueError("dice doubles flag must match dice values")
+        return self
+
+
+class DeckShuffledPayload(EventModel):
+    deck: DeckEventName
+    draw_pile: tuple[str, ...]
+    shuffle_counter: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_card_ids_are_unique(self) -> Self:
+        if len(set(self.draw_pile)) != len(self.draw_pile):
+            raise ValueError("card ids cannot appear more than once in a shuffled deck")
+        return self
+
+
+class CardDrawnPayload(EventModel):
+    deck: DeckEventName
+    card_id: str = Field(min_length=1)
+    draw_counter: int = Field(ge=1)
+
+
 class TurnStateSetPayload(EventModel):
     turn_number: int = Field(ge=1)
     current_player_index: int = Field(ge=0)
@@ -137,7 +175,10 @@ class ActiveBankruptcySetPayload(EventModel):
 
 
 GameEventPayload: TypeAlias = (
-    PlayerCashDeltaPayload
+    DiceRolledPayload
+    | DeckShuffledPayload
+    | CardDrawnPayload
+    | PlayerCashDeltaPayload
     | PlayerPositionSetPayload
     | PlayerJailSetPayload
     | PlayerBankruptcySetPayload
@@ -155,6 +196,9 @@ GameEventPayload: TypeAlias = (
 )
 
 PAYLOAD_MODEL_BY_EVENT_TYPE: dict[str, type[EventModel]] = {
+    "DICE_ROLLED": DiceRolledPayload,
+    "DECK_SHUFFLED": DeckShuffledPayload,
+    "CARD_DRAWN": CardDrawnPayload,
     "PLAYER_CASH_DELTA": PlayerCashDeltaPayload,
     "PLAYER_POSITION_SET": PlayerPositionSetPayload,
     "PLAYER_JAIL_SET": PlayerJailSetPayload,
@@ -216,8 +260,11 @@ __all__ = [
     "ActiveNegotiationSetPayload",
     "ActivePaymentSetPayload",
     "BankInventorySetPayload",
+    "CardDrawnPayload",
     "DeckEventName",
+    "DeckShuffledPayload",
     "DeckStateSetPayload",
+    "DiceRolledPayload",
     "EventModel",
     "GameEvent",
     "GameEventPayload",

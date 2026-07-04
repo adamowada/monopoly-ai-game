@@ -76,6 +76,15 @@ class DeckCollectionState(StateModel):
     community_chest: DeckState
 
 
+class RngState(StateModel):
+    seed: str
+    dice_roll_count: int = Field(ge=0)
+    chance_draw_count: int = Field(ge=0)
+    community_chest_draw_count: int = Field(ge=0)
+    chance_shuffle_count: int = Field(ge=0)
+    community_chest_shuffle_count: int = Field(ge=0)
+
+
 class BankInventoryState(StateModel):
     houses: int = Field(ge=0, le=32)
     hotels: int = Field(ge=0, le=12)
@@ -110,6 +119,7 @@ class GameState(StateModel):
     game_id: str = Field(min_length=1)
     ruleset_version: str = Field(min_length=1)
     seed: str
+    rng: RngState
     players: tuple[PlayerState, ...]
     property_ownership: tuple[PropertyOwnershipState, ...]
     decks: DeckCollectionState
@@ -125,6 +135,9 @@ class GameState(StateModel):
     @model_validator(mode="after")
     def validate_game_state_shape(self) -> Self:
         _validate_player_count_and_ids(self.players)
+
+        if self.rng.seed != self.seed:
+            raise ValueError("rng seed must match game seed")
 
         if self.turn.current_player_index >= len(self.players):
             raise ValueError("current player index must reference an existing player")
@@ -203,6 +216,14 @@ def create_initial_game_state(
         game_id=game_id,
         ruleset_version=data.version,
         seed=seed,
+        rng=RngState(
+            seed=seed,
+            dice_roll_count=0,
+            chance_draw_count=0,
+            community_chest_draw_count=0,
+            chance_shuffle_count=0,
+            community_chest_shuffle_count=0,
+        ),
         players=player_states,
         property_ownership=property_ownership,
         decks=decks,

@@ -11,7 +11,10 @@ from app.rules.events import (
     ActiveNegotiationSetPayload,
     ActivePaymentSetPayload,
     BankInventorySetPayload,
+    CardDrawnPayload,
+    DeckShuffledPayload,
     DeckStateSetPayload,
+    DiceRolledPayload,
     EventModel,
     GameEvent,
     InvalidEventError,
@@ -39,6 +42,7 @@ from app.rules.state import (
     PlayerSetup,
     PlayerState,
     PropertyOwnershipState,
+    RngState,
     TurnPhase,
     TurnState,
     create_initial_game_state,
@@ -86,7 +90,7 @@ def _validate_event(event: GameEvent) -> GameEvent:
         raise InvalidEventError(f"unknown event type {event_type}")
 
     payload = getattr(event, "payload", None)
-    if event_type == "DECK_STATE_SET":
+    if event_type in {"DECK_STATE_SET", "DECK_SHUFFLED", "CARD_DRAWN"}:
         deck_name = _raw_payload_value(payload, "deck")
         if deck_name not in ("chance", "community_chest"):
             raise InvalidEventError(f"unknown deck {deck_name}")
@@ -214,6 +218,11 @@ def _updates_for_event(state: GameState, event: GameEvent) -> dict[str, Any]:
         payload = _expect_payload(event, BankInventorySetPayload)
         return {"bank_inventory": BankInventoryState(houses=payload.houses, hotels=payload.hotels)}
 
+    if event.type == "DICE_ROLLED":
+        payload = _expect_payload(event, DiceRolledPayload)
+        _validate_dice_rolled_payload(state, payload)
+        return {"rng": _replace_rng_state(state, {"dice_roll_count": payload.roll_counter})}
+
     if event.type == "DECK_STATE_SET":
         payload = _expect_payload(event, DeckStateSetPayload)
         _validate_deck_state_payload(payload)
@@ -223,6 +232,35 @@ def _updates_for_event(state: GameState, event: GameEvent) -> dict[str, Any]:
             discard_pile=payload.discard_pile,
         )
         return {"decks": DeckCollectionState.model_validate(deck_updates)}
+
+    if event.type == "DECK_SHUFFLED":
+        payload = _expect_payload(event, DeckShuffledPayload)
+        _validate_deck_shuffled_payload(state, payload)
+        deck_updates = state.decks.model_dump(mode="python")
+        deck_updates[payload.deck] = DeckState(draw_pile=payload.draw_pile, discard_pile=())
+        return {
+            "decks": DeckCollectionState.model_validate(deck_updates),
+            "rng": _replace_rng_state(
+                state,
+                {_shuffle_counter_field(payload.deck): payload.shuffle_counter},
+            ),
+        }
+
+    if event.type == "CARD_DRAWN":
+        payload = _expect_payload(event, CardDrawnPayload)
+        deck_state = _validate_card_drawn_payload(state, payload)
+        deck_updates = state.decks.model_dump(mode="python")
+        deck_updates[payload.deck] = DeckState(
+            draw_pile=deck_state.draw_pile[1:],
+            discard_pile=(*deck_state.discard_pile, payload.card_id),
+        )
+        return {
+            "decks": DeckCollectionState.model_validate(deck_updates),
+            "rng": _replace_rng_state(
+                state,
+                {_draw_counter_field(payload.deck): payload.draw_counter},
+            ),
+        }
 
     if event.type == "TURN_STATE_SET":
         payload = _expect_payload(event, TurnStateSetPayload)
@@ -305,14 +343,65 @@ def _validate_property_owner_reference(state: GameState, owner_id: str | None) -
 
 
 def _validate_deck_state_payload(payload: DeckStateSetPayload) -> None:
-    expected_card_ids = _card_ids_for_deck(payload.deck)
-    event_card_ids = set((*payload.draw_pile, *payload.discard_pile))
+    _validate_full_deck_membership(payload.deck, (*payload.draw_pile, *payload.discard_pile))
+
+
+def _validate_dice_rolled_payload(state: GameState, payload: DiceRolledPayload) -> None:
+    _player_by_id(state, payload.player_id)
+    expected_counter = state.rng.dice_roll_count + 1
+    if payload.roll_counter != expected_counter:
+        raise InvalidEventError(
+            f"dice roll counter {payload.roll_counter} does not match expected "
+            f"roll counter {expected_counter}"
+        )
+    if not 1 <= payload.die_1 <= 6 or not 1 <= payload.die_2 <= 6:
+        raise InvalidEventError("dice values must be between 1 and 6")
+    if payload.total != payload.die_1 + payload.die_2:
+        raise InvalidEventError("dice total must equal die_1 plus die_2")
+    if payload.is_doubles != (payload.die_1 == payload.die_2):
+        raise InvalidEventError("dice doubles flag must match dice values")
+
+
+def _validate_deck_shuffled_payload(state: GameState, payload: DeckShuffledPayload) -> None:
+    expected_counter = _shuffle_counter(state, payload.deck) + 1
+    if payload.shuffle_counter != expected_counter:
+        raise InvalidEventError(
+            f"{payload.deck} shuffle counter {payload.shuffle_counter} does not match expected "
+            f"shuffle counter {expected_counter}"
+        )
+    _validate_full_deck_membership(payload.deck, payload.draw_pile)
+
+
+def _validate_card_drawn_payload(state: GameState, payload: CardDrawnPayload) -> DeckState:
+    expected_counter = _draw_counter(state, payload.deck) + 1
+    if payload.draw_counter != expected_counter:
+        raise InvalidEventError(
+            f"{payload.deck} draw counter {payload.draw_counter} does not match expected "
+            f"draw counter {expected_counter}"
+        )
+
+    deck_state = _deck_state_for_name(state, payload.deck)
+    if not deck_state.draw_pile:
+        raise InvalidEventError(f"{payload.deck} draw pile is empty")
+    expected_card_id = deck_state.draw_pile[0]
+    if payload.card_id != expected_card_id:
+        raise InvalidEventError(
+            f"card draw {payload.card_id} does not match current top card {expected_card_id}"
+        )
+    return deck_state
+
+
+def _validate_full_deck_membership(deck_name: str, card_ids: tuple[str, ...]) -> None:
+    expected_card_ids = _card_ids_for_deck(deck_name)
+    event_card_ids = set(card_ids)
     unknown_card_ids = event_card_ids - expected_card_ids
     if unknown_card_ids:
         unknown_card_id = sorted(unknown_card_ids)[0]
         raise InvalidEventError(f"unknown card {unknown_card_id}")
+    if len(card_ids) != len(set(card_ids)):
+        raise InvalidEventError(f"{deck_name} deck cannot contain duplicate cards")
     if event_card_ids != expected_card_ids:
-        raise InvalidEventError(f"{payload.deck} deck state must contain every deck card exactly once")
+        raise InvalidEventError(f"{deck_name} deck state must contain every deck card exactly once")
 
 
 def _validate_player_card_ids(card_ids: tuple[str, ...]) -> None:
@@ -346,6 +435,50 @@ def _card_ids_for_deck(deck_name: str) -> set[str]:
 def _all_card_ids() -> set[str]:
     data = load_classic_monopoly_data()
     return {card.id for card in (*data.decks.chance, *data.decks.community_chest)}
+
+
+def _deck_state_for_name(state: GameState, deck_name: str) -> DeckState:
+    if deck_name == "chance":
+        return state.decks.chance
+    if deck_name == "community_chest":
+        return state.decks.community_chest
+    raise InvalidEventError(f"unknown deck {deck_name}")
+
+
+def _draw_counter(state: GameState, deck_name: str) -> int:
+    if deck_name == "chance":
+        return state.rng.chance_draw_count
+    if deck_name == "community_chest":
+        return state.rng.community_chest_draw_count
+    raise InvalidEventError(f"unknown deck {deck_name}")
+
+
+def _shuffle_counter(state: GameState, deck_name: str) -> int:
+    if deck_name == "chance":
+        return state.rng.chance_shuffle_count
+    if deck_name == "community_chest":
+        return state.rng.community_chest_shuffle_count
+    raise InvalidEventError(f"unknown deck {deck_name}")
+
+
+def _draw_counter_field(deck_name: str) -> str:
+    if deck_name == "chance":
+        return "chance_draw_count"
+    if deck_name == "community_chest":
+        return "community_chest_draw_count"
+    raise InvalidEventError(f"unknown deck {deck_name}")
+
+
+def _shuffle_counter_field(deck_name: str) -> str:
+    if deck_name == "chance":
+        return "chance_shuffle_count"
+    if deck_name == "community_chest":
+        return "community_chest_shuffle_count"
+    raise InvalidEventError(f"unknown deck {deck_name}")
+
+
+def _replace_rng_state(state: GameState, updates: Mapping[str, object]) -> RngState:
+    return RngState.model_validate({**state.rng.model_dump(mode="python"), **updates})
 
 
 def _build_game_state(state: GameState, updates: Mapping[str, object]) -> GameState:
