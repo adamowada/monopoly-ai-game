@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette import status
 
-from app.db.metadata import deals, games, negotiations, players
+from app.db.metadata import action_idempotency_keys, deals, games, negotiations, players, rejected_actions
 from app.db.persistence import (
     AcceptedEventRecord,
     AcceptedEventTemplate,
@@ -304,103 +305,154 @@ async def get_legal_actions(
 
 
 @router.post("/{game_id}/actions", response_model=ActionAcceptedResponse | dict[str, Any])
-async def submit_action(game_id: UUID, request: Request) -> ActionAcceptedResponse | JSONResponse:
+async def submit_action(
+    game_id: UUID,
+    request: Request,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+) -> JSONResponse:
+    normalized_idempotency_key = idempotency_key.strip()
+    if not normalized_idempotency_key:
+        return _missing_idempotency_key_response()
+
     session_factory = _session_factory(request)
     persistence = EventPersistence(session_factory)
-    audit = RejectedActionAudit(session_factory)
+    raw_body = await request.body()
+    raw_payload, parse_errors = _request_payload_from_body(raw_body)
+    request_hash = _request_hash(raw_body=raw_body, raw_payload=raw_payload, parse_errors=parse_errors)
 
-    try:
-        state = await persistence.replay_from_latest_snapshot(game_id)
-    except GameNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
+    async with session_factory() as session:
+        async with session.begin():
+            try:
+                state = await persistence.replay_current_state_for_update(session, game_id)
+            except GameNotFoundError as exc:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
 
-    raw_payload, parse_errors = await _request_payload(request)
-    if parse_errors:
-        return await _persist_and_respond_to_rejection(
-            audit=audit,
-            game_id=game_id,
-            state=state,
-            raw_payload=raw_payload,
-            actor_id=_raw_actor_id(raw_payload),
-            action_type=_raw_action_type(raw_payload),
-            submitted_payload=_raw_action_payload(raw_payload),
-            validation_errors=parse_errors,
-        )
-
-    try:
-        submission = ActionSubmission.model_validate(raw_payload)
-    except ValidationError as exc:
-        return await _persist_and_respond_to_rejection(
-            audit=audit,
-            game_id=game_id,
-            state=state,
-            raw_payload=raw_payload,
-            actor_id=_raw_actor_id(raw_payload),
-            action_type=_raw_action_type(raw_payload),
-            submitted_payload=_raw_action_payload(raw_payload),
-            validation_errors=_pydantic_errors(exc),
-        )
-
-    action = GameAction(
-        actor_id=submission.actor_id,
-        type=submission.type,
-        payload=submission.payload,
-        expected_state_hash=submission.expected_state_hash,
-        expected_event_sequence=submission.expected_event_sequence,
-    )
-    try:
-        execution = execute_action(state, action, f"api-{game_id}-{state.event_sequence}")
-        result = await persistence.append_accepted_events(
-            game_id=game_id,
-            actor_player_id=submission.actor_id,
-            event_templates=[
-                AcceptedEventTemplate(
-                    event_type=event.type,
-                    payload=event.payload.model_dump(mode="json"),
+            existing_idempotency = await _load_idempotency_key(
+                session=session,
+                game_id=game_id,
+                idempotency_key=normalized_idempotency_key,
+            )
+            if existing_idempotency is not None:
+                if existing_idempotency["request_hash"] != request_hash:
+                    return _idempotency_conflict_response(raw_payload)
+                response_payload = dict(existing_idempotency["response_payload"])
+                return JSONResponse(
+                    status_code=_status_code_for_persisted_response(response_payload),
+                    content=response_payload,
                 )
-                for event in execution.events
-            ],
-            expected_base_sequence=state.event_sequence,
-            expected_base_state_hash=state.state_hash(),
-        )
-    except ActionValidationError as exc:
-        return await _persist_and_respond_to_rejection(
-            audit=audit,
-            game_id=game_id,
-            state=state,
-            raw_payload=submission.model_dump(mode="json"),
-            actor_id=submission.actor_id,
-            action_type=submission.type,
-            submitted_payload=submission.payload,
-            validation_errors=[issue.model_dump(mode="json") for issue in exc.errors],
-        )
-    except StaleEventSequenceError:
-        current_state = await persistence.replay_from_latest_snapshot(game_id)
-        return await _persist_and_respond_to_rejection(
-            audit=audit,
-            game_id=game_id,
-            state=current_state,
-            raw_payload=submission.model_dump(mode="json"),
-            actor_id=submission.actor_id,
-            action_type=submission.type,
-            submitted_payload=submission.payload,
-            validation_errors=[
-                {
-                    "code": "stale_action",
-                    "message": "action expected state no longer matches current state",
-                    "field": "expected_state_hash",
-                }
-            ],
-        )
 
-    return ActionAcceptedResponse(
-        status="accepted",
-        game_id=game_id,
-        accepted_events=[_event_response(record) for record in result.events],
-        state=_state_payload(result.state),
-        state_hash=result.state.state_hash(),
-        event_sequence=result.state.event_sequence,
-    )
+            if parse_errors:
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=raw_payload,
+                    actor_id=_raw_actor_id(raw_payload),
+                    action_type=_raw_action_type(raw_payload),
+                    submitted_payload=_raw_action_payload(raw_payload),
+                    validation_errors=parse_errors,
+                )
+
+            try:
+                submission = ActionSubmission.model_validate(raw_payload)
+            except ValidationError as exc:
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=raw_payload,
+                    actor_id=_raw_actor_id(raw_payload),
+                    action_type=_raw_action_type(raw_payload),
+                    submitted_payload=_raw_action_payload(raw_payload),
+                    validation_errors=_pydantic_errors(exc),
+                )
+
+            action = GameAction(
+                actor_id=submission.actor_id,
+                type=submission.type,
+                payload=submission.payload,
+                expected_state_hash=submission.expected_state_hash,
+                expected_event_sequence=submission.expected_event_sequence,
+            )
+            try:
+                execution = execute_action(state, action, f"api-{game_id}-{state.event_sequence}")
+                result = await persistence.append_accepted_events_to_locked_state(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    actor_player_id=submission.actor_id,
+                    event_templates=[
+                        AcceptedEventTemplate(
+                            event_type=event.type,
+                            payload=event.payload.model_dump(mode="json"),
+                        )
+                        for event in execution.events
+                    ],
+                    expected_base_sequence=submission.expected_event_sequence,
+                    expected_base_state_hash=submission.expected_state_hash,
+                )
+            except ActionValidationError as exc:
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[issue.model_dump(mode="json") for issue in exc.errors],
+                )
+            except StaleEventSequenceError:
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[
+                        {
+                            "code": "stale_action",
+                            "message": "action expected state no longer matches current state",
+                            "field": "expected_state_hash",
+                        }
+                    ],
+                )
+
+            response_payload = ActionAcceptedResponse(
+                status="accepted",
+                game_id=game_id,
+                accepted_events=[_event_response(record) for record in result.events],
+                state=_state_payload(result.state),
+                state_hash=result.state.state_hash(),
+                event_sequence=result.state.event_sequence,
+            ).model_dump(mode="json")
+            await _persist_idempotency_key(
+                session=session,
+                game_id=game_id,
+                actor_player_id=await _resolve_actor_player_id_in_session(
+                    session=session,
+                    game_id=game_id,
+                    actor_id=submission.actor_id,
+                ),
+                idempotency_key=normalized_idempotency_key,
+                request_hash=request_hash,
+                outcome_status="accepted",
+                response_payload=response_payload,
+                created_event_sequence_start=result.events[0].sequence,
+                created_event_sequence_end=result.events[-1].sequence,
+                rejected_action_id=None,
+            )
+            return JSONResponse(status_code=status.HTTP_200_OK, content=response_payload)
 
 
 @router.get("/{game_id}/events", response_model=EventsResponse)
@@ -680,11 +732,13 @@ async def _next_deal_version(
         return int(result.scalar_one()) + 1
 
 
-async def _persist_and_respond_to_rejection(
+async def _persist_idempotent_rejection_response(
     *,
-    audit: RejectedActionAudit,
+    session: AsyncSession,
     game_id: UUID,
     state: GameState,
+    idempotency_key: str,
+    request_hash: str,
     raw_payload: object,
     actor_id: str | None,
     action_type: str,
@@ -692,9 +746,14 @@ async def _persist_and_respond_to_rejection(
     validation_errors: Sequence[Mapping[str, Any]],
 ) -> JSONResponse:
     reason_code = _reason_code(validation_errors)
-    actor_player_id = await audit.resolve_actor_player_id(game_id=game_id, actor_id=actor_id)
+    actor_player_id = await _resolve_actor_player_id_in_session(
+        session=session,
+        game_id=game_id,
+        actor_id=actor_id,
+    )
     legal_action_context = _legal_action_context(state, actor_id)
-    record = await audit.persist_rejected_action(
+    rejected_row = await _persist_rejected_action_in_session(
+        session=session,
         game_id=game_id,
         actor_player_id=actor_player_id,
         action_type=action_type,
@@ -705,23 +764,130 @@ async def _persist_and_respond_to_rejection(
         phase=state.turn.phase.value,
         state_hash=state.state_hash(),
     )
+    response_payload = _rejection_response_payload(
+        rejected_action_id=rejected_row["id"],
+        reason_code=reason_code,
+        validation_errors=validation_errors,
+        legal_action_context=legal_action_context,
+        submitted_action=raw_payload,
+    )
+    await _persist_idempotency_key(
+        session=session,
+        game_id=game_id,
+        actor_player_id=actor_player_id,
+        idempotency_key=idempotency_key,
+        request_hash=request_hash,
+        outcome_status="rejected",
+        response_payload=response_payload,
+        created_event_sequence_start=None,
+        created_event_sequence_end=None,
+        rejected_action_id=rejected_row["id"],
+    )
+    return JSONResponse(status_code=_status_code_for_reason(reason_code), content=response_payload)
 
-    return JSONResponse(
-        status_code=_status_code_for_reason(reason_code),
-        content={
-            "status": "rejected",
-            "rejected_action_id": str(record.id),
-            "reason_code": reason_code,
-            "validation_errors": [dict(error) for error in validation_errors],
-            "legal_action_context": legal_action_context,
-            "submitted_action": raw_payload,
-        },
+
+async def _persist_rejected_action_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    actor_player_id: UUID | None,
+    action_type: str,
+    payload: Mapping[str, Any],
+    reason_code: str,
+    validation_errors: Sequence[Mapping[str, Any]],
+    legal_action_context: Mapping[str, Any] | None,
+    phase: str | None,
+    state_hash: str | None,
+) -> Mapping[str, Any]:
+    result = await session.execute(
+        rejected_actions.insert()
+        .values(
+            game_id=game_id,
+            actor_player_id=actor_player_id,
+            action_type=action_type,
+            payload=dict(payload),
+            reason_code=reason_code,
+            validation_errors=[dict(error) for error in validation_errors],
+            legal_action_context=None if legal_action_context is None else dict(legal_action_context),
+            phase=phase,
+            state_hash=state_hash,
+        )
+        .returning(rejected_actions)
+    )
+    return dict(result.mappings().one())
+
+
+async def _load_idempotency_key(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    idempotency_key: str,
+) -> Mapping[str, Any] | None:
+    result = await session.execute(
+        sa.select(action_idempotency_keys)
+        .where(
+            action_idempotency_keys.c.game_id == game_id,
+            action_idempotency_keys.c.idempotency_key == idempotency_key,
+        )
+        .with_for_update()
+    )
+    row = result.mappings().first()
+    return None if row is None else dict(row)
+
+
+async def _persist_idempotency_key(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    actor_player_id: UUID | None,
+    idempotency_key: str,
+    request_hash: str,
+    outcome_status: str,
+    response_payload: Mapping[str, Any],
+    created_event_sequence_start: int | None,
+    created_event_sequence_end: int | None,
+    rejected_action_id: UUID | None,
+) -> None:
+    await session.execute(
+        action_idempotency_keys.insert().values(
+            game_id=game_id,
+            actor_player_id=actor_player_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            status=outcome_status,
+            response_payload=dict(response_payload),
+            created_event_sequence_start=created_event_sequence_start,
+            created_event_sequence_end=created_event_sequence_end,
+            rejected_action_id=rejected_action_id,
+        )
     )
 
 
-async def _request_payload(request: Request) -> tuple[object, list[dict[str, str]]]:
+async def _resolve_actor_player_id_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    actor_id: str | None,
+) -> UUID | None:
+    if actor_id is None:
+        return None
     try:
-        payload: object = await request.json()
+        normalized_actor_id = UUID(str(actor_id))
+    except ValueError:
+        return None
+
+    result = await session.execute(
+        sa.select(players.c.id).where(
+            players.c.game_id == game_id,
+            players.c.id == normalized_actor_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+def _request_payload_from_body(raw_body: bytes) -> tuple[object, list[dict[str, str]]]:
+    try:
+        payload: object = json.loads(raw_body)
     except json.JSONDecodeError as exc:
         return {}, [
             {
@@ -740,6 +906,90 @@ async def _request_payload(request: Request) -> tuple[object, list[dict[str, str
             }
         ]
     return dict(payload), []
+
+
+def _request_hash(
+    *,
+    raw_body: bytes,
+    raw_payload: object,
+    parse_errors: Sequence[Mapping[str, Any]],
+) -> str:
+    if parse_errors:
+        payload_bytes = raw_body
+    else:
+        payload_bytes = json.dumps(
+            raw_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    return hashlib.sha256(payload_bytes).hexdigest()
+
+
+def _status_code_for_persisted_response(response_payload: Mapping[str, Any]) -> int:
+    if response_payload.get("status") == "accepted":
+        return status.HTTP_200_OK
+    reason_code = response_payload.get("reason_code")
+    if isinstance(reason_code, str):
+        return _status_code_for_reason(reason_code)
+    return status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+def _rejection_response_payload(
+    *,
+    rejected_action_id: UUID,
+    reason_code: str,
+    validation_errors: Sequence[Mapping[str, Any]],
+    legal_action_context: Mapping[str, Any] | None,
+    submitted_action: object,
+) -> dict[str, Any]:
+    return {
+        "status": "rejected",
+        "rejected_action_id": str(rejected_action_id),
+        "reason_code": reason_code,
+        "validation_errors": [dict(error) for error in validation_errors],
+        "legal_action_context": legal_action_context,
+        "submitted_action": submitted_action,
+    }
+
+
+def _idempotency_conflict_response(raw_payload: object) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "status": "rejected",
+            "reason_code": "idempotency_key_conflict",
+            "validation_errors": [
+                {
+                    "code": "idempotency_key_conflict",
+                    "message": "idempotency key was already used with a different request body",
+                    "field": "Idempotency-Key",
+                }
+            ],
+            "submitted_action": raw_payload,
+        },
+    )
+
+
+def _missing_idempotency_key_payload() -> dict[str, Any]:
+    return {
+        "status": "rejected",
+        "reason_code": "missing_idempotency_key",
+        "validation_errors": [
+            {
+                "code": "missing_idempotency_key",
+                "message": "POST /games/{game_id}/actions requires an Idempotency-Key header",
+                "field": "Idempotency-Key",
+            }
+        ],
+    }
+
+
+def _missing_idempotency_key_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content=_missing_idempotency_key_payload(),
+    )
 
 
 def _state_response(game_id: UUID, state: GameState) -> GameStateResponse:
@@ -844,8 +1094,10 @@ def _reason_code(validation_errors: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _status_code_for_reason(reason_code: str) -> int:
-    if reason_code in {"stale_action", "mistimed_action"}:
+    if reason_code in {"stale_action", "mistimed_action", "idempotency_key_conflict"}:
         return status.HTTP_409_CONFLICT
+    if reason_code == "missing_idempotency_key":
+        return status.HTTP_400_BAD_REQUEST
     if reason_code == "unknown_action":
         return status.HTTP_400_BAD_REQUEST
     return 422

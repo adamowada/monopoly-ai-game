@@ -89,7 +89,11 @@ async def run_verification(database_url: str) -> None:
             transport=httpx.ASGITransport(app=app),
             base_url="http://verify.local",
         ) as client:
-            post_response = await client.post(f"/games/{VERIFY_GAME_ID}/actions", json=invalid_action)
+            post_response = await client.post(
+                f"/games/{VERIFY_GAME_ID}/actions",
+                headers={"Idempotency-Key": "stage-4.3-verify-rejected-action"},
+                json=invalid_action,
+            )
             if post_response.status_code != 422:
                 raise RuntimeError(
                     f"expected rejected action HTTP 422, got {post_response.status_code}: "

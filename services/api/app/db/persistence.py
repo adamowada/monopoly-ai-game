@@ -200,60 +200,103 @@ class EventPersistence:
         async with self._session_factory() as session:
             async with session.begin():
                 state = await self._replay_current_state_for_append(session, normalized_game_id)
-                if expected_base_sequence is not None and state.event_sequence != expected_base_sequence:
-                    raise StaleEventSequenceError(
-                        f"expected base sequence {expected_base_sequence} does not match current "
-                        f"sequence {state.event_sequence}"
+                return await self.append_accepted_events_to_locked_state(
+                    session=session,
+                    game_id=normalized_game_id,
+                    state=state,
+                    actor_player_id=normalized_actor_player_id,
+                    event_templates=event_templates,
+                    expected_base_sequence=expected_base_sequence,
+                    expected_base_state_hash=expected_base_state_hash,
+                    snapshot_interval=effective_snapshot_interval,
+                )
+
+    async def replay_current_state_for_update(
+        self,
+        session: AsyncSession,
+        game_id: UUID | str,
+    ) -> GameState:
+        normalized_game_id = _coerce_uuid(game_id)
+        return await self._replay_current_state_for_append(session, normalized_game_id)
+
+    async def append_accepted_events_to_locked_state(
+        self,
+        *,
+        session: AsyncSession,
+        game_id: UUID | str,
+        state: GameState,
+        event_templates: Sequence[AcceptedEventTemplate],
+        actor_player_id: UUID | str | None = None,
+        expected_base_sequence: int | None = None,
+        expected_base_state_hash: str | None = None,
+        snapshot_interval: int | None = None,
+    ) -> EventAppendManyResult:
+        if not event_templates:
+            raise EventPersistenceError("at least one accepted event is required")
+
+        normalized_game_id = _coerce_uuid(game_id)
+        normalized_actor_player_id = (
+            None if actor_player_id is None else _coerce_uuid(actor_player_id)
+        )
+        effective_snapshot_interval = (
+            self._snapshot_interval
+            if snapshot_interval is None
+            else _validate_snapshot_interval(snapshot_interval)
+        )
+
+        if expected_base_sequence is not None and state.event_sequence != expected_base_sequence:
+            raise StaleEventSequenceError(
+                f"expected base sequence {expected_base_sequence} does not match current "
+                f"sequence {state.event_sequence}"
+            )
+        if expected_base_state_hash is not None and state.state_hash() != expected_base_state_hash:
+            raise StaleEventSequenceError("expected base state hash does not match current state")
+
+        records: list[AcceptedEventRecord] = []
+        current_state = state
+        for template in event_templates:
+            next_sequence = current_state.event_sequence + 1
+            event_id = uuid4()
+            event = _build_game_event(
+                event_id=event_id,
+                sequence=next_sequence,
+                event_type=template.event_type,
+                payload=template.payload,
+            )
+            next_state = apply_event(current_state, event)
+            state_hash = next_state.state_hash()
+
+            result = await session.execute(
+                game_events.insert()
+                .values(
+                    id=event_id,
+                    game_id=normalized_game_id,
+                    sequence=next_sequence,
+                    actor_player_id=normalized_actor_player_id,
+                    event_type=event.type,
+                    payload=_payload_for_storage(event.payload),
+                    state_hash=state_hash,
+                )
+                .returning(game_events)
+            )
+            records.append(_accepted_event_record_from_row(dict(result.mappings().one())))
+
+            if next_sequence % effective_snapshot_interval == 0:
+                await session.execute(
+                    game_snapshots.insert().values(
+                        game_id=normalized_game_id,
+                        last_event_id=event_id,
+                        event_sequence=next_sequence,
+                        state_payload=next_state.model_dump(mode="json"),
+                        state_hash=state_hash,
                     )
-                if expected_base_state_hash is not None and state.state_hash() != expected_base_state_hash:
-                    raise StaleEventSequenceError(
-                        "expected base state hash does not match current state"
-                    )
+                )
 
-                records: list[AcceptedEventRecord] = []
-                for template in event_templates:
-                    next_sequence = state.event_sequence + 1
-                    event_id = uuid4()
-                    event = _build_game_event(
-                        event_id=event_id,
-                        sequence=next_sequence,
-                        event_type=template.event_type,
-                        payload=template.payload,
-                    )
-                    next_state = apply_event(state, event)
-                    state_hash = next_state.state_hash()
+            current_state = next_state
 
-                    result = await session.execute(
-                        game_events.insert()
-                        .values(
-                            id=event_id,
-                            game_id=normalized_game_id,
-                            sequence=next_sequence,
-                            actor_player_id=normalized_actor_player_id,
-                            event_type=event.type,
-                            payload=_payload_for_storage(event.payload),
-                            state_hash=state_hash,
-                        )
-                        .returning(game_events)
-                    )
-                    records.append(_accepted_event_record_from_row(dict(result.mappings().one())))
+        await _update_game_current_state(session, normalized_game_id, current_state)
 
-                    if next_sequence % effective_snapshot_interval == 0:
-                        await session.execute(
-                            game_snapshots.insert().values(
-                                game_id=normalized_game_id,
-                                last_event_id=event_id,
-                                event_sequence=next_sequence,
-                                state_payload=next_state.model_dump(mode="json"),
-                                state_hash=state_hash,
-                            )
-                        )
-
-                    state = next_state
-
-                await _update_game_current_state(session, normalized_game_id, state)
-
-                return EventAppendManyResult(events=tuple(records), state=state)
+        return EventAppendManyResult(events=tuple(records), state=current_state)
 
     async def list_accepted_events(self, game_id: UUID | str) -> list[AcceptedEventRecord]:
         normalized_game_id = _coerce_uuid(game_id)

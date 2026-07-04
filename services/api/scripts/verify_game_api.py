@@ -70,7 +70,11 @@ async def verify(database_url: str) -> None:
         legal_actions: list[dict[str, Any]] = legal_response.json()["legal_actions"]
         roll_action = next(action for action in legal_actions if action["type"] == "ROLL_DICE")
 
-        accepted_response = await client.post(f"/games/{game_id}/actions", json=roll_action)
+        accepted_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-verify-roll"},
+            json=roll_action,
+        )
         accepted_response.raise_for_status()
         accepted = accepted_response.json()
         if not accepted["accepted_events"]:
@@ -79,6 +83,7 @@ async def verify(database_url: str) -> None:
         invalid_before = await _count(app.state.database_engine, game_events, game_id)
         invalid_response = await client.post(
             f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-verify-invalid"},
             json={
                 "actor_id": player_ids[0],
                 "type": "BUY_PROPERTY",

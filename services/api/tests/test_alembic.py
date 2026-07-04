@@ -12,12 +12,14 @@ from app.db.metadata import metadata
 API_ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_REVISION = "0001_create_foundation_metadata"
 STAGE_41_REVISION = "0002_create_domain_audit_schema"
+STAGE_45_REVISION = "0003_add_action_idempotency_keys"
 REQUIRED_DOMAIN_TABLES = {
     "games",
     "players",
     "game_events",
     "game_snapshots",
     "rejected_actions",
+    "action_idempotency_keys",
     "negotiations",
     "negotiation_messages",
     "deals",
@@ -55,12 +57,12 @@ def test_alembic_head_includes_stage_41_domain_audit_schema() -> None:
 
     head = script.get_current_head()
 
-    assert head == STAGE_41_REVISION
+    assert head == STAGE_45_REVISION
     assert head != FOUNDATION_REVISION
     revision = script.get_revision(head)
     assert revision is not None
-    assert revision.down_revision == FOUNDATION_REVISION
-    assert "domain and audit schema" in (revision.module.__doc__ or "")
+    assert revision.down_revision == STAGE_41_REVISION
+    assert "action idempotency keys" in (revision.module.__doc__ or "")
 
 
 def test_foundation_metadata_table_is_in_sqlalchemy_metadata() -> None:
@@ -102,8 +104,10 @@ def test_accepted_events_and_rejected_audits_are_modeled_separately() -> None:
 
 def test_stage_41_metadata_defines_required_indexes_and_constraints() -> None:
     ai_decisions = metadata.tables["ai_decisions"]
+    action_idempotency_keys = metadata.tables["action_idempotency_keys"]
 
     assert ("game_id", "sequence") in unique_constraint_columns("game_events")
+    assert ("game_id", "idempotency_key") in unique_constraint_columns("action_idempotency_keys")
 
     assert index_columns("game_events", "ix_game_events_game_sequence") == ("game_id", "sequence")
     assert index_columns("game_events", "ix_game_events_actor_player_id") == ("actor_player_id",)
@@ -133,5 +137,12 @@ def test_stage_41_metadata_defines_required_indexes_and_constraints() -> None:
         "player_id",
         "created_at",
     )
+    assert index_columns("action_idempotency_keys", "ix_action_idempotency_keys_game_key") == (
+        "game_id",
+        "idempotency_key",
+    )
+    assert "request_hash" in action_idempotency_keys.c
+    assert "response_payload" in action_idempotency_keys.c
+    assert "rejected_action_id" in action_idempotency_keys.c
     assert "accepted_event_id" in ai_decisions.c
     assert "rejected_action_id" in ai_decisions.c

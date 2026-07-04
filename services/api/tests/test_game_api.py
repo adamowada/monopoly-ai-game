@@ -216,7 +216,11 @@ async def test_legal_action_commits_real_ordered_events_without_rejection(
             if action["type"] == "ROLL_DICE"
         )
 
-        action_response = await client.post(f"/games/{game_id}/actions", json=roll_action)
+        action_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-roll"},
+            json=roll_action,
+        )
         events_response = await client.get(f"/games/{game_id}/events")
 
         assert action_response.status_code == 200
@@ -251,6 +255,7 @@ async def test_illegal_action_creates_rejection_without_appending_event(
         before_events = await table_count(session_factory, game_events, str(game_id))
         response = await client.post(
             f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-illegal-buy"},
             json={
                 "actor_id": actor_id,
                 "type": "BUY_PROPERTY",
@@ -282,9 +287,14 @@ async def test_malformed_and_stale_actions_are_audited_once(
     game_id = created["id"]
     actor_id = created["players"][0]["id"]
     try:
-        malformed = await client.post(f"/games/{game_id}/actions", json=["ROLL_DICE"])
+        malformed = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-malformed"},
+            json=["ROLL_DICE"],
+        )
         stale = await client.post(
             f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-stale"},
             json={
                 "actor_id": actor_id,
                 "type": "ROLL_DICE",
@@ -406,6 +416,7 @@ async def test_sse_stream_returns_existing_accepted_events(
         )
         await client.post(
             f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-sse-roll"},
             json=next(
                 action
                 for action in legal_actions.json()["legal_actions"]
@@ -444,3 +455,11 @@ def test_openapi_includes_stage_4_4_endpoints(api_app: FastAPI) -> None:
     for method, path in expected:
         assert path in paths
         assert method in paths[path]
+
+    action_parameters = paths["/games/{game_id}/actions"]["post"]["parameters"]
+    idempotency_header = next(
+        parameter
+        for parameter in action_parameters
+        if parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_header["required"] is True

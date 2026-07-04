@@ -6,10 +6,15 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from starlette import status
+from starlette.requests import Request
 
-from app.api.games import router as games_router
+from app.api.games import _missing_idempotency_key_payload, router as games_router
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.db.session import create_database_engine, create_session_factory
@@ -62,6 +67,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(games_router)
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ):
+        if _is_missing_action_idempotency_key(request, exc):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=_missing_idempotency_key_payload(),
+            )
+        return await request_validation_exception_handler(request, exc)
+
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
         return HealthResponse(
@@ -73,6 +90,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     return app
+
+
+def _is_missing_action_idempotency_key(request: Request, exc: RequestValidationError) -> bool:
+    if request.method != "POST":
+        return False
+    if not request.url.path.startswith("/games/") or not request.url.path.endswith("/actions"):
+        return False
+    return any(
+        tuple(error.get("loc", ())) == ("header", "Idempotency-Key")
+        for error in exc.errors()
+    )
 
 
 app = create_app()

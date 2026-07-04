@@ -697,7 +697,9 @@ export interface operations {
     submit_action_games__game_id__actions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path: {
                 game_id: string;
             };

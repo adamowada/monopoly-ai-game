@@ -222,6 +222,7 @@ async def test_illegal_api_action_creates_exactly_one_audit_row(
         ) as client:
             response = await client.post(
                 f"/games/{fixture.game_id}/actions",
+                headers={"Idempotency-Key": "stage-4.3-illegal-api-action"},
                 json=action_payload(
                     fixture,
                     fixture.player_ids[0],
@@ -266,8 +267,16 @@ async def test_malformed_api_action_creates_one_audit_without_event_or_snapshot(
             transport=httpx.ASGITransport(app=api_app),
             base_url="http://testserver",
         ) as client:
-            response = await client.post(f"/games/{fixture.game_id}/actions", json=malformed)
-            repeat_response = await client.post(f"/games/{fixture.game_id}/actions", json=malformed)
+            response = await client.post(
+                f"/games/{fixture.game_id}/actions",
+                headers={"Idempotency-Key": "stage-4.3-malformed-one"},
+                json=malformed,
+            )
+            repeat_response = await client.post(
+                f"/games/{fixture.game_id}/actions",
+                headers={"Idempotency-Key": "stage-4.3-malformed-two"},
+                json=malformed,
+            )
 
         rows = await fetch_rejections(session_factory, fixture.game_id)
 
@@ -295,10 +304,12 @@ async def test_rejection_records_are_queryable_by_game_and_actor(
         ) as client:
             await client.post(
                 f"/games/{fixture.game_id}/actions",
+                headers={"Idempotency-Key": "stage-4.3-unknown-action"},
                 json=action_payload(fixture, fixture.player_ids[0], "DANCE"),
             )
             await client.post(
                 f"/games/{fixture.game_id}/actions",
+                headers={"Idempotency-Key": "stage-4.3-mistimed-action"},
                 json=action_payload(fixture, fixture.player_ids[1], "ROLL_DICE"),
             )
 
@@ -337,6 +348,7 @@ async def test_legal_action_creates_accepted_event_without_rejection(
         ) as client:
             response = await client.post(
                 f"/games/{fixture.game_id}/actions",
+                headers={"Idempotency-Key": "stage-4.3-legal-action"},
                 json=action_payload(fixture, fixture.player_ids[0], "ROLL_DICE"),
             )
 

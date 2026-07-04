@@ -172,6 +172,50 @@ rejected_actions = sa.Table(
     sa.Index("ix_rejected_actions_game_phase", "game_id", "phase"),
 )
 
+action_idempotency_keys = sa.Table(
+    "action_idempotency_keys",
+    metadata,
+    uuid_pk(),
+    sa.Column(
+        "game_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("games.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "actor_player_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("players.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column("idempotency_key", sa.String(length=255), nullable=False),
+    sa.Column("request_hash", sa.String(length=128), nullable=False),
+    sa.Column("status", sa.String(length=50), nullable=False),
+    required_jsonb("response_payload"),
+    sa.Column("created_event_sequence_start", sa.BigInteger, nullable=True),
+    sa.Column("created_event_sequence_end", sa.BigInteger, nullable=True),
+    sa.Column(
+        "rejected_action_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("rejected_actions.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    created_at(),
+    updated_at(),
+    sa.UniqueConstraint("game_id", "idempotency_key", name="uq_action_idempotency_keys_game_key"),
+    sa.CheckConstraint(
+        "created_event_sequence_start IS NULL OR created_event_sequence_start > 0",
+        name="ck_action_idempotency_keys_sequence_start_positive",
+    ),
+    sa.CheckConstraint(
+        "created_event_sequence_end IS NULL OR created_event_sequence_end >= created_event_sequence_start",
+        name="ck_action_idempotency_keys_sequence_end_after_start",
+    ),
+    sa.Index("ix_action_idempotency_keys_game_key", "game_id", "idempotency_key"),
+    sa.Index("ix_action_idempotency_keys_rejected_action_id", "rejected_action_id"),
+    sa.Index("ix_action_idempotency_keys_actor_created_at", "actor_player_id", "created_at"),
+)
+
 negotiations = sa.Table(
     "negotiations",
     metadata,
