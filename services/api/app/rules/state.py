@@ -7,11 +7,12 @@ from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.rules.atomic import AtomicResolutionKind
+from app.rules.phases import TurnPhase
 from app.rules.static_data import load_classic_monopoly_data
 
 
 PlayerKind: TypeAlias = Literal["human", "ai"]
-TurnPhase: TypeAlias = Literal["START_TURN"]
 
 INITIAL_PLAYER_CASH = 1500
 GAME_STATE_SCHEMA_VERSION = "game-state-v1"
@@ -99,7 +100,20 @@ class TurnState(StateModel):
 
 
 class ActivePaymentState(StateModel):
-    pass
+    debtor_id: str = Field(min_length=1)
+    creditor_id: str | None = Field(default=None, min_length=1)
+    amount_owed: int = Field(gt=0)
+    amount_paid: int = Field(ge=0)
+    reason: str = Field(min_length=1)
+    negotiation_allowed: bool
+
+    @model_validator(mode="after")
+    def validate_payment_state(self) -> Self:
+        if self.creditor_id is not None and self.creditor_id == self.debtor_id:
+            raise ValueError("active payment creditor cannot match debtor")
+        if self.amount_paid > self.amount_owed:
+            raise ValueError("active payment amount_paid cannot exceed amount_owed")
+        return self
 
 
 class ActiveAuctionState(StateModel):
@@ -125,6 +139,11 @@ class ActiveBankruptcyState(StateModel):
     pass
 
 
+class ActiveAtomicResolutionState(StateModel):
+    kind: AtomicResolutionKind
+    actor_id: str | None = Field(default=None, min_length=1)
+
+
 class GameState(StateModel):
     schema_version: Literal["game-state-v1"] = GAME_STATE_SCHEMA_VERSION
     game_id: str = Field(min_length=1)
@@ -140,6 +159,7 @@ class GameState(StateModel):
     active_auction: ActiveAuctionState | None = None
     active_negotiation: ActiveNegotiationState | None = None
     active_bankruptcy: ActiveBankruptcyState | None = None
+    active_atomic_resolution: ActiveAtomicResolutionState | None = None
     event_sequence: int = Field(default=0, ge=0)
     applied_event_ids: tuple[str, ...] = ()
 
@@ -179,6 +199,22 @@ class GameState(StateModel):
             unknown_passed_ids = set(self.active_auction.passed_player_ids) - owner_ids
             if unknown_passed_ids:
                 raise ValueError("active auction passed player ids must reference existing players")
+
+        if (
+            self.active_atomic_resolution is not None
+            and self.active_atomic_resolution.actor_id is not None
+            and self.active_atomic_resolution.actor_id not in owner_ids
+        ):
+            raise ValueError("active atomic resolution actor must reference an existing player")
+
+        if self.active_payment is not None:
+            if self.active_payment.debtor_id not in owner_ids:
+                raise ValueError("active payment debtor must reference an existing player")
+            if (
+                self.active_payment.creditor_id is not None
+                and self.active_payment.creditor_id not in owner_ids
+            ):
+                raise ValueError("active payment creditor must reference an existing player")
 
         if len(self.applied_event_ids) != self.event_sequence:
             raise ValueError("applied event id count must match event sequence")
@@ -259,13 +295,14 @@ def create_initial_game_state(
             turn_number=1,
             current_player_index=0,
             current_player_id=player_states[0].id,
-            phase="START_TURN",
+            phase=TurnPhase.START_TURN,
             consecutive_doubles=0,
         ),
         active_payment=None,
         active_auction=None,
         active_negotiation=None,
         active_bankruptcy=None,
+        active_atomic_resolution=None,
     )
 
 

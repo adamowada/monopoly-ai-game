@@ -5,6 +5,8 @@ from typing import Any, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.rules.atomic import AtomicResolutionKind
+
 
 GameEventType: TypeAlias = Literal[
     "DICE_ROLLED",
@@ -25,6 +27,7 @@ GameEventType: TypeAlias = Literal[
     "ACTIVE_AUCTION_SET",
     "ACTIVE_NEGOTIATION_SET",
     "ACTIVE_BANKRUPTCY_SET",
+    "ACTIVE_ATOMIC_RESOLUTION_SET",
 ]
 DeckEventName: TypeAlias = Literal["chance", "community_chest"]
 
@@ -160,6 +163,54 @@ class TurnStateSetPayload(EventModel):
 
 class ActivePaymentSetPayload(EventModel):
     active: bool
+    debtor_id: str | None = Field(default=None, min_length=1)
+    creditor_id: str | None = Field(default=None, min_length=1)
+    amount_owed: int | None = Field(default=None, gt=0)
+    amount_paid: int | None = Field(default=None, ge=0)
+    reason: str | None = Field(default=None, min_length=1)
+    negotiation_allowed: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_shape(self) -> Self:
+        debt_fields = {
+            "debtor_id",
+            "creditor_id",
+            "amount_owed",
+            "amount_paid",
+            "reason",
+            "negotiation_allowed",
+        }
+        if not self.active:
+            included_fields = sorted(debt_fields & self.model_fields_set)
+            if included_fields:
+                raise ValueError("inactive payment payload cannot include debt details")
+            return self
+
+        missing_fields = [
+            field_name
+            for field_name in (
+                "debtor_id",
+                "amount_owed",
+                "amount_paid",
+                "reason",
+                "negotiation_allowed",
+            )
+            if getattr(self, field_name) is None
+        ]
+        if missing_fields:
+            raise ValueError(
+                "active payment payload must include "
+                f"{', '.join(missing_fields)}"
+            )
+        if self.creditor_id is not None and self.creditor_id == self.debtor_id:
+            raise ValueError("active payment creditor cannot match debtor")
+        if (
+            self.amount_paid is not None
+            and self.amount_owed is not None
+            and self.amount_paid > self.amount_owed
+        ):
+            raise ValueError("active payment amount_paid cannot exceed amount_owed")
+        return self
 
 
 class ActiveAuctionSetPayload(EventModel):
@@ -198,6 +249,23 @@ class ActiveBankruptcySetPayload(EventModel):
     active: bool
 
 
+class ActiveAtomicResolutionSetPayload(EventModel):
+    active: bool
+    kind: AtomicResolutionKind | None = None
+    actor_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_atomic_resolution_shape(self) -> Self:
+        if not self.active:
+            if self.kind is not None or self.actor_id is not None:
+                raise ValueError("inactive atomic resolution payload cannot include details")
+            return self
+
+        if self.kind is None:
+            raise ValueError("active atomic resolution payload must include kind")
+        return self
+
+
 GameEventPayload: TypeAlias = (
     DiceRolledPayload
     | DeckShuffledPayload
@@ -217,6 +285,7 @@ GameEventPayload: TypeAlias = (
     | ActiveAuctionSetPayload
     | ActiveNegotiationSetPayload
     | ActiveBankruptcySetPayload
+    | ActiveAtomicResolutionSetPayload
 )
 
 PAYLOAD_MODEL_BY_EVENT_TYPE: dict[str, type[EventModel]] = {
@@ -238,6 +307,7 @@ PAYLOAD_MODEL_BY_EVENT_TYPE: dict[str, type[EventModel]] = {
     "ACTIVE_AUCTION_SET": ActiveAuctionSetPayload,
     "ACTIVE_NEGOTIATION_SET": ActiveNegotiationSetPayload,
     "ACTIVE_BANKRUPTCY_SET": ActiveBankruptcySetPayload,
+    "ACTIVE_ATOMIC_RESOLUTION_SET": ActiveAtomicResolutionSetPayload,
 }
 
 
@@ -280,6 +350,7 @@ def payload_model_for_event_type(event_type: str) -> type[EventModel] | None:
 
 __all__ = [
     "ActiveAuctionSetPayload",
+    "ActiveAtomicResolutionSetPayload",
     "ActiveBankruptcySetPayload",
     "ActiveNegotiationSetPayload",
     "ActivePaymentSetPayload",
