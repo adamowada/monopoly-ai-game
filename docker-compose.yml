@@ -23,8 +23,11 @@ services:
       context: .
       dockerfile: services/api/Dockerfile
     environment:
+      API_ENV: local
       API_HOST: 0.0.0.0
       API_PORT: "8000"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       DATABASE_URL: ${DATABASE_URL:-postgresql://monopoly:monopoly@postgres:5432/monopoly_ai_game}
     ports:
       - "${API_PORT:-8000}:8000"

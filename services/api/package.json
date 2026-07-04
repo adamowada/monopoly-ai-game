@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "uv run --directory ../.. --project services/api --python 3.14.6 python services/api/scripts/run_api.py",
     "start": "uv run --directory ../.. --project services/api --python 3.14.6 python services/api/scripts/run_api.py",
+    "migrate": "uv run --directory ../.. --project services/api --python 3.14.6 alembic -c services/api/alembic.ini upgrade head",
     "test": "uv run --directory ../.. --project services/api --python 3.14.6 pytest services/api/tests",
     "lint": "uv run --directory ../.. --project services/api --python 3.14.6 ruff check services/api",
     "typecheck": "uv run --directory ../.. --project services/api --python 3.14.6 basedpyright --project services/api"

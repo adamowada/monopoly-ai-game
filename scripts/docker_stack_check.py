@@ -45,7 +45,6 @@ def check_required_files() -> None:
 
 def check_no_later_stage_artifacts() -> None:
     for relative_path in [
-        "services/api/alembic",
         "packages/schemas/openapi.json",
         "packages/schemas/src/generated",
     ]:

@@ -14,6 +14,8 @@ COPY services/api/pyproject.toml services/api/uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
 COPY services/api/app ./app
+COPY services/api/alembic.ini ./alembic.ini
+COPY services/api/alembic ./alembic
 
 EXPOSE 8000
 

@@ -43,6 +43,30 @@ Run the Stage 1.2 stack contract check:
 pnpm run test:stack
 ```
 
+## Phase 1 Stage 1.3 Status
+
+Phase 1 Stage 1.3 adds the FastAPI backend foundation:
+
+- FastAPI application factory with `GET /health`.
+- Pydantic settings through `pydantic-settings`.
+- Structured JSON logging.
+- Local Next.js CORS origins from `CORS_ORIGINS`.
+- SQLAlchemy 2.x async engine/session wiring with `asyncpg`.
+- Alembic configuration and an initial `foundation_metadata` migration.
+- Expanded pytest coverage for health, settings, CORS, database wiring, logging, and Alembic.
+
+Run the backend tests:
+
+```powershell
+pnpm --filter @monopoly-ai-game/api run test
+```
+
+Apply migrations against the configured Postgres database:
+
+```powershell
+uv run --directory services/api alembic upgrade head
+```
+
 ## Local-Only Architecture
 
 The finished product is a local 3-tier application:
