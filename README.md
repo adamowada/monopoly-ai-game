@@ -6,7 +6,7 @@ Local-only Monopoly-style AI research game. `PLANS.md` is the authoritative prod
 
 This branch is `feature/phase-0-project-control`. Phase 0 establishes project control, the fixed command surface, local toolchain documentation, and repository hygiene before the application tiers are scaffolded in Phase 1.
 
-The Phase 0 `pnpm` commands are scaffold verifiers. They prove the repository baseline is intact and will be expanded into real frontend, backend, end-to-end, smoke, and regression suites as later phases add product code.
+The Phase 0 `pnpm` commands are scaffold verifiers. They run through uv's pinned Python environment, prove the repository baseline is intact, and will be expanded into real frontend, backend, end-to-end, smoke, and regression suites as later phases add product code.
 
 ## Local-Only Architecture
 
@@ -205,4 +205,4 @@ pnpm run lint
 pnpm run typecheck
 ```
 
-The verifier is `scripts/phase0_check.py`. It checks required files, `.python-version`, package scripts, `.gitignore` coverage, README markers, and Makefile delegation.
+The verifier is `scripts/phase0_check.py`. The root `pnpm` scripts invoke it through `uv run --no-sync python`. It checks required files, `.python-version`, exact package script wiring, `.gitignore` coverage, README markers, and Makefile delegation.

@@ -8,17 +8,32 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-REQUIRED_SCRIPTS = {
-    "dev",
-    "test",
-    "test:unit",
-    "test:integration",
-    "test:e2e",
-    "test:smoke",
-    "lint",
-    "format",
-    "typecheck",
-    "review",
+REQUIRED_SCRIPT_COMMANDS = {
+    "dev": "uv run --no-sync python scripts/phase0_check.py dev",
+    "test": "pnpm run test:unit && pnpm run test:integration && pnpm run test:e2e && pnpm run test:smoke",
+    "test:unit": "uv run --no-sync python scripts/phase0_check.py unit",
+    "test:integration": "uv run --no-sync python scripts/phase0_check.py integration",
+    "test:e2e": "uv run --no-sync python scripts/phase0_check.py e2e",
+    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke",
+    "lint": "uv run --no-sync python scripts/phase0_check.py lint",
+    "format": "uv run --no-sync python scripts/phase0_check.py format",
+    "typecheck": "uv run --no-sync python scripts/phase0_check.py typecheck",
+    "review": "pnpm run lint && pnpm run typecheck && pnpm run test",
+}
+
+REQUIRED_MAKEFILE_COMMANDS = {
+    "dev": "pnpm run dev",
+    "test": "pnpm run test",
+    "test-unit": "pnpm run test:unit",
+    "test-integration": "pnpm run test:integration",
+    "test-e2e": "pnpm run test:e2e",
+    "test-smoke": "pnpm run test:smoke",
+    "lint": "pnpm run lint",
+    "format": "pnpm run format",
+    "typecheck": "pnpm run typecheck",
+    "review": "pnpm run review",
+    "python-install": "uv python install 3.14.6",
+    "python-sync": "uv sync --python 3.14.6",
 }
 
 REQUIRED_FILES = {
@@ -90,9 +105,15 @@ def check_python_version() -> None:
 
 def check_package_scripts() -> None:
     package = json.loads(read_text("package.json"))
-    scripts = set(package.get("scripts", {}))
-    missing = sorted(REQUIRED_SCRIPTS - scripts)
+    scripts = package.get("scripts", {})
+    missing = sorted(set(REQUIRED_SCRIPT_COMMANDS) - set(scripts))
     require(not missing, f"package.json missing scripts: {', '.join(missing)}")
+    mismatched = [
+        f"{name} must be {expected!r}"
+        for name, expected in sorted(REQUIRED_SCRIPT_COMMANDS.items())
+        if scripts.get(name) != expected
+    ]
+    require(not mismatched, "package.json script mismatches: " + "; ".join(mismatched))
     require(package.get("packageManager") == "pnpm@11.7.0", "packageManager must be pnpm@11.7.0")
 
 
@@ -144,9 +165,10 @@ def check_readme() -> None:
 
 def check_makefile() -> None:
     makefile = read_text("Makefile")
-    require("pnpm run test" in makefile, "Makefile must delegate test to pnpm")
-    require("uv python install 3.14.6" in makefile, "Makefile must expose uv Python install")
-    require("uv sync --python 3.14.6" in makefile, "Makefile must expose uv sync")
+    makefile_with_guard = f"\n{makefile}"
+    for target, command in sorted(REQUIRED_MAKEFILE_COMMANDS.items()):
+        expected_block = f"\n{target}:\n\t{command}"
+        require(expected_block in makefile_with_guard, f"Makefile target {target} must delegate to {command}")
 
 
 def run_gate(gate: str) -> None:

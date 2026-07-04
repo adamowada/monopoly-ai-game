@@ -10,15 +10,15 @@
     "pnpm": "11.7.0"
   },
   "scripts": {
-    "dev": "python scripts/phase0_check.py dev",
+    "dev": "uv run --no-sync python scripts/phase0_check.py dev",
     "test": "pnpm run test:unit && pnpm run test:integration && pnpm run test:e2e && pnpm run test:smoke",
-    "test:unit": "python scripts/phase0_check.py unit",
-    "test:integration": "python scripts/phase0_check.py integration",
-    "test:e2e": "python scripts/phase0_check.py e2e",
-    "test:smoke": "python scripts/phase0_check.py smoke",
-    "lint": "python scripts/phase0_check.py lint",
-    "format": "python scripts/phase0_check.py format",
-    "typecheck": "python scripts/phase0_check.py typecheck",
+    "test:unit": "uv run --no-sync python scripts/phase0_check.py unit",
+    "test:integration": "uv run --no-sync python scripts/phase0_check.py integration",
+    "test:e2e": "uv run --no-sync python scripts/phase0_check.py e2e",
+    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke",
+    "lint": "uv run --no-sync python scripts/phase0_check.py lint",
+    "format": "uv run --no-sync python scripts/phase0_check.py format",
+    "typecheck": "uv run --no-sync python scripts/phase0_check.py typecheck",
     "review": "pnpm run lint && pnpm run typecheck && pnpm run test"
   }
 }
