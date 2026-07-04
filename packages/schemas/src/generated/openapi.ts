@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/deals/{deal_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Deal */
+        post: operations["accept_deal_games__game_id__deals__deal_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/deals/{deal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Deal */
+        post: operations["reject_deal_games__game_id__deals__deal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/events": {
         parameters: {
             query?: never;
@@ -147,10 +181,62 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Negotiations */
+        get: operations["list_negotiations_games__game_id__negotiations_get"];
         put?: never;
         /** Create Negotiation */
         post: operations["create_negotiation_games__game_id__negotiations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Negotiation */
+        get: operations["get_negotiation_games__game_id__negotiations__negotiation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Negotiation */
+        post: operations["execute_negotiation_games__game_id__negotiations__negotiation_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}/expire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Expire Negotiation */
+        post: operations["expire_negotiation_games__game_id__negotiations__negotiation_id__expire_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -332,6 +418,8 @@ export interface components {
             context?: {
                 [key: string]: unknown;
             };
+            /** Expires At */
+            expires_at?: string | null;
             /**
              * Opened By Player Id
              * Format: uuid
@@ -339,6 +427,11 @@ export interface components {
             opened_by_player_id: string;
             /** Participant Player Ids */
             participant_player_ids: string[];
+        };
+        /** DealDecisionRequest */
+        DealDecisionRequest: {
+            /** Player Id */
+            player_id?: string | null;
         };
         /** DealResponse */
         DealResponse: {
@@ -494,8 +587,24 @@ export interface components {
             /** State Hash */
             state_hash: string;
         };
+        /** LifecycleRejectedResponse */
+        LifecycleRejectedResponse: {
+            /** Reason Code */
+            reason_code: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "rejected";
+            /** Validation Errors */
+            validation_errors: components["schemas"]["ValidationIssueResponse"][];
+        };
         /** NegotiationResponse */
         NegotiationResponse: {
+            /** Acceptances */
+            acceptances: {
+                [key: string]: string[];
+            };
             /** Closed At */
             closed_at: unknown | null;
             /** Context */
@@ -504,6 +613,10 @@ export interface components {
             };
             /** Created At */
             created_at: unknown;
+            /** Current Deal Id */
+            current_deal_id: string | null;
+            /** Expires At */
+            expires_at: unknown | null;
             /**
              * Game Id
              * Format: uuid
@@ -518,14 +631,25 @@ export interface components {
             opened_by_player_id: string | null;
             /** Participant Player Ids */
             participant_player_ids: string[];
+            /** Pending Deal Id */
+            pending_deal_id: string | null;
             /** Phase */
             phase: string | null;
             /** Round Number */
             round_number: number;
             /** Status */
             status: string;
+            /** Status History */
+            status_history: {
+                [key: string]: unknown;
+            }[];
             /** Updated At */
             updated_at: unknown;
+        };
+        /** NegotiationsResponse */
+        NegotiationsResponse: {
+            /** Negotiations */
+            negotiations: components["schemas"]["NegotiationResponse"][];
         };
         /** PlayerCreateRequest */
         PlayerCreateRequest: {
@@ -620,6 +744,15 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** ValidationIssueResponse */
+        ValidationIssueResponse: {
+            /** Code */
+            code: string;
+            /** Field */
+            field?: string | null;
+            /** Message */
+            message: string;
         };
     };
     responses: never;
@@ -785,7 +918,79 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DealResponse"];
+                    "application/json": components["schemas"]["DealResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_deal_games__game_id__deals__deal_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                deal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DealDecisionRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_deal_games__game_id__deals__deal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                deal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DealDecisionRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealResponse"] | components["schemas"]["LifecycleRejectedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -894,6 +1099,37 @@ export interface operations {
             };
         };
     };
+    list_negotiations_games__game_id__negotiations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_negotiation_games__game_id__negotiations_post: {
         parameters: {
             query?: never;
@@ -916,6 +1152,102 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NegotiationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_negotiation_games__game_id__negotiations__negotiation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_negotiation_games__game_id__negotiations__negotiation_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    expire_negotiation_games__game_id__negotiations__negotiation_id__expire_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
                 };
             };
             /** @description Validation Error */

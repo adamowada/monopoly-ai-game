@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
@@ -13,7 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette import status
 
-from app.db.metadata import action_idempotency_keys, deals, games, negotiations, players, rejected_actions
+from app.db.metadata import (
+    action_idempotency_keys,
+    deals,
+    games,
+    negotiation_messages,
+    negotiations,
+    players,
+    rejected_actions,
+)
 from app.db.persistence import (
     AcceptedEventRecord,
     AcceptedEventTemplate,
@@ -32,6 +41,31 @@ from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
 router = APIRouter(prefix="/games", tags=["games"])
+
+
+NEGOTIATION_STATUS_OPENED = "opened"
+NEGOTIATION_STATUS_ACTIVE = "active"
+NEGOTIATION_STATUS_COUNTERED = "countered"
+NEGOTIATION_STATUS_ACCEPTED = "accepted"
+NEGOTIATION_STATUS_REJECTED = "rejected"
+NEGOTIATION_STATUS_EXPIRED = "expired"
+NEGOTIATION_STATUS_EXECUTED = "executed"
+NEGOTIATION_TERMINAL_STATUSES = frozenset(
+    {
+        NEGOTIATION_STATUS_REJECTED,
+        NEGOTIATION_STATUS_EXPIRED,
+        NEGOTIATION_STATUS_EXECUTED,
+    }
+)
+
+DEAL_STATUS_PROPOSED = "proposed"
+DEAL_STATUS_ACCEPTED = "accepted"
+DEAL_STATUS_REJECTED = "rejected"
+DEAL_STATUS_EXPIRED = "expired"
+
+AUDIT_STATUS_CHANGED = "NEGOTIATION_STATUS_CHANGED"
+AUDIT_DEAL_ACCEPTED = "NEGOTIATION_DEAL_ACCEPTED"
+AUDIT_DEAL_REJECTED = "NEGOTIATION_DEAL_REJECTED"
 
 
 class PlayerCreateRequest(BaseModel):
@@ -161,12 +195,25 @@ class RejectedActionsResponse(BaseModel):
     rejected_actions: list[RejectedActionResponse]
 
 
+class ValidationIssueResponse(BaseModel):
+    code: str
+    message: str
+    field: str | None = None
+
+
+class LifecycleRejectedResponse(BaseModel):
+    status: Literal["rejected"]
+    reason_code: str
+    validation_errors: list[ValidationIssueResponse]
+
+
 class CreateNegotiationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     opened_by_player_id: UUID
     participant_player_ids: list[UUID] = Field(min_length=2, max_length=5)
     context: dict[str, Any] = Field(default_factory=dict)
+    expires_at: datetime | None = None
 
     @model_validator(mode="after")
     def validate_unique_participants(self) -> "CreateNegotiationRequest":
@@ -185,10 +232,19 @@ class NegotiationResponse(BaseModel):
     status: str
     phase: str | None
     round_number: int
+    pending_deal_id: UUID | None
+    current_deal_id: UUID | None
+    acceptances: Mapping[str, list[UUID]]
+    status_history: list[Mapping[str, Any]]
+    expires_at: Any | None
     context: Mapping[str, Any]
     created_at: Any
     updated_at: Any
     closed_at: Any | None
+
+
+class NegotiationsResponse(BaseModel):
+    negotiations: list[NegotiationResponse]
 
 
 class CreateDealRequest(BaseModel):
@@ -213,6 +269,12 @@ class DealResponse(BaseModel):
     created_at: Any
     updated_at: Any
     accepted_at: Any | None
+
+
+class DealDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: UUID | None = None
 
 
 class AiStepRequest(BaseModel):
@@ -479,6 +541,30 @@ async def list_rejections(
     )
 
 
+@router.get("/{game_id}/negotiations", response_model=NegotiationsResponse)
+async def list_negotiations(game_id: UUID, request: Request) -> NegotiationsResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(negotiations)
+            .where(negotiations.c.game_id == game_id)
+            .order_by(negotiations.c.updated_at.desc(), negotiations.c.created_at.desc())
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+    return NegotiationsResponse(negotiations=[_negotiation_response(row) for row in rows])
+
+
+@router.get("/{game_id}/negotiations/{negotiation_id}", response_model=NegotiationResponse)
+async def get_negotiation(
+    game_id: UUID,
+    negotiation_id: UUID,
+    request: Request,
+) -> NegotiationResponse:
+    row = await _load_negotiation_in_game(_session_factory(request), game_id, negotiation_id)
+    return _negotiation_response(row)
+
+
 @router.post(
     "/{game_id}/negotiations",
     response_model=NegotiationResponse,
@@ -498,10 +584,7 @@ async def create_negotiation(
     )
     state = await _load_replayed_state(session_factory, game_id)
 
-    stored_context = {
-        "participant_player_ids": [str(player_id) for player_id in payload.participant_player_ids],
-        "context": dict(payload.context),
-    }
+    stored_context = _initial_negotiation_context(payload)
     async with session_factory() as session:
         async with session.begin():
             result = await session.execute(
@@ -509,7 +592,7 @@ async def create_negotiation(
                 .values(
                     game_id=game_id,
                     opened_by_player_id=payload.opened_by_player_id,
-                    status="opened",
+                    status=NEGOTIATION_STATUS_OPENED,
                     phase=state.turn.phase.value,
                     round_number=0,
                     context=stored_context,
@@ -521,19 +604,105 @@ async def create_negotiation(
     return _negotiation_response(row)
 
 
-@router.post("/{game_id}/deals", response_model=DealResponse, status_code=status.HTTP_201_CREATED)
-async def create_deal(game_id: UUID, request: Request, payload: CreateDealRequest) -> DealResponse:
+@router.post(
+    "/{game_id}/deals",
+    response_model=DealResponse | LifecycleRejectedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_deal(
+    game_id: UUID,
+    request: Request,
+    payload: CreateDealRequest,
+) -> DealResponse | JSONResponse:
     session_factory = _session_factory(request)
     await _ensure_game_exists(session_factory, game_id)
     await _ensure_player_in_game(session_factory, game_id, payload.proposed_by_player_id)
-    if payload.negotiation_id is not None:
-        await _ensure_negotiation_in_game(session_factory, game_id, payload.negotiation_id)
-    if payload.parent_deal_id is not None:
-        await _ensure_deal_in_game(session_factory, game_id, payload.parent_deal_id)
 
-    version = await _next_deal_version(session_factory, game_id, payload.negotiation_id)
     async with session_factory() as session:
         async with session.begin():
+            negotiation_row: dict[str, Any] | None = None
+            next_negotiation_status: str | None = None
+            next_round_number: int | None = None
+            context: dict[str, Any] | None = None
+
+            if payload.negotiation_id is not None:
+                negotiation_row = await _load_negotiation_row_for_update(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_id=payload.negotiation_id,
+                )
+                if negotiation_row is None:
+                    return _lifecycle_rejection_response(
+                        "negotiation_not_found",
+                        "negotiation does not belong to game",
+                        field="negotiation_id",
+                    )
+
+                terminal_response = _reject_if_negotiation_cannot_receive_proposal(
+                    negotiation_row["status"]
+                )
+                if terminal_response is not None:
+                    return terminal_response
+
+                context = _normalized_negotiation_context(negotiation_row)
+                participant_ids = set(context["participant_player_ids"])
+                if str(payload.proposed_by_player_id) not in participant_ids:
+                    return _lifecycle_rejection_response(
+                        "proposer_not_participant",
+                        "proposed_by_player_id must be a negotiation participant",
+                        field="proposed_by_player_id",
+                    )
+
+                current_deal_id = context.get("current_deal_id")
+                if payload.parent_deal_id is None and current_deal_id is not None:
+                    return _lifecycle_rejection_response(
+                        "parent_deal_id_required",
+                        "a changed proposal must reference the current deal as parent_deal_id",
+                        field="parent_deal_id",
+                    )
+
+                if payload.parent_deal_id is not None:
+                    parent_deal = await _load_deal_row_for_update(
+                        session=session,
+                        game_id=game_id,
+                        deal_id=payload.parent_deal_id,
+                    )
+                    if parent_deal is None or parent_deal["negotiation_id"] != payload.negotiation_id:
+                        return _lifecycle_rejection_response(
+                            "parent_deal_not_current",
+                            "parent_deal_id must belong to this negotiation",
+                            field="parent_deal_id",
+                        )
+                    if current_deal_id != str(payload.parent_deal_id):
+                        return _lifecycle_rejection_response(
+                            "parent_deal_not_current",
+                            "parent_deal_id must match the current proposal",
+                            field="parent_deal_id",
+                        )
+                    next_negotiation_status = NEGOTIATION_STATUS_COUNTERED
+                    next_round_number = int(negotiation_row["round_number"]) + 1
+                else:
+                    next_negotiation_status = NEGOTIATION_STATUS_ACTIVE
+                    next_round_number = max(int(negotiation_row["round_number"]) + 1, 1)
+
+            elif payload.parent_deal_id is not None:
+                parent_deal = await _load_deal_row_for_update(
+                    session=session,
+                    game_id=game_id,
+                    deal_id=payload.parent_deal_id,
+                )
+                if parent_deal is None:
+                    return _lifecycle_rejection_response(
+                        "parent_deal_not_found",
+                        "parent deal does not belong to game",
+                        field="parent_deal_id",
+                    )
+
+            version = await _next_deal_version_in_session(
+                session=session,
+                game_id=game_id,
+                negotiation_id=payload.negotiation_id,
+            )
             result = await session.execute(
                 deals.insert()
                 .values(
@@ -550,7 +719,267 @@ async def create_deal(game_id: UUID, request: Request, payload: CreateDealReques
             )
             row = dict(result.mappings().one())
 
+            if negotiation_row is not None and context is not None:
+                if next_negotiation_status is None or next_round_number is None:
+                    raise RuntimeError("negotiation proposal transition was not resolved")
+                context["pending_deal_id"] = str(row["id"])
+                context["current_deal_id"] = str(row["id"])
+                context["current_parent_deal_id"] = (
+                    None if payload.parent_deal_id is None else str(payload.parent_deal_id)
+                )
+                context.setdefault("acceptances", {})[str(row["id"])] = []
+                if negotiation_row["status"] != next_negotiation_status:
+                    _append_status_history(
+                        context,
+                        from_status=negotiation_row["status"],
+                        to_status=next_negotiation_status,
+                        deal_id=str(row["id"]),
+                        round_number=next_round_number,
+                    )
+
+                await session.execute(
+                    negotiations.update()
+                    .where(negotiations.c.id == negotiation_row["id"])
+                    .values(
+                        status=next_negotiation_status,
+                        round_number=next_round_number,
+                        context=context,
+                        updated_at=sa.func.now(),
+                    )
+                )
+                if negotiation_row["status"] != next_negotiation_status:
+                    await _insert_negotiation_audit_message(
+                        session=session,
+                        game_id=game_id,
+                        negotiation_id=negotiation_row["id"],
+                        sender_player_id=payload.proposed_by_player_id,
+                        message_type=AUDIT_STATUS_CHANGED,
+                        payload={
+                            "from_status": negotiation_row["status"],
+                            "to_status": next_negotiation_status,
+                            "deal_id": str(row["id"]),
+                            "round_number": next_round_number,
+                        },
+                    )
+
     return _deal_response(row)
+
+
+@router.post(
+    "/{game_id}/deals/{deal_id}/accept",
+    response_model=DealResponse | LifecycleRejectedResponse,
+)
+async def accept_deal(
+    game_id: UUID,
+    deal_id: UUID,
+    request: Request,
+    payload: DealDecisionRequest | None = None,
+) -> DealResponse | JSONResponse:
+    return await _record_deal_acceptance_or_rejection(
+        game_id=game_id,
+        deal_id=deal_id,
+        request=request,
+        payload=payload,
+        decision="accept",
+    )
+
+
+@router.post(
+    "/{game_id}/deals/{deal_id}/reject",
+    response_model=DealResponse | LifecycleRejectedResponse,
+)
+async def reject_deal(
+    game_id: UUID,
+    deal_id: UUID,
+    request: Request,
+    payload: DealDecisionRequest | None = None,
+) -> DealResponse | JSONResponse:
+    return await _record_deal_acceptance_or_rejection(
+        game_id=game_id,
+        deal_id=deal_id,
+        request=request,
+        payload=payload,
+        decision="reject",
+    )
+
+
+@router.post(
+    "/{game_id}/negotiations/{negotiation_id}/expire",
+    response_model=NegotiationResponse | LifecycleRejectedResponse,
+)
+async def expire_negotiation(
+    game_id: UUID,
+    negotiation_id: UUID,
+    request: Request,
+) -> NegotiationResponse | JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        async with session.begin():
+            negotiation_row = await _load_negotiation_row_for_update(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+            )
+            if negotiation_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="negotiation not found",
+                )
+            terminal_response = _reject_if_negotiation_terminal(negotiation_row["status"])
+            if terminal_response is not None:
+                return terminal_response
+
+            context = _normalized_negotiation_context(negotiation_row)
+            current_deal_id = _uuid_or_none(context.get("current_deal_id"))
+            if current_deal_id is not None:
+                await session.execute(
+                    deals.update()
+                    .where(
+                        deals.c.game_id == game_id,
+                        deals.c.id == current_deal_id,
+                        deals.c.status == DEAL_STATUS_PROPOSED,
+                    )
+                    .values(status=DEAL_STATUS_EXPIRED, updated_at=sa.func.now())
+                )
+
+            context["expired_at"] = _audit_time_marker()
+            _append_status_history(
+                context,
+                from_status=negotiation_row["status"],
+                to_status=NEGOTIATION_STATUS_EXPIRED,
+                deal_id=context.get("current_deal_id"),
+                round_number=negotiation_row["round_number"],
+            )
+            await session.execute(
+                negotiations.update()
+                .where(negotiations.c.id == negotiation_id)
+                .values(
+                    status=NEGOTIATION_STATUS_EXPIRED,
+                    context=context,
+                    updated_at=sa.func.now(),
+                    closed_at=sa.func.now(),
+                )
+            )
+            await _insert_negotiation_audit_message(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+                sender_player_id=None,
+                message_type=AUDIT_STATUS_CHANGED,
+                payload={
+                    "from_status": negotiation_row["status"],
+                    "to_status": NEGOTIATION_STATUS_EXPIRED,
+                    "deal_id": context.get("current_deal_id"),
+                    "round_number": negotiation_row["round_number"],
+                },
+            )
+            updated = await _load_negotiation_row_by_id(session, negotiation_id)
+            if updated is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="negotiation not found",
+                )
+    return _negotiation_response(updated)
+
+
+@router.post(
+    "/{game_id}/negotiations/{negotiation_id}/execute",
+    response_model=NegotiationResponse | LifecycleRejectedResponse,
+)
+async def execute_negotiation(
+    game_id: UUID,
+    negotiation_id: UUID,
+    request: Request,
+) -> NegotiationResponse | JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        async with session.begin():
+            negotiation_row = await _load_negotiation_row_for_update(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+            )
+            if negotiation_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="negotiation not found",
+                )
+            terminal_response = _reject_if_negotiation_terminal(negotiation_row["status"])
+            if terminal_response is not None:
+                return terminal_response
+            if negotiation_row["status"] != NEGOTIATION_STATUS_ACCEPTED:
+                return _lifecycle_rejection_response(
+                    "negotiation_not_accepted",
+                    "negotiation can execute only after all participants accept the current deal",
+                    field="status",
+                )
+
+            context = _normalized_negotiation_context(negotiation_row)
+            current_deal_id = _uuid_or_none(context.get("current_deal_id"))
+            if current_deal_id is None:
+                return _lifecycle_rejection_response(
+                    "current_deal_missing",
+                    "negotiation has no current deal to execute",
+                    field="current_deal_id",
+                )
+            current_deal = await _load_deal_row_for_update(
+                session=session,
+                game_id=game_id,
+                deal_id=current_deal_id,
+            )
+            if current_deal is None or current_deal["status"] != DEAL_STATUS_ACCEPTED:
+                return _lifecycle_rejection_response(
+                    "current_deal_not_accepted",
+                    "current deal must be accepted before execution",
+                    field="current_deal_id",
+                )
+            missing_acceptances = _missing_acceptances(context, str(current_deal_id))
+            if missing_acceptances:
+                return _lifecycle_rejection_response(
+                    "missing_acceptances",
+                    "all negotiation participants must accept the current deal before execution",
+                    field="acceptances",
+                )
+
+            _append_status_history(
+                context,
+                from_status=negotiation_row["status"],
+                to_status=NEGOTIATION_STATUS_EXECUTED,
+                deal_id=str(current_deal_id),
+                round_number=negotiation_row["round_number"],
+            )
+            await session.execute(
+                negotiations.update()
+                .where(negotiations.c.id == negotiation_id)
+                .values(
+                    status=NEGOTIATION_STATUS_EXECUTED,
+                    context=context,
+                    updated_at=sa.func.now(),
+                    closed_at=sa.func.now(),
+                )
+            )
+            await _insert_negotiation_audit_message(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+                sender_player_id=None,
+                message_type=AUDIT_STATUS_CHANGED,
+                payload={
+                    "from_status": negotiation_row["status"],
+                    "to_status": NEGOTIATION_STATUS_EXECUTED,
+                    "deal_id": str(current_deal_id),
+                    "round_number": negotiation_row["round_number"],
+                },
+            )
+            updated = await _load_negotiation_row_by_id(session, negotiation_id)
+            if updated is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="negotiation not found",
+                )
+    return _negotiation_response(updated)
 
 
 @router.post(
@@ -640,6 +1069,540 @@ async def _load_replayed_state(
         return await EventPersistence(session_factory).replay_from_latest_snapshot(game_id)
     except GameNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
+
+
+def _initial_negotiation_context(payload: CreateNegotiationRequest) -> dict[str, Any]:
+    return {
+        "participant_player_ids": [str(player_id) for player_id in payload.participant_player_ids],
+        "context": dict(payload.context),
+        "pending_deal_id": None,
+        "current_deal_id": None,
+        "current_parent_deal_id": None,
+        "acceptances": {},
+        "status_history": [
+            {
+                "from_status": None,
+                "to_status": NEGOTIATION_STATUS_OPENED,
+                "deal_id": None,
+                "round_number": 0,
+            }
+        ],
+        "expires_at": payload.expires_at.isoformat() if payload.expires_at is not None else None,
+    }
+
+
+def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
+    stored_context = row["context"] or {}
+    participant_ids = stored_context.get("participant_player_ids", [])
+    if not isinstance(participant_ids, Sequence) or isinstance(participant_ids, str):
+        participant_ids = []
+
+    public_context = stored_context.get("context", {})
+    if not isinstance(public_context, Mapping):
+        public_context = {}
+
+    raw_acceptances = stored_context.get("acceptances", {})
+    if not isinstance(raw_acceptances, Mapping):
+        raw_acceptances = {}
+    acceptances: dict[str, list[str]] = {}
+    for deal_id, player_ids in raw_acceptances.items():
+        if isinstance(player_ids, Sequence) and not isinstance(player_ids, str):
+            acceptances[str(deal_id)] = [str(player_id) for player_id in player_ids]
+
+    raw_status_history = stored_context.get("status_history", [])
+    status_history = [
+        dict(item) for item in raw_status_history if isinstance(item, Mapping)
+    ] if isinstance(raw_status_history, Sequence) and not isinstance(raw_status_history, str) else []
+
+    return {
+        "participant_player_ids": [str(player_id) for player_id in participant_ids],
+        "context": dict(public_context),
+        "pending_deal_id": _string_or_none(stored_context.get("pending_deal_id")),
+        "current_deal_id": _string_or_none(stored_context.get("current_deal_id")),
+        "current_parent_deal_id": _string_or_none(stored_context.get("current_parent_deal_id")),
+        "acceptances": acceptances,
+        "status_history": status_history,
+        "expires_at": _string_or_none(stored_context.get("expires_at")),
+        **{
+            key: value
+            for key, value in stored_context.items()
+            if key
+            not in {
+                "participant_player_ids",
+                "context",
+                "pending_deal_id",
+                "current_deal_id",
+                "current_parent_deal_id",
+                "acceptances",
+                "status_history",
+                "expires_at",
+            }
+        },
+    }
+
+
+async def _load_negotiation_in_game(
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    negotiation_id: UUID,
+) -> Mapping[str, Any]:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(negotiations).where(
+                negotiations.c.game_id == game_id,
+                negotiations.c.id == negotiation_id,
+            )
+        )
+        row = result.mappings().first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="negotiation not found")
+    return dict(row)
+
+
+async def _load_negotiation_row_for_update(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID,
+) -> dict[str, Any] | None:
+    result = await session.execute(
+        sa.select(negotiations)
+        .where(negotiations.c.game_id == game_id, negotiations.c.id == negotiation_id)
+        .with_for_update()
+    )
+    row = result.mappings().first()
+    return None if row is None else dict(row)
+
+
+async def _load_negotiation_row_by_id(
+    session: AsyncSession,
+    negotiation_id: UUID,
+) -> dict[str, Any] | None:
+    result = await session.execute(sa.select(negotiations).where(negotiations.c.id == negotiation_id))
+    row = result.mappings().first()
+    return None if row is None else dict(row)
+
+
+async def _load_deal_row_for_update(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    deal_id: UUID,
+) -> dict[str, Any] | None:
+    result = await session.execute(
+        sa.select(deals)
+        .where(deals.c.game_id == game_id, deals.c.id == deal_id)
+        .with_for_update()
+    )
+    row = result.mappings().first()
+    return None if row is None else dict(row)
+
+
+async def _load_deal_row_by_id(session: AsyncSession, deal_id: UUID) -> dict[str, Any] | None:
+    result = await session.execute(sa.select(deals).where(deals.c.id == deal_id))
+    row = result.mappings().first()
+    return None if row is None else dict(row)
+
+
+async def _next_deal_version_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID | None,
+) -> int:
+    if negotiation_id is None:
+        return 1
+    result = await session.execute(
+        sa.select(sa.func.coalesce(sa.func.max(deals.c.version), 0)).where(
+            deals.c.game_id == game_id,
+            deals.c.negotiation_id == negotiation_id,
+        )
+    )
+    return int(result.scalar_one()) + 1
+
+
+async def _insert_negotiation_audit_message(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID,
+    sender_player_id: UUID | None,
+    message_type: str,
+    payload: Mapping[str, Any],
+) -> None:
+    await session.execute(
+        negotiation_messages.insert().values(
+            game_id=game_id,
+            negotiation_id=negotiation_id,
+            sender_player_id=sender_player_id,
+            recipient_player_id=None,
+            message_type=message_type,
+            body=None,
+            payload=dict(payload),
+        )
+    )
+
+
+def _lifecycle_rejection_response(
+    reason_code: str,
+    message: str,
+    *,
+    field: str | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={
+            "status": "rejected",
+            "reason_code": reason_code,
+            "validation_errors": [
+                {
+                    "code": reason_code,
+                    "message": message,
+                    "field": field,
+                }
+            ],
+        },
+    )
+
+
+def _reject_if_negotiation_terminal(negotiation_status: str) -> JSONResponse | None:
+    if negotiation_status == NEGOTIATION_STATUS_EXPIRED:
+        return _lifecycle_rejection_response(
+            "negotiation_expired",
+            "expired negotiations do nothing and cannot execute",
+            field="status",
+        )
+    if negotiation_status == NEGOTIATION_STATUS_REJECTED:
+        return _lifecycle_rejection_response(
+            "negotiation_rejected",
+            "rejected negotiations cannot execute",
+            field="status",
+        )
+    if negotiation_status == NEGOTIATION_STATUS_EXECUTED:
+        return _lifecycle_rejection_response(
+            "negotiation_executed",
+            "executed negotiations are terminal",
+            field="status",
+        )
+    return None
+
+
+def _reject_if_negotiation_cannot_receive_proposal(negotiation_status: str) -> JSONResponse | None:
+    terminal_response = _reject_if_negotiation_terminal(negotiation_status)
+    if terminal_response is not None:
+        return terminal_response
+    if negotiation_status == NEGOTIATION_STATUS_ACCEPTED:
+        return _lifecycle_rejection_response(
+            "negotiation_already_accepted",
+            "accepted negotiations cannot receive changed proposals",
+            field="status",
+        )
+    return None
+
+
+async def _record_deal_acceptance_or_rejection(
+    *,
+    game_id: UUID,
+    deal_id: UUID,
+    request: Request,
+    payload: DealDecisionRequest | None,
+    decision: Literal["accept", "reject"],
+) -> DealResponse | JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        async with session.begin():
+            deal_row = await _load_deal_row_for_update(
+                session=session,
+                game_id=game_id,
+                deal_id=deal_id,
+            )
+            if deal_row is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="deal not found")
+            if deal_row["negotiation_id"] is None:
+                return _lifecycle_rejection_response(
+                    "deal_has_no_negotiation",
+                    "deal lifecycle decisions require a negotiation",
+                    field="negotiation_id",
+                )
+
+            negotiation_row = await _load_negotiation_row_for_update(
+                session=session,
+                game_id=game_id,
+                negotiation_id=deal_row["negotiation_id"],
+            )
+            if negotiation_row is None:
+                return _lifecycle_rejection_response(
+                    "negotiation_not_found",
+                    "deal negotiation does not belong to game",
+                    field="negotiation_id",
+                )
+
+            terminal_response = _reject_if_negotiation_terminal(negotiation_row["status"])
+            if terminal_response is not None:
+                return terminal_response
+            if negotiation_row["status"] == NEGOTIATION_STATUS_ACCEPTED:
+                return _lifecycle_rejection_response(
+                    "negotiation_already_accepted",
+                    "accepted negotiations can only execute or expire",
+                    field="status",
+                )
+
+            context = _normalized_negotiation_context(negotiation_row)
+            current_deal_id = context.get("current_deal_id")
+            if current_deal_id != str(deal_id):
+                return _lifecycle_rejection_response(
+                    "deal_not_current",
+                    "only the current proposal can be accepted or rejected",
+                    field="deal_id",
+                )
+            if deal_row["status"] != DEAL_STATUS_PROPOSED:
+                return _lifecycle_rejection_response(
+                    f"deal_{deal_row['status']}",
+                    "only proposed current deals can be accepted or rejected",
+                    field="status",
+                )
+
+            actor_player_id = _decision_player_id(payload, context, deal_row)
+            if actor_player_id is None:
+                return _lifecycle_rejection_response(
+                    "player_id_required",
+                    "player_id is required when more than one participant could respond",
+                    field="player_id",
+                )
+            if actor_player_id not in context["participant_player_ids"]:
+                return _lifecycle_rejection_response(
+                    "player_not_participant",
+                    "player_id must be a negotiation participant",
+                    field="player_id",
+                )
+
+            if decision == "reject":
+                updated_deal = await _reject_current_deal(
+                    session=session,
+                    game_id=game_id,
+                    deal_row=deal_row,
+                    negotiation_row=negotiation_row,
+                    context=context,
+                    actor_player_id=actor_player_id,
+                )
+                return _deal_response(updated_deal)
+
+            updated_deal = await _accept_current_deal(
+                session=session,
+                game_id=game_id,
+                deal_row=deal_row,
+                negotiation_row=negotiation_row,
+                context=context,
+                actor_player_id=actor_player_id,
+            )
+            if isinstance(updated_deal, JSONResponse):
+                return updated_deal
+            return _deal_response(updated_deal)
+
+
+async def _accept_current_deal(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    deal_row: Mapping[str, Any],
+    negotiation_row: Mapping[str, Any],
+    context: dict[str, Any],
+    actor_player_id: str,
+) -> Mapping[str, Any] | JSONResponse:
+    deal_id = str(deal_row["id"])
+    acceptances = context.setdefault("acceptances", {})
+    accepted_player_ids = set(acceptances.get(deal_id, []))
+    if actor_player_id in accepted_player_ids:
+        return _lifecycle_rejection_response(
+            "deal_already_accepted_by_player",
+            "player has already accepted the current deal",
+            field="player_id",
+        )
+
+    accepted_player_ids.add(actor_player_id)
+    acceptances[deal_id] = [
+        player_id for player_id in context["participant_player_ids"] if player_id in accepted_player_ids
+    ]
+    await _insert_negotiation_audit_message(
+        session=session,
+        game_id=game_id,
+        negotiation_id=negotiation_row["id"],
+        sender_player_id=UUID(actor_player_id),
+        message_type=AUDIT_DEAL_ACCEPTED,
+        payload={
+            "deal_id": deal_id,
+            "player_id": actor_player_id,
+            "accepted_player_ids": acceptances[deal_id],
+            "round_number": negotiation_row["round_number"],
+        },
+    )
+
+    missing_acceptances = _missing_acceptances(context, deal_id)
+    deal_values: dict[str, Any] = {"updated_at": sa.func.now()}
+    negotiation_values: dict[str, Any] = {"context": context, "updated_at": sa.func.now()}
+    if not missing_acceptances:
+        deal_values.update(status=DEAL_STATUS_ACCEPTED, accepted_at=sa.func.now())
+        negotiation_values["status"] = NEGOTIATION_STATUS_ACCEPTED
+        if negotiation_row["status"] != NEGOTIATION_STATUS_ACCEPTED:
+            _append_status_history(
+                context,
+                from_status=negotiation_row["status"],
+                to_status=NEGOTIATION_STATUS_ACCEPTED,
+                deal_id=deal_id,
+                round_number=negotiation_row["round_number"],
+            )
+
+    await session.execute(deals.update().where(deals.c.id == deal_row["id"]).values(**deal_values))
+    await session.execute(
+        negotiations.update().where(negotiations.c.id == negotiation_row["id"]).values(**negotiation_values)
+    )
+
+    if not missing_acceptances and negotiation_row["status"] != NEGOTIATION_STATUS_ACCEPTED:
+        await _insert_negotiation_audit_message(
+            session=session,
+            game_id=game_id,
+            negotiation_id=negotiation_row["id"],
+            sender_player_id=UUID(actor_player_id),
+            message_type=AUDIT_STATUS_CHANGED,
+            payload={
+                "from_status": negotiation_row["status"],
+                "to_status": NEGOTIATION_STATUS_ACCEPTED,
+                "deal_id": deal_id,
+                "round_number": negotiation_row["round_number"],
+            },
+        )
+
+    updated_deal = await _load_deal_row_by_id(session, deal_row["id"])
+    if updated_deal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="deal not found")
+    return updated_deal
+
+
+async def _reject_current_deal(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    deal_row: Mapping[str, Any],
+    negotiation_row: Mapping[str, Any],
+    context: dict[str, Any],
+    actor_player_id: str,
+) -> Mapping[str, Any]:
+    deal_id = str(deal_row["id"])
+    context["rejected_deal_id"] = deal_id
+    context["rejected_by_player_id"] = actor_player_id
+    _append_status_history(
+        context,
+        from_status=negotiation_row["status"],
+        to_status=NEGOTIATION_STATUS_REJECTED,
+        deal_id=deal_id,
+        round_number=negotiation_row["round_number"],
+    )
+    await session.execute(
+        deals.update()
+        .where(deals.c.id == deal_row["id"])
+        .values(status=DEAL_STATUS_REJECTED, updated_at=sa.func.now())
+    )
+    await session.execute(
+        negotiations.update()
+        .where(negotiations.c.id == negotiation_row["id"])
+        .values(
+            status=NEGOTIATION_STATUS_REJECTED,
+            context=context,
+            updated_at=sa.func.now(),
+            closed_at=sa.func.now(),
+        )
+    )
+    await _insert_negotiation_audit_message(
+        session=session,
+        game_id=game_id,
+        negotiation_id=negotiation_row["id"],
+        sender_player_id=UUID(actor_player_id),
+        message_type=AUDIT_DEAL_REJECTED,
+        payload={
+            "deal_id": deal_id,
+            "player_id": actor_player_id,
+            "round_number": negotiation_row["round_number"],
+        },
+    )
+    await _insert_negotiation_audit_message(
+        session=session,
+        game_id=game_id,
+        negotiation_id=negotiation_row["id"],
+        sender_player_id=UUID(actor_player_id),
+        message_type=AUDIT_STATUS_CHANGED,
+        payload={
+            "from_status": negotiation_row["status"],
+            "to_status": NEGOTIATION_STATUS_REJECTED,
+            "deal_id": deal_id,
+            "round_number": negotiation_row["round_number"],
+        },
+    )
+    updated_deal = await _load_deal_row_by_id(session, deal_row["id"])
+    if updated_deal is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="deal not found")
+    return updated_deal
+
+
+def _decision_player_id(
+    payload: DealDecisionRequest | None,
+    context: Mapping[str, Any],
+    deal_row: Mapping[str, Any],
+) -> str | None:
+    if payload is not None and payload.player_id is not None:
+        return str(payload.player_id)
+    proposer_id = None if deal_row["proposed_by_player_id"] is None else str(deal_row["proposed_by_player_id"])
+    non_proposer_ids = [
+        player_id for player_id in context["participant_player_ids"] if player_id != proposer_id
+    ]
+    if len(non_proposer_ids) == 1:
+        return non_proposer_ids[0]
+    return None
+
+
+def _missing_acceptances(context: Mapping[str, Any], deal_id: str) -> list[str]:
+    accepted_player_ids = set(context["acceptances"].get(deal_id, []))
+    return [
+        player_id
+        for player_id in context["participant_player_ids"]
+        if player_id not in accepted_player_ids
+    ]
+
+
+def _append_status_history(
+    context: dict[str, Any],
+    *,
+    from_status: str,
+    to_status: str,
+    deal_id: str | None,
+    round_number: int,
+) -> None:
+    history = context.setdefault("status_history", [])
+    if isinstance(history, list):
+        history.append(
+            {
+                "from_status": from_status,
+                "to_status": to_status,
+                "deal_id": deal_id,
+                "round_number": round_number,
+            }
+        )
+
+
+def _uuid_or_none(value: object) -> UUID | None:
+    if value is None or value == "":
+        return None
+    return UUID(str(value))
+
+
+def _string_or_none(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    return str(value)
+
+
+def _audit_time_marker() -> str:
+    return "expired"
 
 
 async def _ensure_game_exists(
@@ -1014,9 +1977,9 @@ def _rejected_response(record: RejectedActionRecord) -> RejectedActionResponse:
 
 
 def _negotiation_response(row: Mapping[str, Any]) -> NegotiationResponse:
-    stored_context = row["context"] or {}
-    participant_ids = stored_context.get("participant_player_ids", [])
-    context = stored_context.get("context", {})
+    stored_context = _normalized_negotiation_context(row)
+    participant_ids = stored_context["participant_player_ids"]
+    context = stored_context["context"]
     return NegotiationResponse(
         id=row["id"],
         game_id=row["game_id"],
@@ -1025,7 +1988,15 @@ def _negotiation_response(row: Mapping[str, Any]) -> NegotiationResponse:
         status=row["status"],
         phase=row["phase"],
         round_number=row["round_number"],
-        context=context if isinstance(context, Mapping) else {},
+        pending_deal_id=_uuid_or_none(stored_context["pending_deal_id"]),
+        current_deal_id=_uuid_or_none(stored_context["current_deal_id"]),
+        acceptances={
+            str(deal_id): [UUID(str(player_id)) for player_id in player_ids]
+            for deal_id, player_ids in stored_context["acceptances"].items()
+        },
+        status_history=list(stored_context["status_history"]),
+        expires_at=stored_context["expires_at"],
+        context=context,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         closed_at=row["closed_at"],

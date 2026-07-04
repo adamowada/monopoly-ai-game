@@ -251,6 +251,18 @@
             "title": "Context",
             "type": "object"
           },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
           "opened_by_player_id": {
             "format": "uuid",
             "title": "Opened By Player Id",
@@ -272,6 +284,25 @@
           "participant_player_ids"
         ],
         "title": "CreateNegotiationRequest",
+        "type": "object"
+      },
+      "DealDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player Id"
+          }
+        },
+        "title": "DealDecisionRequest",
         "type": "object"
       },
       "DealResponse": {
@@ -638,8 +669,46 @@
         "title": "LegalActionsResponse",
         "type": "object"
       },
+      "LifecycleRejectedResponse": {
+        "properties": {
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "status": {
+            "const": "rejected",
+            "title": "Status",
+            "type": "string"
+          },
+          "validation_errors": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssueResponse"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "reason_code",
+          "validation_errors"
+        ],
+        "title": "LifecycleRejectedResponse",
+        "type": "object"
+      },
       "NegotiationResponse": {
         "properties": {
+          "acceptances": {
+            "additionalProperties": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Acceptances",
+            "type": "object"
+          },
           "closed_at": {
             "anyOf": [
               {},
@@ -656,6 +725,27 @@
           },
           "created_at": {
             "title": "Created At"
+          },
+          "current_deal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Deal Id"
+          },
+          "expires_at": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
           },
           "game_id": {
             "format": "uuid",
@@ -687,6 +777,18 @@
             "title": "Participant Player Ids",
             "type": "array"
           },
+          "pending_deal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Deal Id"
+          },
           "phase": {
             "anyOf": [
               {
@@ -706,6 +808,14 @@
             "title": "Status",
             "type": "string"
           },
+          "status_history": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Status History",
+            "type": "array"
+          },
           "updated_at": {
             "title": "Updated At"
           }
@@ -718,12 +828,33 @@
           "status",
           "phase",
           "round_number",
+          "pending_deal_id",
+          "current_deal_id",
+          "acceptances",
+          "status_history",
+          "expires_at",
           "context",
           "created_at",
           "updated_at",
           "closed_at"
         ],
         "title": "NegotiationResponse",
+        "type": "object"
+      },
+      "NegotiationsResponse": {
+        "properties": {
+          "negotiations": {
+            "items": {
+              "$ref": "#/components/schemas/NegotiationResponse"
+            },
+            "title": "Negotiations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "negotiations"
+        ],
+        "title": "NegotiationsResponse",
         "type": "object"
       },
       "PlayerCreateRequest": {
@@ -958,6 +1089,35 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationIssueResponse": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ValidationIssueResponse",
         "type": "object"
       }
     }
@@ -1197,7 +1357,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DealResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DealResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Create Deal Games  Game Id  Deals Post"
                 }
               }
             },
@@ -1215,6 +1383,162 @@
           }
         },
         "summary": "Create Deal",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/deals/{deal_id}/accept": {
+      "post": {
+        "operationId": "accept_deal_games__game_id__deals__deal_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "deal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Deal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DealDecisionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DealResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Accept Deal Games  Game Id  Deals  Deal Id  Accept Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Accept Deal",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/deals/{deal_id}/reject": {
+      "post": {
+        "operationId": "reject_deal_games__game_id__deals__deal_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "deal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Deal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DealDecisionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/DealResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Reject Deal Games  Game Id  Deals  Deal Id  Reject Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Deal",
         "tags": [
           "games"
         ]
@@ -1356,6 +1680,47 @@
       }
     },
     "/games/{game_id}/negotiations": {
+      "get": {
+        "operationId": "list_negotiations_games__game_id__negotiations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NegotiationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Negotiations",
+        "tags": [
+          "games"
+        ]
+      },
       "post": {
         "operationId": "create_negotiation_games__game_id__negotiations_post",
         "parameters": [
@@ -1403,6 +1768,181 @@
           }
         },
         "summary": "Create Negotiation",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/negotiations/{negotiation_id}": {
+      "get": {
+        "operationId": "get_negotiation_games__game_id__negotiations__negotiation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "negotiation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Negotiation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NegotiationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Negotiation",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/negotiations/{negotiation_id}/execute": {
+      "post": {
+        "operationId": "execute_negotiation_games__game_id__negotiations__negotiation_id__execute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "negotiation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Negotiation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/NegotiationResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Execute Negotiation Games  Game Id  Negotiations  Negotiation Id  Execute Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Execute Negotiation",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/negotiations/{negotiation_id}/expire": {
+      "post": {
+        "operationId": "expire_negotiation_games__game_id__negotiations__negotiation_id__expire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "negotiation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Negotiation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/NegotiationResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Expire Negotiation Games  Game Id  Negotiations  Negotiation Id  Expire Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Expire Negotiation",
         "tags": [
           "games"
         ]
