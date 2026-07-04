@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
@@ -67,6 +68,15 @@ AUDIT_STATUS_CHANGED = "NEGOTIATION_STATUS_CHANGED"
 AUDIT_DEAL_ACCEPTED = "NEGOTIATION_DEAL_ACCEPTED"
 AUDIT_DEAL_REJECTED = "NEGOTIATION_DEAL_REJECTED"
 AUDIT_EXPIRED_BY_CUTOFF = "NEGOTIATION_EXPIRED_BY_CUTOFF"
+AUDIT_MESSAGE_SENT = "NEGOTIATION_MESSAGE_SENT"
+AUDIT_DEAL_PROPOSED = "NEGOTIATION_DEAL_PROPOSED"
+AUDIT_COUNTEROFFER_PROPOSED = "NEGOTIATION_COUNTEROFFER_PROPOSED"
+AUDIT_ACCEPTANCES_INVALIDATED = "NEGOTIATION_ACCEPTANCES_INVALIDATED"
+AUDIT_DEAL_VALIDATION_FAILED = "NEGOTIATION_DEAL_VALIDATION_FAILED"
+
+MESSAGE_TYPE_FREEFORM = "freeform_message"
+STRUCTURED_DEAL_KIND = "structured_deal"
+DEAL_SCHEMA_VERSION = 1
 
 NEGOTIATION_CUTOFF_DEFAULTS: dict[str, int | str] = {
     "max_rounds": 8,
@@ -250,7 +260,10 @@ class NegotiationResponse(BaseModel):
     round_number: int
     pending_deal_id: UUID | None
     current_deal_id: UUID | None
+    current_terms_hash: str | None
+    current_deal_version: int | None
     acceptances: Mapping[str, list[UUID]]
+    invalidated_acceptances: Mapping[str, list[UUID]]
     status_history: list[Mapping[str, Any]]
     expires_at: Any | None
     context: Mapping[str, Any]
@@ -269,13 +282,73 @@ class NegotiationsResponse(BaseModel):
     negotiations: list[NegotiationResponse]
 
 
+class CreateNegotiationMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sender_player_id: UUID | None = None
+    author_player_id: UUID | None = None
+    body: str = Field(min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_sender_alias(self) -> "CreateNegotiationMessageRequest":
+        if self.sender_player_id is None and self.author_player_id is None:
+            raise ValueError("sender_player_id is required")
+        if (
+            self.sender_player_id is not None
+            and self.author_player_id is not None
+            and self.sender_player_id != self.author_player_id
+        ):
+            raise ValueError("sender_player_id and author_player_id must match")
+        if self.sender_player_id is None:
+            self.sender_player_id = self.author_player_id
+        return self
+
+
+class NegotiationMessageResponse(BaseModel):
+    id: UUID
+    game_id: UUID
+    negotiation_id: UUID
+    sender_player_id: UUID | None
+    author_player_id: UUID | None
+    recipient_player_id: UUID | None
+    message_type: str
+    body: str | None
+    payload: Mapping[str, Any]
+    created_at: Any
+
+
+class NegotiationMessagesResponse(BaseModel):
+    messages: list[NegotiationMessageResponse]
+
+
+class NegotiationMessageMutationResponse(BaseModel):
+    status: Literal["ok"]
+    message: NegotiationMessageResponse
+
+
 class CreateDealRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    proposed_by_player_id: UUID
+    proposed_by_player_id: UUID | None = None
+    proposer_player_id: UUID | None = None
+    participant_player_ids: list[UUID] | None = None
     negotiation_id: UUID | None = None
     parent_deal_id: UUID | None = None
-    terms: dict[str, Any] = Field(min_length=1)
+    terms: dict[str, Any] | list[dict[str, Any]] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_proposer_alias(self) -> "CreateDealRequest":
+        if self.proposed_by_player_id is None and self.proposer_player_id is None:
+            raise ValueError("proposed_by_player_id is required")
+        if (
+            self.proposed_by_player_id is not None
+            and self.proposer_player_id is not None
+            and self.proposed_by_player_id != self.proposer_player_id
+        ):
+            raise ValueError("proposed_by_player_id and proposer_player_id must match")
+        if self.proposed_by_player_id is None:
+            self.proposed_by_player_id = self.proposer_player_id
+        return self
 
 
 class DealResponse(BaseModel):
@@ -283,10 +356,17 @@ class DealResponse(BaseModel):
     game_id: UUID
     negotiation_id: UUID | None
     proposed_by_player_id: UUID | None
+    proposer_player_id: UUID | None
+    participant_player_ids: list[UUID]
     parent_deal_id: UUID | None
     status: str
     version: int
+    deal_version: int
     terms: Mapping[str, Any]
+    structured_deal: bool
+    deal_schema_version: int | None
+    terms_hash: str
+    eligible_for_contract: bool
     validation_errors: Sequence[Mapping[str, Any]] | None
     created_at: Any
     updated_at: Any
@@ -593,6 +673,128 @@ async def get_negotiation(
     return _negotiation_response(row)
 
 
+@router.get(
+    "/{game_id}/negotiations/{negotiation_id}/messages",
+    response_model=NegotiationMessagesResponse,
+)
+async def list_negotiation_messages(
+    game_id: UUID,
+    negotiation_id: UUID,
+    request: Request,
+) -> NegotiationMessagesResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        negotiation_row = await _load_negotiation_row_for_update(
+            session=session,
+            game_id=game_id,
+            negotiation_id=negotiation_id,
+        )
+        if negotiation_row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="negotiation not found")
+        result = await session.execute(
+            sa.select(negotiation_messages)
+            .where(
+                negotiation_messages.c.game_id == game_id,
+                negotiation_messages.c.negotiation_id == negotiation_id,
+                negotiation_messages.c.message_type == MESSAGE_TYPE_FREEFORM,
+            )
+            .order_by(negotiation_messages.c.created_at, negotiation_messages.c.id)
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+    return NegotiationMessagesResponse(messages=[_negotiation_message_response(row) for row in rows])
+
+
+@router.post(
+    "/{game_id}/negotiations/{negotiation_id}/messages",
+    response_model=NegotiationMessageMutationResponse | LifecycleRejectedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_negotiation_message(
+    game_id: UUID,
+    negotiation_id: UUID,
+    request: Request,
+    payload: CreateNegotiationMessageRequest,
+) -> NegotiationMessageMutationResponse | JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    sender_player_id = _message_sender_player_id(payload)
+    await _ensure_player_in_game(session_factory, game_id, sender_player_id)
+
+    async with session_factory() as session:
+        async with session.begin():
+            negotiation_row = await _load_negotiation_row_for_update(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+            )
+            if negotiation_row is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="negotiation not found")
+            terminal_response = _reject_if_negotiation_terminal(negotiation_row["status"])
+            if terminal_response is not None:
+                return terminal_response
+
+            context = _normalized_negotiation_context(negotiation_row)
+            cutoff_response = await _expire_if_active_time_cutoff(
+                session=session,
+                game_id=game_id,
+                negotiation_row=negotiation_row,
+                context=context,
+                actor_player_id=sender_player_id,
+            )
+            if cutoff_response is not None:
+                return cutoff_response
+            if str(sender_player_id) not in context["participant_player_ids"]:
+                return _lifecycle_rejection_response(
+                    "sender_not_participant",
+                    "sender_player_id must be a negotiation participant",
+                    field="sender_player_id",
+                )
+
+            result = await session.execute(
+                negotiation_messages.insert()
+                .values(
+                    game_id=game_id,
+                    negotiation_id=negotiation_id,
+                    sender_player_id=sender_player_id,
+                    recipient_player_id=None,
+                    message_type=MESSAGE_TYPE_FREEFORM,
+                    body=payload.body.strip(),
+                    payload={
+                        "message_type": MESSAGE_TYPE_FREEFORM,
+                        "sender_player_id": str(sender_player_id),
+                    },
+                )
+                .returning(negotiation_messages)
+            )
+            row = dict(result.mappings().one())
+            await session.execute(
+                negotiations.update()
+                .where(negotiations.c.id == negotiation_id)
+                .values(updated_at=sa.func.now())
+            )
+            await _insert_negotiation_audit_message(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+                sender_player_id=sender_player_id,
+                message_type=AUDIT_MESSAGE_SENT,
+                payload={
+                    "message_id": str(row["id"]),
+                    "message_type": MESSAGE_TYPE_FREEFORM,
+                    "sender_player_id": str(sender_player_id),
+                    "changed_game_state": False,
+                    "created_contract": False,
+                    "created_game_event": False,
+                },
+            )
+
+    return NegotiationMessageMutationResponse(
+        status="ok",
+        message=_negotiation_message_response(row),
+    )
+
+
 @router.post(
     "/{game_id}/negotiations",
     response_model=NegotiationResponse,
@@ -646,8 +848,11 @@ async def create_deal(
     payload: CreateDealRequest,
 ) -> DealResponse | JSONResponse:
     session_factory = _session_factory(request)
+    proposed_by_player_id = _deal_proposed_by_player_id(payload)
     await _ensure_game_exists(session_factory, game_id)
-    await _ensure_player_in_game(session_factory, game_id, payload.proposed_by_player_id)
+    await _ensure_player_in_game(session_factory, game_id, proposed_by_player_id)
+    if payload.participant_player_ids:
+        await _ensure_player_ids_in_game(session_factory, game_id, payload.participant_player_ids)
 
     async with session_factory() as session:
         async with session.begin():
@@ -655,6 +860,9 @@ async def create_deal(
             next_negotiation_status: str | None = None
             next_round_number: int | None = None
             context: dict[str, Any] | None = None
+            participant_player_ids: list[str] = [
+                str(player_id) for player_id in payload.participant_player_ids or []
+            ]
 
             if payload.negotiation_id is not None:
                 negotiation_row = await _load_negotiation_row_for_update(
@@ -681,17 +889,26 @@ async def create_deal(
                     game_id=game_id,
                     negotiation_row=negotiation_row,
                     context=context,
-                    actor_player_id=payload.proposed_by_player_id,
+                    actor_player_id=proposed_by_player_id,
                 )
                 if cutoff_response is not None:
                     return cutoff_response
 
                 participant_ids = set(context["participant_player_ids"])
-                if str(payload.proposed_by_player_id) not in participant_ids:
+                participant_player_ids = list(context["participant_player_ids"])
+                if str(proposed_by_player_id) not in participant_ids:
                     return _lifecycle_rejection_response(
                         "proposer_not_participant",
                         "proposed_by_player_id must be a negotiation participant",
                         field="proposed_by_player_id",
+                    )
+                if payload.participant_player_ids and set(participant_player_ids) != {
+                    str(player_id) for player_id in payload.participant_player_ids
+                }:
+                    return _lifecycle_rejection_response(
+                        "participants_must_match_negotiation",
+                        "participant_player_ids must match the negotiation participants",
+                        field="participant_player_ids",
                     )
 
                 current_deal_id = context.get("current_deal_id")
@@ -734,7 +951,7 @@ async def create_deal(
                 )
                 proposal_cutoff_reason = _proposal_cutoff_reason(
                     context=context,
-                    proposed_by_player_id=str(payload.proposed_by_player_id),
+                    proposed_by_player_id=str(proposed_by_player_id),
                     next_round_number=next_round_number,
                 )
                 if proposal_cutoff_reason is not None:
@@ -744,7 +961,7 @@ async def create_deal(
                         negotiation_row=negotiation_row,
                         context=context,
                         cutoff_reason=proposal_cutoff_reason,
-                        actor_player_id=payload.proposed_by_player_id,
+                        actor_player_id=proposed_by_player_id,
                     )
 
             elif payload.parent_deal_id is not None:
@@ -760,6 +977,37 @@ async def create_deal(
                         field="parent_deal_id",
                     )
 
+            prepared_terms = _prepare_deal_terms(
+                payload.terms,
+                participant_player_ids=participant_player_ids,
+            )
+            if prepared_terms.validation_errors:
+                await _persist_invalid_deal(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_id=payload.negotiation_id,
+                    proposed_by_player_id=proposed_by_player_id,
+                    parent_deal_id=payload.parent_deal_id,
+                    raw_terms=payload.terms,
+                    validation_errors=prepared_terms.validation_errors,
+                )
+                if payload.negotiation_id is not None:
+                    await _insert_negotiation_audit_message(
+                        session=session,
+                        game_id=game_id,
+                        negotiation_id=payload.negotiation_id,
+                        sender_player_id=proposed_by_player_id,
+                        message_type=AUDIT_DEAL_VALIDATION_FAILED,
+                        payload={
+                            "validation_errors": prepared_terms.validation_errors,
+                            "structured_deal": prepared_terms.structured_deal,
+                        },
+                    )
+                return _lifecycle_rejection_response_from_errors(
+                    "invalid_structured_deal",
+                    prepared_terms.validation_errors,
+                )
+
             version = await _next_deal_version_in_session(
                 session=session,
                 game_id=game_id,
@@ -770,11 +1018,11 @@ async def create_deal(
                 .values(
                     game_id=game_id,
                     negotiation_id=payload.negotiation_id,
-                    proposed_by_player_id=payload.proposed_by_player_id,
+                    proposed_by_player_id=proposed_by_player_id,
                     parent_deal_id=payload.parent_deal_id,
                     status="proposed",
                     version=version,
-                    terms=dict(payload.terms),
+                    terms=prepared_terms.terms,
                     validation_errors=None,
                 )
                 .returning(deals)
@@ -784,19 +1032,37 @@ async def create_deal(
             if negotiation_row is not None and context is not None:
                 if next_negotiation_status is None or next_round_number is None:
                     raise RuntimeError("negotiation proposal transition was not resolved")
+                previous_current_deal_id = context.get("current_deal_id")
+                previous_terms_hash = context.get("current_terms_hash")
+                previous_acceptances = (
+                    list(context.get("acceptances", {}).get(str(previous_current_deal_id), []))
+                    if previous_current_deal_id is not None
+                    else []
+                )
+                changed_counteroffer = (
+                    payload.parent_deal_id is not None
+                    and previous_terms_hash is not None
+                    and previous_terms_hash != prepared_terms.terms_hash
+                )
+                if changed_counteroffer and previous_current_deal_id and previous_acceptances:
+                    invalidated = context.setdefault("invalidated_acceptances", {})
+                    invalidated[str(previous_current_deal_id)] = previous_acceptances
                 context["pending_deal_id"] = str(row["id"])
                 context["current_deal_id"] = str(row["id"])
                 context["current_parent_deal_id"] = (
                     None if payload.parent_deal_id is None else str(payload.parent_deal_id)
                 )
+                context["current_terms_hash"] = prepared_terms.terms_hash
+                context["current_deal_version"] = version
+                context["current_deal_structured"] = prepared_terms.structured_deal
                 context.setdefault("acceptances", {})[str(row["id"])] = []
                 _increment_count(
                     context.setdefault("proposal_counts_by_player_id", {}),
-                    str(payload.proposed_by_player_id),
+                    str(proposed_by_player_id),
                 )
                 _increment_count(
                     context.setdefault("pending_offer_counts_by_player_id", {}),
-                    str(payload.proposed_by_player_id),
+                    str(proposed_by_player_id),
                 )
                 if negotiation_row["status"] != next_negotiation_status:
                     _append_status_history(
@@ -817,12 +1083,50 @@ async def create_deal(
                         updated_at=sa.func.now(),
                     )
                 )
+                await _insert_negotiation_audit_message(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_id=negotiation_row["id"],
+                    sender_player_id=proposed_by_player_id,
+                    message_type=(
+                        AUDIT_COUNTEROFFER_PROPOSED
+                        if payload.parent_deal_id is not None
+                        else AUDIT_DEAL_PROPOSED
+                    ),
+                    payload={
+                        "deal_id": str(row["id"]),
+                        "parent_deal_id": None
+                        if payload.parent_deal_id is None
+                        else str(payload.parent_deal_id),
+                        "deal_version": version,
+                        "version": version,
+                        "terms_hash": prepared_terms.terms_hash,
+                        "structured_deal": prepared_terms.structured_deal,
+                        "counteroffer": payload.parent_deal_id is not None,
+                    },
+                )
+                if changed_counteroffer and previous_current_deal_id and previous_acceptances:
+                    await _insert_negotiation_audit_message(
+                        session=session,
+                        game_id=game_id,
+                        negotiation_id=negotiation_row["id"],
+                        sender_player_id=proposed_by_player_id,
+                        message_type=AUDIT_ACCEPTANCES_INVALIDATED,
+                        payload={
+                            "deal_id": str(previous_current_deal_id),
+                            "replacement_deal_id": str(row["id"]),
+                            "invalidated_acceptances": previous_acceptances,
+                            "previous_terms_hash": previous_terms_hash,
+                            "current_terms_hash": prepared_terms.terms_hash,
+                            "exact_term_acceptance": True,
+                        },
+                    )
                 if negotiation_row["status"] != next_negotiation_status:
                     await _insert_negotiation_audit_message(
                         session=session,
                         game_id=game_id,
                         negotiation_id=negotiation_row["id"],
-                        sender_player_id=payload.proposed_by_player_id,
+                        sender_player_id=proposed_by_player_id,
                         message_type=AUDIT_STATUS_CHANGED,
                         payload={
                             "from_status": negotiation_row["status"],
@@ -1013,6 +1317,15 @@ async def execute_negotiation(
                     "current_deal_not_accepted",
                     "current deal must be accepted before execution",
                     field="current_deal_id",
+                )
+            current_deal_terms = (
+                current_deal["terms"] if isinstance(current_deal["terms"], Mapping) else {}
+            )
+            if context.get("current_terms_hash") != _terms_hash_for_response(current_deal_terms):
+                return _lifecycle_rejection_response(
+                    "exact_term_acceptance_required",
+                    "accepted current deal must match the negotiation terms_hash",
+                    field="current_terms_hash",
                 )
             missing_acceptances = _missing_acceptances(context, str(current_deal_id))
             if missing_acceptances:
@@ -1246,6 +1559,263 @@ async def _load_game_settings(
     return dict(settings_row)
 
 
+@dataclass(frozen=True)
+class PreparedDealTerms:
+    terms: dict[str, Any]
+    terms_hash: str
+    structured_deal: bool
+    deal_schema_version: int | None
+    participant_player_ids: list[str]
+    validation_errors: list[dict[str, str]]
+
+
+def _message_sender_player_id(payload: CreateNegotiationMessageRequest) -> UUID:
+    if payload.sender_player_id is None:
+        raise RuntimeError("message sender was not resolved")
+    return payload.sender_player_id
+
+
+def _deal_proposed_by_player_id(payload: CreateDealRequest) -> UUID:
+    if payload.proposed_by_player_id is None:
+        raise RuntimeError("deal proposer was not resolved")
+    return payload.proposed_by_player_id
+
+
+def _prepare_deal_terms(
+    raw_terms: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+    *,
+    participant_player_ids: Sequence[str],
+) -> PreparedDealTerms:
+    validation_errors: list[dict[str, str]] = []
+    if isinstance(raw_terms, Mapping):
+        source = _json_safe_mapping(raw_terms)
+    elif isinstance(raw_terms, Sequence) and not isinstance(raw_terms, (str, bytes)):
+        source: dict[str, Any] = {
+            "kind": STRUCTURED_DEAL_KIND,
+            "deal_schema_version": DEAL_SCHEMA_VERSION,
+            "participants": list(participant_player_ids),
+            "terms": [dict(term) for term in raw_terms if isinstance(term, Mapping)],
+        }
+        if len(source["terms"]) != len(raw_terms):
+            validation_errors.append(
+                _deal_validation_error("invalid_structured_deal", "each term must be an object", "terms")
+            )
+    else:
+        source = {}
+        validation_errors.append(
+            _deal_validation_error("invalid_structured_deal", "terms must be an object or list", "terms")
+        )
+
+    if source.get("kind") != STRUCTURED_DEAL_KIND:
+        terms = _json_safe_mapping(source)
+        return PreparedDealTerms(
+            terms=terms,
+            terms_hash=_canonical_hash(terms),
+            structured_deal=False,
+            deal_schema_version=None,
+            participant_player_ids=[],
+            validation_errors=[],
+        )
+
+    raw_version = source.get("deal_schema_version")
+    if isinstance(raw_version, bool) or not isinstance(raw_version, int) or raw_version < 1:
+        validation_errors.append(
+            _deal_validation_error(
+                "invalid_structured_deal",
+                "deal_schema_version must be a positive integer",
+                "deal_schema_version",
+            )
+        )
+        deal_schema_version: int | None = None
+    else:
+        deal_schema_version = raw_version
+
+    raw_participants = source.get("participants", source.get("participant_player_ids"))
+    participants = _normalized_uuid_strings(raw_participants)
+    if len(participants) < 2:
+        validation_errors.append(
+            _deal_validation_error(
+                "invalid_structured_deal",
+                "participants must include at least two players",
+                "participants",
+            )
+        )
+    if len(set(participants)) != len(participants):
+        validation_errors.append(
+            _deal_validation_error(
+                "invalid_structured_deal",
+                "participants must be unique",
+                "participants",
+            )
+        )
+    if raw_participants is not None and len(participants) != _sequence_length(raw_participants):
+        validation_errors.append(
+            _deal_validation_error(
+                "invalid_structured_deal",
+                "participants must be player UUID strings",
+                "participants",
+            )
+        )
+    if participant_player_ids and set(participants) != set(participant_player_ids):
+        validation_errors.append(
+            _deal_validation_error(
+                "invalid_structured_deal",
+                "participants must match the negotiation participants",
+                "participants",
+            )
+        )
+
+    raw_items = source.get("terms")
+    term_items: list[dict[str, Any]] = []
+    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes, Mapping)):
+        validation_errors.append(
+            _deal_validation_error("invalid_structured_deal", "terms must be a list", "terms")
+        )
+    else:
+        for index, item in enumerate(raw_items):
+            if not isinstance(item, Mapping):
+                validation_errors.append(
+                    _deal_validation_error(
+                        "invalid_structured_deal",
+                        "each term must be an object",
+                        f"terms.{index}",
+                    )
+                )
+                continue
+            term = _json_safe_mapping(item)
+            term_kind = term.get("kind")
+            if not isinstance(term_kind, str) or not term_kind.strip():
+                validation_errors.append(
+                    _deal_validation_error(
+                        "invalid_structured_deal",
+                        "each term must include a non-empty kind",
+                        f"terms.{index}.kind",
+                    )
+                )
+                continue
+            term["kind"] = term_kind.strip()
+            term_items.append(term)
+    if not term_items:
+        validation_errors.append(
+            _deal_validation_error(
+                "invalid_structured_deal",
+                "terms must include at least one structured term",
+                "terms",
+            )
+        )
+
+    ordered_participants = _ordered_participants(participants, participant_player_ids)
+    canonical_terms: dict[str, Any] = {
+        "kind": STRUCTURED_DEAL_KIND,
+        "deal_schema_version": deal_schema_version or DEAL_SCHEMA_VERSION,
+        "participants": ordered_participants,
+        "terms": term_items,
+    }
+    terms_hash = _canonical_hash(canonical_terms)
+    canonical_terms["terms_hash"] = terms_hash
+    return PreparedDealTerms(
+        terms=canonical_terms,
+        terms_hash=terms_hash,
+        structured_deal=True,
+        deal_schema_version=deal_schema_version,
+        participant_player_ids=ordered_participants,
+        validation_errors=validation_errors,
+    )
+
+
+def _deal_validation_error(code: str, message: str, field: str) -> dict[str, str]:
+    return {"code": code, "message": message, "field": field}
+
+
+def _normalized_uuid_strings(value: object) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, Mapping)):
+        return []
+    normalized: list[str] = []
+    for item in value:
+        try:
+            normalized.append(str(UUID(str(item))))
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _sequence_length(value: object) -> int:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, Mapping)):
+        return 0
+    return len(value)
+
+
+def _ordered_participants(participants: Sequence[str], negotiation_order: Sequence[str]) -> list[str]:
+    participant_set = set(participants)
+    if negotiation_order:
+        return [player_id for player_id in negotiation_order if player_id in participant_set]
+    return [str(player_id) for player_id in participants]
+
+
+def _json_safe_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    safe = _json_safe(value)
+    if not isinstance(safe, dict):
+        raise TypeError("expected JSON object")
+    return safe
+
+
+def _json_safe(value: object) -> Any:
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _canonical_hash(value: Mapping[str, Any]) -> str:
+    serialized = json.dumps(
+        _json_safe_mapping(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+async def _persist_invalid_deal(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID | None,
+    proposed_by_player_id: UUID,
+    parent_deal_id: UUID | None,
+    raw_terms: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+    validation_errors: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    version = await _next_rejected_deal_version_in_session(
+        session=session,
+        game_id=game_id,
+        negotiation_id=negotiation_id,
+    )
+    terms = _json_safe(raw_terms)
+    if not isinstance(terms, (dict, list)):
+        terms = {"submitted_terms": terms}
+    result = await session.execute(
+        deals.insert()
+        .values(
+            game_id=game_id,
+            negotiation_id=negotiation_id,
+            proposed_by_player_id=proposed_by_player_id,
+            parent_deal_id=parent_deal_id,
+            status=DEAL_STATUS_REJECTED,
+            version=version,
+            terms=terms,
+            validation_errors=[dict(error) for error in validation_errors],
+        )
+        .returning(deals)
+    )
+    return dict(result.mappings().one())
+
+
 def _initial_negotiation_context(
     payload: CreateNegotiationRequest,
     *,
@@ -1257,7 +1827,11 @@ def _initial_negotiation_context(
         "pending_deal_id": None,
         "current_deal_id": None,
         "current_parent_deal_id": None,
+        "current_terms_hash": None,
+        "current_deal_version": None,
+        "current_deal_structured": False,
         "acceptances": {},
+        "invalidated_acceptances": {},
         "status_history": [
             {
                 "from_status": None,
@@ -1350,6 +1924,14 @@ def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(player_ids, Sequence) and not isinstance(player_ids, str):
             acceptances[str(deal_id)] = [str(player_id) for player_id in player_ids]
 
+    raw_invalidated_acceptances = stored_context.get("invalidated_acceptances", {})
+    if not isinstance(raw_invalidated_acceptances, Mapping):
+        raw_invalidated_acceptances = {}
+    invalidated_acceptances: dict[str, list[str]] = {}
+    for deal_id, player_ids in raw_invalidated_acceptances.items():
+        if isinstance(player_ids, Sequence) and not isinstance(player_ids, str):
+            invalidated_acceptances[str(deal_id)] = [str(player_id) for player_id in player_ids]
+
     raw_status_history = stored_context.get("status_history", [])
     status_history = [
         dict(item) for item in raw_status_history if isinstance(item, Mapping)
@@ -1363,7 +1945,11 @@ def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
         "pending_deal_id": _string_or_none(stored_context.get("pending_deal_id")),
         "current_deal_id": _string_or_none(stored_context.get("current_deal_id")),
         "current_parent_deal_id": _string_or_none(stored_context.get("current_parent_deal_id")),
+        "current_terms_hash": _string_or_none(stored_context.get("current_terms_hash")),
+        "current_deal_version": _int_or_none(stored_context.get("current_deal_version")),
+        "current_deal_structured": stored_context.get("current_deal_structured") is True,
         "acceptances": acceptances,
+        "invalidated_acceptances": invalidated_acceptances,
         "status_history": status_history,
         "expires_at": _string_or_none(stored_context.get("expires_at")),
         "cutoff_policy": cutoff_policy,
@@ -1388,7 +1974,11 @@ def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
                 "pending_deal_id",
                 "current_deal_id",
                 "current_parent_deal_id",
+                "current_terms_hash",
+                "current_deal_version",
+                "current_deal_structured",
                 "acceptances",
+                "invalidated_acceptances",
                 "status_history",
                 "expires_at",
                 "cutoff_policy",
@@ -1725,9 +2315,26 @@ async def _next_deal_version_in_session(
         sa.select(sa.func.coalesce(sa.func.max(deals.c.version), 0)).where(
             deals.c.game_id == game_id,
             deals.c.negotiation_id == negotiation_id,
+            deals.c.version > 0,
         )
     )
     return int(result.scalar_one()) + 1
+
+
+async def _next_rejected_deal_version_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID | None,
+) -> int:
+    result = await session.execute(
+        sa.select(sa.func.coalesce(sa.func.min(deals.c.version), 0)).where(
+            deals.c.game_id == game_id,
+            deals.c.negotiation_id == negotiation_id,
+            deals.c.version < 0,
+        )
+    )
+    return int(result.scalar_one()) - 1
 
 
 async def _insert_negotiation_audit_message(
@@ -1770,6 +2377,20 @@ def _lifecycle_rejection_response(
                     "field": field,
                 }
             ],
+        },
+    )
+
+
+def _lifecycle_rejection_response_from_errors(
+    reason_code: str,
+    validation_errors: Sequence[Mapping[str, Any]],
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={
+            "status": "rejected",
+            "reason_code": reason_code,
+            "validation_errors": [dict(error) for error in validation_errors],
         },
     )
 
@@ -1869,10 +2490,19 @@ async def _record_deal_acceptance_or_rejection(
                 return cutoff_response
 
             current_deal_id = context.get("current_deal_id")
-            if current_deal_id != str(deal_id):
+            current_terms_hash = context.get("current_terms_hash")
+            deal_terms = deal_row["terms"] if isinstance(deal_row["terms"], Mapping) else {}
+            deal_terms_hash = _terms_hash_for_response(deal_terms)
+            if current_deal_id != str(deal_id) or current_terms_hash != deal_terms_hash:
                 return _lifecycle_rejection_response(
-                    "deal_not_current",
-                    "only the current proposal can be accepted or rejected",
+                    "exact_term_acceptance_required",
+                    "acceptance must target the current deal and exact current terms_hash",
+                    field="deal_id",
+                )
+            if str(deal_id) in context.get("invalidated_acceptances", {}):
+                return _lifecycle_rejection_response(
+                    "exact_term_acceptance_required",
+                    "acceptances invalidated by a changed counteroffer cannot be reused",
                     field="deal_id",
                 )
             if deal_row["status"] != DEAL_STATUS_PROPOSED:
@@ -1954,6 +2584,9 @@ async def _accept_current_deal(
             "player_id": actor_player_id,
             "accepted_player_ids": acceptances[deal_id],
             "round_number": negotiation_row["round_number"],
+            "terms_hash": context.get("current_terms_hash"),
+            "current_deal_id": context.get("current_deal_id"),
+            "exact_term_acceptance": True,
         },
     )
 
@@ -2120,6 +2753,19 @@ def _string_or_none(value: object) -> str | None:
     return str(value)
 
 
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _audit_time_marker() -> str:
     return "expired"
 
@@ -2209,6 +2855,7 @@ async def _next_deal_version(
             sa.select(sa.func.coalesce(sa.func.max(deals.c.version), 0)).where(
                 deals.c.game_id == game_id,
                 deals.c.negotiation_id == negotiation_id,
+                deals.c.version > 0,
             )
         )
         return int(result.scalar_one()) + 1
@@ -2495,6 +3142,21 @@ def _rejected_response(record: RejectedActionRecord) -> RejectedActionResponse:
     return RejectedActionResponse.model_validate(record.model_dump())
 
 
+def _negotiation_message_response(row: Mapping[str, Any]) -> NegotiationMessageResponse:
+    return NegotiationMessageResponse(
+        id=row["id"],
+        game_id=row["game_id"],
+        negotiation_id=row["negotiation_id"],
+        sender_player_id=row["sender_player_id"],
+        author_player_id=row["sender_player_id"],
+        recipient_player_id=row["recipient_player_id"],
+        message_type=row["message_type"],
+        body=row["body"],
+        payload=row["payload"],
+        created_at=row["created_at"],
+    )
+
+
 def _negotiation_response(row: Mapping[str, Any]) -> NegotiationResponse:
     stored_context = _normalized_negotiation_context(row)
     participant_ids = stored_context["participant_player_ids"]
@@ -2509,9 +3171,15 @@ def _negotiation_response(row: Mapping[str, Any]) -> NegotiationResponse:
         round_number=row["round_number"],
         pending_deal_id=_uuid_or_none(stored_context["pending_deal_id"]),
         current_deal_id=_uuid_or_none(stored_context["current_deal_id"]),
+        current_terms_hash=stored_context["current_terms_hash"],
+        current_deal_version=stored_context["current_deal_version"],
         acceptances={
             str(deal_id): [UUID(str(player_id)) for player_id in player_ids]
             for deal_id, player_ids in stored_context["acceptances"].items()
+        },
+        invalidated_acceptances={
+            str(deal_id): [UUID(str(player_id)) for player_id in player_ids]
+            for deal_id, player_ids in stored_context["invalidated_acceptances"].items()
         },
         status_history=list(stored_context["status_history"]),
         expires_at=stored_context["expires_at"],
@@ -2531,20 +3199,62 @@ def _negotiation_response(row: Mapping[str, Any]) -> NegotiationResponse:
 
 
 def _deal_response(row: Mapping[str, Any]) -> DealResponse:
+    terms = row["terms"]
+    terms_mapping = terms if isinstance(terms, Mapping) else {}
+    structured_deal = _is_structured_deal_terms(terms_mapping)
+    terms_hash = _terms_hash_for_response(terms_mapping)
     return DealResponse(
         id=row["id"],
         game_id=row["game_id"],
         negotiation_id=row["negotiation_id"],
         proposed_by_player_id=row["proposed_by_player_id"],
+        proposer_player_id=row["proposed_by_player_id"],
+        participant_player_ids=_participant_ids_for_deal_terms(terms_mapping),
         parent_deal_id=row["parent_deal_id"],
         status=row["status"],
         version=row["version"],
+        deal_version=row["version"],
         terms=row["terms"],
+        structured_deal=structured_deal,
+        deal_schema_version=_deal_schema_version_for_terms(terms_mapping),
+        terms_hash=terms_hash,
+        eligible_for_contract=_eligible_for_contract(row, structured_deal=structured_deal),
         validation_errors=row["validation_errors"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         accepted_at=row["accepted_at"],
     )
+
+
+def _is_structured_deal_terms(terms: Mapping[str, Any]) -> bool:
+    return terms.get("kind") == STRUCTURED_DEAL_KIND and isinstance(terms.get("terms_hash"), str)
+
+
+def _deal_schema_version_for_terms(terms: Mapping[str, Any]) -> int | None:
+    if not _is_structured_deal_terms(terms):
+        return None
+    version = terms.get("deal_schema_version")
+    return version if isinstance(version, int) and not isinstance(version, bool) else None
+
+
+def _terms_hash_for_response(terms: Mapping[str, Any]) -> str:
+    terms_hash = terms.get("terms_hash")
+    if isinstance(terms_hash, str) and terms_hash:
+        return terms_hash
+    return _canonical_hash(_json_safe_mapping(terms))
+
+
+def _participant_ids_for_deal_terms(terms: Mapping[str, Any]) -> list[UUID]:
+    participants = terms.get("participants", terms.get("participant_player_ids", []))
+    return [UUID(player_id) for player_id in _normalized_uuid_strings(participants)]
+
+
+def _eligible_for_contract(
+    row: Mapping[str, Any],
+    *,
+    structured_deal: bool,
+) -> bool:
+    return row["status"] == DEAL_STATUS_ACCEPTED and structured_deal
 
 
 def _raw_actor_id(raw_payload: object) -> str | None:
