@@ -2,6 +2,7 @@
 node_modules/
 .pnpm-store/
 .yarn/
+apps/web/next-env.d.ts
 .next/
 *.tsbuildinfo
 out/

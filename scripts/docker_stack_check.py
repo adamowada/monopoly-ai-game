@@ -45,12 +45,15 @@ def check_required_files() -> None:
 
 def check_no_later_stage_artifacts() -> None:
     for relative_path in [
-        "packages/schemas/openapi.json",
-        "packages/schemas/src/generated",
+        "services/api/app/rules",
+        "services/api/app/ai",
+        "services/api/app/rag",
+        "services/api/app/mcp",
+        "services/api/app/negotiations",
     ]:
         require(
             not (ROOT / relative_path).exists(),
-            f"Stage 1.2 must not create later-stage artifact: {relative_path}",
+            f"Phase 1 stack checks must not create later-stage artifact: {relative_path}",
         )
 
 
