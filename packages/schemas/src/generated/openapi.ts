@@ -243,6 +243,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/negotiations/{negotiation_id}/messages/{message_id}/ai-decision-attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Negotiation Ai Decision Attempt */
+        post: operations["record_negotiation_ai_decision_attempt_games__game_id__negotiations__negotiation_id__messages__message_id__ai_decision_attempts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/rejected-actions": {
         parameters: {
             query?: never;
@@ -347,6 +364,11 @@ export interface components {
              * @constant
              */
             status: "accepted";
+        };
+        /** AiDecisionAttemptRequest */
+        AiDecisionAttemptRequest: {
+            /** Player Id */
+            player_id?: string | null;
         };
         /** AiStepNotImplementedResponse */
         AiStepNotImplementedResponse: {
@@ -605,6 +627,10 @@ export interface components {
             acceptances: {
                 [key: string]: string[];
             };
+            /** Ai Decision Attempts By Message Id */
+            ai_decision_attempts_by_message_id: {
+                [key: string]: number;
+            };
             /** Closed At */
             closed_at: unknown | null;
             /** Context */
@@ -615,6 +641,14 @@ export interface components {
             created_at: unknown;
             /** Current Deal Id */
             current_deal_id: string | null;
+            /** Cutoff Policy */
+            cutoff_policy: {
+                [key: string]: unknown;
+            };
+            /** Cutoff Reason */
+            cutoff_reason: string | null;
+            /** Expired By Cutoff */
+            expired_by_cutoff: boolean;
             /** Expires At */
             expires_at: unknown | null;
             /**
@@ -633,8 +667,16 @@ export interface components {
             participant_player_ids: string[];
             /** Pending Deal Id */
             pending_deal_id: string | null;
+            /** Pending Offer Counts By Player Id */
+            pending_offer_counts_by_player_id: {
+                [key: string]: number;
+            };
             /** Phase */
             phase: string | null;
+            /** Proposal Counts By Player Id */
+            proposal_counts_by_player_id: {
+                [key: string]: number;
+            };
             /** Round Number */
             round_number: number;
             /** Status */
@@ -1240,6 +1282,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_negotiation_ai_decision_attempt_games__game_id__negotiations__negotiation_id__messages__message_id__ai_decision_attempts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AiDecisionAttemptRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

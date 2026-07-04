@@ -103,6 +103,25 @@
         "title": "ActionAcceptedResponse",
         "type": "object"
       },
+      "AiDecisionAttemptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player Id"
+          }
+        },
+        "title": "AiDecisionAttemptRequest",
+        "type": "object"
+      },
       "AiStepNotImplementedResponse": {
         "properties": {
           "game_id": {
@@ -709,6 +728,13 @@
             "title": "Acceptances",
             "type": "object"
           },
+          "ai_decision_attempts_by_message_id": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Ai Decision Attempts By Message Id",
+            "type": "object"
+          },
           "closed_at": {
             "anyOf": [
               {},
@@ -737,6 +763,26 @@
               }
             ],
             "title": "Current Deal Id"
+          },
+          "cutoff_policy": {
+            "additionalProperties": true,
+            "title": "Cutoff Policy",
+            "type": "object"
+          },
+          "cutoff_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cutoff Reason"
+          },
+          "expired_by_cutoff": {
+            "title": "Expired By Cutoff",
+            "type": "boolean"
           },
           "expires_at": {
             "anyOf": [
@@ -789,6 +835,13 @@
             ],
             "title": "Pending Deal Id"
           },
+          "pending_offer_counts_by_player_id": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Pending Offer Counts By Player Id",
+            "type": "object"
+          },
           "phase": {
             "anyOf": [
               {
@@ -799,6 +852,13 @@
               }
             ],
             "title": "Phase"
+          },
+          "proposal_counts_by_player_id": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Proposal Counts By Player Id",
+            "type": "object"
           },
           "round_number": {
             "title": "Round Number",
@@ -834,6 +894,12 @@
           "status_history",
           "expires_at",
           "context",
+          "cutoff_policy",
+          "proposal_counts_by_player_id",
+          "pending_offer_counts_by_player_id",
+          "ai_decision_attempts_by_message_id",
+          "cutoff_reason",
+          "expired_by_cutoff",
           "created_at",
           "updated_at",
           "closed_at"
@@ -1943,6 +2009,94 @@
           }
         },
         "summary": "Expire Negotiation",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/negotiations/{negotiation_id}/messages/{message_id}/ai-decision-attempts": {
+      "post": {
+        "operationId": "record_negotiation_ai_decision_attempt_games__game_id__negotiations__negotiation_id__messages__message_id__ai_decision_attempts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "negotiation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Negotiation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AiDecisionAttemptRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/NegotiationResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Record Negotiation Ai Decision Attempt Games  Game Id  Negotiations  Negotiation Id  Messages  Message Id  Ai Decision Attempts Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Negotiation Ai Decision Attempt",
         "tags": [
           "games"
         ]

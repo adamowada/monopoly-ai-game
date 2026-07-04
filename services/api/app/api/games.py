@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
@@ -66,6 +66,22 @@ DEAL_STATUS_EXPIRED = "expired"
 AUDIT_STATUS_CHANGED = "NEGOTIATION_STATUS_CHANGED"
 AUDIT_DEAL_ACCEPTED = "NEGOTIATION_DEAL_ACCEPTED"
 AUDIT_DEAL_REJECTED = "NEGOTIATION_DEAL_REJECTED"
+AUDIT_EXPIRED_BY_CUTOFF = "NEGOTIATION_EXPIRED_BY_CUTOFF"
+
+NEGOTIATION_CUTOFF_DEFAULTS: dict[str, int | str] = {
+    "max_rounds": 8,
+    "max_proposals_per_player": 8,
+    "max_active_seconds": 900,
+    "max_ai_decision_attempts": 3,
+    "max_pending_offers_per_player": 4,
+    "negotiation_intensity": "standard",
+}
+
+CUTOFF_MAX_ROUNDS = "negotiation_cutoff_max_rounds"
+CUTOFF_MAX_PROPOSALS_PER_PLAYER = "negotiation_cutoff_max_proposals_per_player"
+CUTOFF_MAX_ACTIVE_SECONDS = "negotiation_cutoff_max_active_seconds"
+CUTOFF_MAX_AI_DECISION_ATTEMPTS = "negotiation_cutoff_max_ai_decision_attempts"
+CUTOFF_MAX_PENDING_OFFERS_PER_PLAYER = "negotiation_cutoff_max_pending_offers_per_player"
 
 
 class PlayerCreateRequest(BaseModel):
@@ -238,6 +254,12 @@ class NegotiationResponse(BaseModel):
     status_history: list[Mapping[str, Any]]
     expires_at: Any | None
     context: Mapping[str, Any]
+    cutoff_policy: Mapping[str, Any]
+    proposal_counts_by_player_id: Mapping[str, int]
+    pending_offer_counts_by_player_id: Mapping[str, int]
+    ai_decision_attempts_by_message_id: Mapping[str, int]
+    cutoff_reason: str | None
+    expired_by_cutoff: bool
     created_at: Any
     updated_at: Any
     closed_at: Any | None
@@ -272,6 +294,12 @@ class DealResponse(BaseModel):
 
 
 class DealDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: UUID | None = None
+
+
+class AiDecisionAttemptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: UUID | None = None
@@ -576,7 +604,7 @@ async def create_negotiation(
     payload: CreateNegotiationRequest,
 ) -> NegotiationResponse:
     session_factory = _session_factory(request)
-    await _ensure_game_exists(session_factory, game_id)
+    game_settings = await _load_game_settings(session_factory, game_id)
     await _ensure_player_ids_in_game(
         session_factory,
         game_id,
@@ -584,7 +612,10 @@ async def create_negotiation(
     )
     state = await _load_replayed_state(session_factory, game_id)
 
-    stored_context = _initial_negotiation_context(payload)
+    stored_context = _initial_negotiation_context(
+        payload,
+        cutoff_policy=_negotiation_cutoff_policy(game_settings),
+    )
     async with session_factory() as session:
         async with session.begin():
             result = await session.execute(
@@ -645,6 +676,16 @@ async def create_deal(
                     return terminal_response
 
                 context = _normalized_negotiation_context(negotiation_row)
+                cutoff_response = await _expire_if_active_time_cutoff(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_row=negotiation_row,
+                    context=context,
+                    actor_player_id=payload.proposed_by_player_id,
+                )
+                if cutoff_response is not None:
+                    return cutoff_response
+
                 participant_ids = set(context["participant_player_ids"])
                 if str(payload.proposed_by_player_id) not in participant_ids:
                     return _lifecycle_rejection_response(
@@ -684,6 +725,27 @@ async def create_deal(
                 else:
                     next_negotiation_status = NEGOTIATION_STATUS_ACTIVE
                     next_round_number = max(int(negotiation_row["round_number"]) + 1, 1)
+
+                await _refresh_negotiation_offer_counts(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_id=payload.negotiation_id,
+                    context=context,
+                )
+                proposal_cutoff_reason = _proposal_cutoff_reason(
+                    context=context,
+                    proposed_by_player_id=str(payload.proposed_by_player_id),
+                    next_round_number=next_round_number,
+                )
+                if proposal_cutoff_reason is not None:
+                    return await _expire_negotiation_by_cutoff_and_reject(
+                        session=session,
+                        game_id=game_id,
+                        negotiation_row=negotiation_row,
+                        context=context,
+                        cutoff_reason=proposal_cutoff_reason,
+                        actor_player_id=payload.proposed_by_player_id,
+                    )
 
             elif payload.parent_deal_id is not None:
                 parent_deal = await _load_deal_row_for_update(
@@ -728,6 +790,14 @@ async def create_deal(
                     None if payload.parent_deal_id is None else str(payload.parent_deal_id)
                 )
                 context.setdefault("acceptances", {})[str(row["id"])] = []
+                _increment_count(
+                    context.setdefault("proposal_counts_by_player_id", {}),
+                    str(payload.proposed_by_player_id),
+                )
+                _increment_count(
+                    context.setdefault("pending_offer_counts_by_player_id", {}),
+                    str(payload.proposed_by_player_id),
+                )
                 if negotiation_row["status"] != next_negotiation_status:
                     _append_status_history(
                         context,
@@ -909,6 +979,16 @@ async def execute_negotiation(
             terminal_response = _reject_if_negotiation_terminal(negotiation_row["status"])
             if terminal_response is not None:
                 return terminal_response
+            context = _normalized_negotiation_context(negotiation_row)
+            cutoff_response = await _expire_if_active_time_cutoff(
+                session=session,
+                game_id=game_id,
+                negotiation_row=negotiation_row,
+                context=context,
+                actor_player_id=None,
+            )
+            if cutoff_response is not None:
+                return cutoff_response
             if negotiation_row["status"] != NEGOTIATION_STATUS_ACCEPTED:
                 return _lifecycle_rejection_response(
                     "negotiation_not_accepted",
@@ -916,7 +996,6 @@ async def execute_negotiation(
                     field="status",
                 )
 
-            context = _normalized_negotiation_context(negotiation_row)
             current_deal_id = _uuid_or_none(context.get("current_deal_id"))
             if current_deal_id is None:
                 return _lifecycle_rejection_response(
@@ -972,6 +1051,90 @@ async def execute_negotiation(
                     "deal_id": str(current_deal_id),
                     "round_number": negotiation_row["round_number"],
                 },
+            )
+            updated = await _load_negotiation_row_by_id(session, negotiation_id)
+            if updated is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="negotiation not found",
+                )
+    return _negotiation_response(updated)
+
+
+@router.post(
+    "/{game_id}/negotiations/{negotiation_id}/messages/{message_id}/ai-decision-attempts",
+    response_model=NegotiationResponse | LifecycleRejectedResponse,
+)
+async def record_negotiation_ai_decision_attempt(
+    game_id: UUID,
+    negotiation_id: UUID,
+    message_id: UUID,
+    request: Request,
+    payload: AiDecisionAttemptRequest | None = None,
+) -> NegotiationResponse | JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    if payload is not None and payload.player_id is not None:
+        await _ensure_player_in_game(session_factory, game_id, payload.player_id)
+
+    async with session_factory() as session:
+        async with session.begin():
+            negotiation_row = await _load_negotiation_row_for_update(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+            )
+            if negotiation_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="negotiation not found",
+                )
+            terminal_response = _reject_if_negotiation_terminal(negotiation_row["status"])
+            if terminal_response is not None:
+                return terminal_response
+
+            message_row = await _load_negotiation_message_row_for_update(
+                session=session,
+                game_id=game_id,
+                negotiation_id=negotiation_id,
+                message_id=message_id,
+            )
+            if message_row is None:
+                return _lifecycle_rejection_response(
+                    "negotiation_message_not_found",
+                    "message_id must reference a message in this negotiation",
+                    field="message_id",
+                )
+
+            context = _normalized_negotiation_context(negotiation_row)
+            cutoff_response = await _expire_if_active_time_cutoff(
+                session=session,
+                game_id=game_id,
+                negotiation_row=negotiation_row,
+                context=context,
+                actor_player_id=None if payload is None else payload.player_id,
+            )
+            if cutoff_response is not None:
+                return cutoff_response
+
+            message_key = str(message_id)
+            attempt_counts = context.setdefault("ai_decision_attempts_by_message_id", {})
+            attempt_count = _increment_count(attempt_counts, message_key)
+            max_attempts = int(context["cutoff_policy"]["max_ai_decision_attempts"])
+            if attempt_count > max_attempts:
+                return await _expire_negotiation_by_cutoff_and_reject(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_row=negotiation_row,
+                    context=context,
+                    cutoff_reason=CUTOFF_MAX_AI_DECISION_ATTEMPTS,
+                    actor_player_id=None if payload is None else payload.player_id,
+                )
+
+            await session.execute(
+                negotiations.update()
+                .where(negotiations.c.id == negotiation_id)
+                .values(context=context, updated_at=sa.func.now())
             )
             updated = await _load_negotiation_row_by_id(session, negotiation_id)
             if updated is None:
@@ -1071,7 +1234,23 @@ async def _load_replayed_state(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
 
 
-def _initial_negotiation_context(payload: CreateNegotiationRequest) -> dict[str, Any]:
+async def _load_game_settings(
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+) -> Mapping[str, Any]:
+    async with session_factory() as session:
+        result = await session.execute(sa.select(games.c.settings).where(games.c.id == game_id))
+        settings_row = result.scalar_one_or_none()
+    if settings_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found")
+    return dict(settings_row)
+
+
+def _initial_negotiation_context(
+    payload: CreateNegotiationRequest,
+    *,
+    cutoff_policy: Mapping[str, Any],
+) -> dict[str, Any]:
     return {
         "participant_player_ids": [str(player_id) for player_id in payload.participant_player_ids],
         "context": dict(payload.context),
@@ -1088,7 +1267,69 @@ def _initial_negotiation_context(payload: CreateNegotiationRequest) -> dict[str,
             }
         ],
         "expires_at": payload.expires_at.isoformat() if payload.expires_at is not None else None,
+        "cutoff_policy": dict(cutoff_policy),
+        "proposal_counts_by_player_id": {},
+        "pending_offer_counts_by_player_id": {},
+        "ai_decision_attempts_by_message_id": {},
+        "cutoff_reason": None,
+        "expired_by_cutoff": False,
     }
+
+
+def _negotiation_cutoff_policy(settings: object) -> dict[str, Any]:
+    source: Mapping[str, Any]
+    if isinstance(settings, Mapping):
+        nested = settings.get("negotiation_cutoffs")
+        source = nested if isinstance(nested, Mapping) else settings
+    else:
+        source = {}
+
+    intensity = source.get(
+        "negotiation_intensity",
+        NEGOTIATION_CUTOFF_DEFAULTS["negotiation_intensity"],
+    )
+    if not isinstance(intensity, str) or not intensity.strip():
+        intensity = str(NEGOTIATION_CUTOFF_DEFAULTS["negotiation_intensity"])
+
+    return {
+        "max_rounds": _positive_int_setting(source, "max_rounds"),
+        "max_proposals_per_player": _positive_int_setting(source, "max_proposals_per_player"),
+        "max_active_seconds": _positive_int_setting(source, "max_active_seconds"),
+        "max_ai_decision_attempts": _positive_int_setting(source, "max_ai_decision_attempts"),
+        "max_pending_offers_per_player": _positive_int_setting(
+            source,
+            "max_pending_offers_per_player",
+        ),
+        "negotiation_intensity": intensity.strip(),
+    }
+
+
+def _positive_int_setting(source: Mapping[str, Any], key: str) -> int:
+    value = source.get(key)
+    if isinstance(value, int) and value >= 1:
+        return value
+    default = NEGOTIATION_CUTOFF_DEFAULTS[key]
+    if not isinstance(default, int):
+        raise TypeError(f"{key} default must be an integer")
+    return default
+
+
+def _count_mapping(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    counts: dict[str, int] = {}
+    for key, count in value.items():
+        if isinstance(count, int) and count >= 0:
+            counts[str(key)] = count
+    return counts
+
+
+def _increment_count(counts: Mapping[str, int] | dict[str, int], key: str) -> int:
+    if not isinstance(counts, dict):
+        raise TypeError("cutoff counters must be mutable dictionaries")
+    next_count = int(counts.get(key, 0)) + 1
+    counts[key] = next_count
+    return next_count
 
 
 def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -1114,6 +1355,8 @@ def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
         dict(item) for item in raw_status_history if isinstance(item, Mapping)
     ] if isinstance(raw_status_history, Sequence) and not isinstance(raw_status_history, str) else []
 
+    cutoff_policy = _negotiation_cutoff_policy(stored_context.get("cutoff_policy", {}))
+
     return {
         "participant_player_ids": [str(player_id) for player_id in participant_ids],
         "context": dict(public_context),
@@ -1123,6 +1366,18 @@ def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
         "acceptances": acceptances,
         "status_history": status_history,
         "expires_at": _string_or_none(stored_context.get("expires_at")),
+        "cutoff_policy": cutoff_policy,
+        "proposal_counts_by_player_id": _count_mapping(
+            stored_context.get("proposal_counts_by_player_id")
+        ),
+        "pending_offer_counts_by_player_id": _count_mapping(
+            stored_context.get("pending_offer_counts_by_player_id")
+        ),
+        "ai_decision_attempts_by_message_id": _count_mapping(
+            stored_context.get("ai_decision_attempts_by_message_id")
+        ),
+        "cutoff_reason": _string_or_none(stored_context.get("cutoff_reason")),
+        "expired_by_cutoff": stored_context.get("expired_by_cutoff") is True,
         **{
             key: value
             for key, value in stored_context.items()
@@ -1136,6 +1391,12 @@ def _normalized_negotiation_context(row: Mapping[str, Any]) -> dict[str, Any]:
                 "acceptances",
                 "status_history",
                 "expires_at",
+                "cutoff_policy",
+                "proposal_counts_by_player_id",
+                "pending_offer_counts_by_player_id",
+                "ai_decision_attempts_by_message_id",
+                "cutoff_reason",
+                "expired_by_cutoff",
             }
         },
     }
@@ -1202,6 +1463,254 @@ async def _load_deal_row_by_id(session: AsyncSession, deal_id: UUID) -> dict[str
     result = await session.execute(sa.select(deals).where(deals.c.id == deal_id))
     row = result.mappings().first()
     return None if row is None else dict(row)
+
+
+async def _load_negotiation_message_row_for_update(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID,
+    message_id: UUID,
+) -> dict[str, Any] | None:
+    result = await session.execute(
+        sa.select(negotiation_messages)
+        .where(
+            negotiation_messages.c.game_id == game_id,
+            negotiation_messages.c.negotiation_id == negotiation_id,
+            negotiation_messages.c.id == message_id,
+        )
+        .with_for_update()
+    )
+    row = result.mappings().first()
+    return None if row is None else dict(row)
+
+
+async def _refresh_negotiation_offer_counts(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID,
+    context: dict[str, Any],
+) -> None:
+    result = await session.execute(
+        sa.select(
+            deals.c.proposed_by_player_id,
+            deals.c.status,
+            sa.func.count().label("deal_count"),
+        )
+        .where(deals.c.game_id == game_id, deals.c.negotiation_id == negotiation_id)
+        .group_by(deals.c.proposed_by_player_id, deals.c.status)
+    )
+    proposal_counts: dict[str, int] = {}
+    pending_counts: dict[str, int] = {}
+    for row in result.mappings().all():
+        proposer_id = row["proposed_by_player_id"]
+        if proposer_id is None:
+            continue
+        proposer_key = str(proposer_id)
+        count = int(row["deal_count"])
+        proposal_counts[proposer_key] = proposal_counts.get(proposer_key, 0) + count
+        if row["status"] == DEAL_STATUS_PROPOSED:
+            pending_counts[proposer_key] = pending_counts.get(proposer_key, 0) + count
+
+    context["proposal_counts_by_player_id"] = proposal_counts
+    context["pending_offer_counts_by_player_id"] = pending_counts
+
+
+def _proposal_cutoff_reason(
+    *,
+    context: Mapping[str, Any],
+    proposed_by_player_id: str,
+    next_round_number: int,
+) -> str | None:
+    cutoff_policy = context["cutoff_policy"]
+    if next_round_number > int(cutoff_policy["max_rounds"]):
+        return CUTOFF_MAX_ROUNDS
+
+    proposal_counts = _count_mapping(context.get("proposal_counts_by_player_id"))
+    if proposal_counts.get(proposed_by_player_id, 0) + 1 > int(
+        cutoff_policy["max_proposals_per_player"]
+    ):
+        return CUTOFF_MAX_PROPOSALS_PER_PLAYER
+
+    pending_counts = _count_mapping(context.get("pending_offer_counts_by_player_id"))
+    if pending_counts.get(proposed_by_player_id, 0) + 1 > int(
+        cutoff_policy["max_pending_offers_per_player"]
+    ):
+        return CUTOFF_MAX_PENDING_OFFERS_PER_PLAYER
+
+    return None
+
+
+async def _expire_if_active_time_cutoff(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_row: Mapping[str, Any],
+    context: dict[str, Any],
+    actor_player_id: UUID | None,
+) -> JSONResponse | None:
+    cutoff_reason = _active_time_cutoff_reason(negotiation_row, context)
+    if cutoff_reason is None:
+        return None
+    return await _expire_negotiation_by_cutoff_and_reject(
+        session=session,
+        game_id=game_id,
+        negotiation_row=negotiation_row,
+        context=context,
+        cutoff_reason=cutoff_reason,
+        actor_player_id=actor_player_id,
+    )
+
+
+def _active_time_cutoff_reason(
+    negotiation_row: Mapping[str, Any],
+    context: Mapping[str, Any],
+) -> str | None:
+    now = datetime.now(UTC)
+    expires_at = _parse_datetime_or_none(context.get("expires_at"))
+    if expires_at is not None and expires_at <= now:
+        return CUTOFF_MAX_ACTIVE_SECONDS
+
+    created_at = _parse_datetime_or_none(negotiation_row.get("created_at"))
+    max_active_seconds = int(context["cutoff_policy"]["max_active_seconds"])
+    if created_at is not None and created_at + timedelta(seconds=max_active_seconds) <= now:
+        return CUTOFF_MAX_ACTIVE_SECONDS
+    return None
+
+
+def _parse_datetime_or_none(value: object) -> datetime | None:
+    parsed: datetime | None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+async def _expire_negotiation_by_cutoff_and_reject(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_row: Mapping[str, Any],
+    context: dict[str, Any],
+    cutoff_reason: str,
+    actor_player_id: UUID | None,
+) -> JSONResponse:
+    await _expire_negotiation_by_cutoff(
+        session=session,
+        game_id=game_id,
+        negotiation_row=negotiation_row,
+        context=context,
+        cutoff_reason=cutoff_reason,
+        actor_player_id=actor_player_id,
+    )
+    return _lifecycle_rejection_response(
+        cutoff_reason,
+        _cutoff_reason_message(cutoff_reason),
+        field="negotiation_cutoff",
+    )
+
+
+async def _expire_negotiation_by_cutoff(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_row: Mapping[str, Any],
+    context: dict[str, Any],
+    cutoff_reason: str,
+    actor_player_id: UUID | None,
+) -> None:
+    current_deal_id = _uuid_or_none(context.get("current_deal_id"))
+    if current_deal_id is not None:
+        await session.execute(
+            deals.update()
+            .where(
+                deals.c.game_id == game_id,
+                deals.c.id == current_deal_id,
+                deals.c.status == DEAL_STATUS_PROPOSED,
+            )
+            .values(status=DEAL_STATUS_EXPIRED, updated_at=sa.func.now())
+        )
+
+    context["cutoff_reason"] = cutoff_reason
+    context["expired_by_cutoff"] = True
+    context["expired_at"] = _audit_time_marker()
+    _append_status_history(
+        context,
+        from_status=str(negotiation_row["status"]),
+        to_status=NEGOTIATION_STATUS_EXPIRED,
+        deal_id=context.get("current_deal_id"),
+        round_number=int(negotiation_row["round_number"]),
+    )
+    await session.execute(
+        negotiations.update()
+        .where(negotiations.c.id == negotiation_row["id"])
+        .values(
+            status=NEGOTIATION_STATUS_EXPIRED,
+            context=context,
+            updated_at=sa.func.now(),
+            closed_at=sa.func.now(),
+        )
+    )
+    await _insert_negotiation_audit_message(
+        session=session,
+        game_id=game_id,
+        negotiation_id=negotiation_row["id"],
+        sender_player_id=actor_player_id,
+        message_type=AUDIT_EXPIRED_BY_CUTOFF,
+        payload={
+            "cutoff_reason": cutoff_reason,
+            "from_status": negotiation_row["status"],
+            "to_status": NEGOTIATION_STATUS_EXPIRED,
+            "deal_id": context.get("current_deal_id"),
+            "round_number": negotiation_row["round_number"],
+            "no_substitute_action": True,
+            "created_game_event": False,
+            "created_contract": False,
+            "created_cash_transfer": False,
+            "created_property_transfer": False,
+        },
+    )
+    await _insert_negotiation_audit_message(
+        session=session,
+        game_id=game_id,
+        negotiation_id=negotiation_row["id"],
+        sender_player_id=actor_player_id,
+        message_type=AUDIT_STATUS_CHANGED,
+        payload={
+            "from_status": negotiation_row["status"],
+            "to_status": NEGOTIATION_STATUS_EXPIRED,
+            "deal_id": context.get("current_deal_id"),
+            "round_number": negotiation_row["round_number"],
+            "cutoff_reason": cutoff_reason,
+        },
+    )
+
+
+def _cutoff_reason_message(cutoff_reason: str) -> str:
+    messages = {
+        CUTOFF_MAX_ROUNDS: "proposal would exceed max rounds per negotiation window",
+        CUTOFF_MAX_PROPOSALS_PER_PLAYER: (
+            "proposal would exceed max proposals per player per negotiation window"
+        ),
+        CUTOFF_MAX_ACTIVE_SECONDS: "negotiation exceeded max active wall-clock duration",
+        CUTOFF_MAX_AI_DECISION_ATTEMPTS: (
+            "AI decision attempt would exceed max attempts per negotiation message"
+        ),
+        CUTOFF_MAX_PENDING_OFFERS_PER_PLAYER: (
+            "proposal would exceed max pending offers per player"
+        ),
+    }
+    return messages.get(cutoff_reason, "negotiation expired by cutoff")
 
 
 async def _next_deal_version_in_session(
@@ -1349,6 +1858,16 @@ async def _record_deal_acceptance_or_rejection(
                 )
 
             context = _normalized_negotiation_context(negotiation_row)
+            cutoff_response = await _expire_if_active_time_cutoff(
+                session=session,
+                game_id=game_id,
+                negotiation_row=negotiation_row,
+                context=context,
+                actor_player_id=None,
+            )
+            if cutoff_response is not None:
+                return cutoff_response
+
             current_deal_id = context.get("current_deal_id")
             if current_deal_id != str(deal_id):
                 return _lifecycle_rejection_response(
@@ -1997,6 +2516,14 @@ def _negotiation_response(row: Mapping[str, Any]) -> NegotiationResponse:
         status_history=list(stored_context["status_history"]),
         expires_at=stored_context["expires_at"],
         context=context,
+        cutoff_policy=dict(stored_context["cutoff_policy"]),
+        proposal_counts_by_player_id=dict(stored_context["proposal_counts_by_player_id"]),
+        pending_offer_counts_by_player_id=dict(stored_context["pending_offer_counts_by_player_id"]),
+        ai_decision_attempts_by_message_id=dict(
+            stored_context["ai_decision_attempts_by_message_id"]
+        ),
+        cutoff_reason=stored_context["cutoff_reason"],
+        expired_by_cutoff=stored_context["expired_by_cutoff"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         closed_at=row["closed_at"],
