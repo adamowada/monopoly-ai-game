@@ -11,8 +11,16 @@ from app.rules.actions import (
     list_legal_actions,
     validate_action,
 )
+from app.rules.atomic import (
+    ATOMIC_RESOLUTION_KIND_NAMES,
+    AtomicResolutionKind,
+    RejectedActionAuditEntry,
+    build_rejected_action_audit_entry,
+    is_atomic_section_active,
+)
 from app.rules.events import (
     ActiveAuctionSetPayload,
+    ActiveAtomicResolutionSetPayload,
     ActiveBankruptcySetPayload,
     ActiveNegotiationSetPayload,
     ActivePaymentSetPayload,
@@ -96,6 +104,7 @@ from app.rules.static_data import (
     load_classic_monopoly_data,
 )
 from app.rules.state import (
+    ActiveAtomicResolutionState,
     ActiveAuctionState,
     ActiveBankruptcyState,
     ActiveNegotiationState,
@@ -125,8 +134,11 @@ from app.rules.timing import (
 
 __all__ = [
     "ACTION_TIMING_WINDOWS",
+    "ATOMIC_RESOLUTION_KIND_NAMES",
     "ActiveAuctionState",
     "ActiveAuctionSetPayload",
+    "ActiveAtomicResolutionState",
+    "ActiveAtomicResolutionSetPayload",
     "ActiveBankruptcyState",
     "ActiveBankruptcySetPayload",
     "ActiveNegotiationState",
@@ -136,6 +148,7 @@ __all__ = [
     "ActionTimingIssue",
     "ActionValidationError",
     "ActionValidationIssue",
+    "AtomicResolutionKind",
     "ActionLogEntry",
     "BankInventory",
     "BankInventoryState",
@@ -180,6 +193,7 @@ __all__ = [
     "PropertyOwnershipState",
     "RngState",
     "RandomLegalActionPlayer",
+    "RejectedActionAuditEntry",
     "SUPPORTED_ACTION_TYPES",
     "ScriptedPlayer",
     "SimulationFailure",
@@ -195,6 +209,7 @@ __all__ = [
     "apply_dice_roll",
     "apply_event",
     "assert_valid_phase_transition",
+    "build_rejected_action_audit_entry",
     "buy_house",
     "buy_property",
     "calculate_rent",
@@ -208,6 +223,7 @@ __all__ = [
     "generate_dice_roll_event",
     "is_action_allowed_now",
     "is_action_type_allowed_in_phase",
+    "is_atomic_section_active",
     "is_game_over",
     "list_legal_actions",
     "load_classic_monopoly_data",

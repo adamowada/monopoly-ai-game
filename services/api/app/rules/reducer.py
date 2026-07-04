@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.rules.events import (
     ActiveAuctionSetPayload,
+    ActiveAtomicResolutionSetPayload,
     ActiveBankruptcySetPayload,
     ActiveNegotiationSetPayload,
     ActivePaymentSetPayload,
@@ -32,6 +33,7 @@ from app.rules.events import (
 from app.rules.phases import assert_valid_phase_transition
 from app.rules.static_data import load_classic_monopoly_data
 from app.rules.state import (
+    ActiveAtomicResolutionState,
     ActiveAuctionState,
     ActiveBankruptcyState,
     ActiveNegotiationState,
@@ -307,6 +309,25 @@ def _updates_for_event(state: GameState, event: GameEvent) -> dict[str, Any]:
     if event.type == "ACTIVE_BANKRUPTCY_SET":
         payload = _expect_payload(event, ActiveBankruptcySetPayload)
         return {"active_bankruptcy": ActiveBankruptcyState() if payload.active else None}
+
+    if event.type == "ACTIVE_ATOMIC_RESOLUTION_SET":
+        payload = _expect_payload(event, ActiveAtomicResolutionSetPayload)
+        if not payload.active:
+            if state.active_atomic_resolution is None:
+                raise InvalidEventError("cannot end atomic resolution because no active atomic resolution exists")
+            return {"active_atomic_resolution": None}
+        if state.active_atomic_resolution is not None:
+            raise InvalidEventError("cannot begin atomic resolution because one is already active")
+        if payload.kind is None:
+            raise InvalidEventError("active atomic resolution kind is required")
+        if payload.actor_id is not None:
+            _player_by_id(state, payload.actor_id)
+        return {
+            "active_atomic_resolution": ActiveAtomicResolutionState(
+                kind=payload.kind,
+                actor_id=payload.actor_id,
+            )
+        }
 
     raise InvalidEventError(f"unknown event type {event.type}")
 

@@ -7,6 +7,7 @@ from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.rules.atomic import AtomicResolutionKind
 from app.rules.phases import TurnPhase
 from app.rules.static_data import load_classic_monopoly_data
 
@@ -125,6 +126,11 @@ class ActiveBankruptcyState(StateModel):
     pass
 
 
+class ActiveAtomicResolutionState(StateModel):
+    kind: AtomicResolutionKind
+    actor_id: str | None = Field(default=None, min_length=1)
+
+
 class GameState(StateModel):
     schema_version: Literal["game-state-v1"] = GAME_STATE_SCHEMA_VERSION
     game_id: str = Field(min_length=1)
@@ -140,6 +146,7 @@ class GameState(StateModel):
     active_auction: ActiveAuctionState | None = None
     active_negotiation: ActiveNegotiationState | None = None
     active_bankruptcy: ActiveBankruptcyState | None = None
+    active_atomic_resolution: ActiveAtomicResolutionState | None = None
     event_sequence: int = Field(default=0, ge=0)
     applied_event_ids: tuple[str, ...] = ()
 
@@ -179,6 +186,13 @@ class GameState(StateModel):
             unknown_passed_ids = set(self.active_auction.passed_player_ids) - owner_ids
             if unknown_passed_ids:
                 raise ValueError("active auction passed player ids must reference existing players")
+
+        if (
+            self.active_atomic_resolution is not None
+            and self.active_atomic_resolution.actor_id is not None
+            and self.active_atomic_resolution.actor_id not in owner_ids
+        ):
+            raise ValueError("active atomic resolution actor must reference an existing player")
 
         if len(self.applied_event_ids) != self.event_sequence:
             raise ValueError("applied event id count must match event sequence")
@@ -266,6 +280,7 @@ def create_initial_game_state(
         active_auction=None,
         active_negotiation=None,
         active_bankruptcy=None,
+        active_atomic_resolution=None,
     )
 
 

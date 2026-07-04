@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
+from app.rules.atomic import is_atomic_section_active
 from app.rules.phases import TurnPhase
 from app.rules.state import GameState
 
@@ -117,6 +118,15 @@ def is_action_allowed_now(state: GameState, action_type: str) -> bool:
 
 
 def timing_issue_for_action(state: GameState, action_type: str) -> ActionTimingIssue | None:
+    if is_atomic_section_active(state):
+        active_atomic = state.active_atomic_resolution
+        atomic_kind = "UNKNOWN" if active_atomic is None else active_atomic.kind.value
+        return ActionTimingIssue(
+            code="mistimed_action",
+            message=f"{action_type} is not legal during active atomic resolution {atomic_kind}",
+            field="type",
+        )
+
     phase = _parse_phase(state.turn.phase)
     if phase is None:
         return ActionTimingIssue(

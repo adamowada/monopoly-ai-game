@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Final, NoReturn, Protocol, cast
 
+from app.rules.atomic import is_atomic_section_active
 from app.rules.events import DiceRolledPayload
 from app.rules.mechanics import (
     JAIL_FINE,
@@ -143,6 +144,8 @@ class ValidatedAction:
 def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ...]:
     player = _player_by_id(state, actor_id)
     if player is None or player.is_bankrupt:
+        return ()
+    if is_atomic_section_active(state):
         return ()
 
     actions: list[LegalAction] = []
