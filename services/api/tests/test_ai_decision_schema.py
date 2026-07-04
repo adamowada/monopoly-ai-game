@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import pytest
+
+from app.ai.decision_schema import (
+    AI_OUTPUT_SCHEMA,
+    AIDecisionValidationError,
+    DECISION_TYPES,
+    MALFORMED_AI_OUTPUT_REASON_CODE,
+    rejected_ai_output,
+    validate_ai_decision_output,
+)
+
+
+GAME_ID = "00000000-0000-0000-0000-000000000701"
+PLAYER_ID = "00000000-0000-0000-0000-000000000702"
+RECIPIENT_ID = "00000000-0000-0000-0000-000000000703"
+NEGOTIATION_ID = "00000000-0000-0000-0000-000000000704"
+DEAL_ID = "00000000-0000-0000-0000-000000000705"
+
+
+def _metadata() -> dict[str, Any]:
+    return {
+        "self_dialogue": {
+            "status": "provided",
+            "text": "Boardwalk is not available, so preserve cash and keep tempo.",
+        },
+        "memory_updates": [
+            {
+                "visibility": "private",
+                "category": "strategy",
+                "importance": 6,
+                "content": "Preserve liquidity until an orange property can be traded for.",
+            }
+        ],
+        "confidence": 0.74,
+        "rationale": "The selected output is legal-looking and references the current state.",
+    }
+
+
+def _base(decision_type: str) -> dict[str, Any]:
+    return {
+        "decision_type": decision_type,
+        "game_id": GAME_ID,
+        "player_id": PLAYER_ID,
+        **_metadata(),
+    }
+
+
+def test_valid_ai_decision_shapes_parse_before_mutation() -> None:
+    # AI output validates mechanically before every game mutation
+    # Confidence/rationale metadata
+    examples: list[tuple[str, dict[str, Any]]] = [
+        (
+            "Action decision shape",
+            {
+                **_base("action_decision"),
+                "expected_state_hash": "state-hash-7-2",
+                "expected_event_sequence": 12,
+                "action": {
+                    "type": "ROLL_DICE",
+                    "payload": {},
+                },
+            },
+        ),
+        (
+            "Negotiation message shape",
+            {
+                **_base("negotiation_message"),
+                "negotiation_id": NEGOTIATION_ID,
+                "message": {
+                    "recipient_player_id": RECIPIENT_ID,
+                    "body": "I can trade Baltic if you leave the light blues alone.",
+                    "metadata": {"tone": "firm"},
+                },
+            },
+        ),
+        (
+            "Deal proposal shape",
+            {
+                **_base("deal_proposal"),
+                "negotiation_id": NEGOTIATION_ID,
+                "deal": {
+                    "recipient_player_ids": [RECIPIENT_ID],
+                    "terms": {
+                        "cash": [{"from_player_id": PLAYER_ID, "to_player_id": RECIPIENT_ID, "amount": 100}],
+                        "properties": [],
+                    },
+                    "message": "Cash now for future rent relief.",
+                },
+            },
+        ),
+        (
+            "Counteroffer shape",
+            {
+                **_base("counteroffer"),
+                "negotiation_id": NEGOTIATION_ID,
+                "counteroffer": {
+                    "responds_to_deal_id": DEAL_ID,
+                    "terms": {
+                        "cash": [{"from_player_id": RECIPIENT_ID, "to_player_id": PLAYER_ID, "amount": 140}],
+                        "properties": ["property_baltic_avenue"],
+                    },
+                    "message": "I need more cash to offset the property.",
+                },
+            },
+        ),
+        (
+            "Accept/reject shape",
+            {
+                **_base("accept_reject"),
+                "negotiation_id": NEGOTIATION_ID,
+                "accept_reject": {
+                    "deal_id": DEAL_ID,
+                    "decision": "reject",
+                    "message": "The cash position is too weak after this deal.",
+                },
+            },
+        ),
+        (
+            "Self-dialogue shape",
+            {
+                **_base("self_dialogue"),
+                "self_dialogue": {
+                    "status": "empty",
+                    "reason": "No private reasoning was produced for this turn.",
+                },
+            },
+        ),
+        (
+            "Memory update shape",
+            {
+                **_base("memory_update"),
+                "self_dialogue": {
+                    "status": "rejected",
+                    "reason": "Self-dialogue was withheld by policy.",
+                },
+                "memory_updates": [
+                    {
+                        "visibility": "private",
+                        "category": "opponent_model",
+                        "importance": 8,
+                        "content": "Grace rejected cash-heavy deals twice in this negotiation.",
+                    }
+                ],
+            },
+        ),
+    ]
+
+    for label, raw_output in examples:
+        parsed = validate_ai_decision_output(raw_output)
+
+        assert parsed.root.decision_type == raw_output["decision_type"], label
+        assert str(parsed.root.game_id) == GAME_ID
+        assert str(parsed.root.player_id) == PLAYER_ID
+        assert parsed.root.confidence == raw_output["confidence"]
+        assert parsed.root.rationale == raw_output["rationale"]
+
+
+def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
+    # schema is used by codex exec --json --output-schema
+    serialized = json.dumps(AI_OUTPUT_SCHEMA)
+
+    for decision_type in DECISION_TYPES:
+        assert decision_type in serialized
+    assert "expected_state_hash" in serialized
+    assert "confidence" in serialized
+    assert "rationale" in serialized
+
+
+@pytest.mark.parametrize(
+    "raw_output, expected_field",
+    [
+        (
+            {
+                **_base("action_decision"),
+                "expected_event_sequence": 12,
+                "action": {"type": "ROLL_DICE", "payload": {}},
+            },
+            "expected_state_hash",
+        ),
+        (
+            {
+                **_base("memory_update"),
+                "self_dialogue": {"status": "empty", "reason": "No private reasoning."},
+                "memory_updates": [
+                    {
+                        "visibility": "private",
+                        "category": "strategy",
+                        "importance": 11,
+                        "content": "Importance must stay within the schema range.",
+                    }
+                ],
+            },
+            "memory_updates.0.importance",
+        ),
+    ],
+)
+def test_missing_or_invalid_fields_produce_malformed_ai_output_errors(
+    raw_output: dict[str, Any],
+    expected_field: str,
+) -> None:
+    # Malformed or incomplete output is rejected and audited
+    with pytest.raises(AIDecisionValidationError) as exc_info:
+        validate_ai_decision_output(raw_output)
+
+    assert exc_info.value.reason_code == MALFORMED_AI_OUTPUT_REASON_CODE
+    assert {issue.code for issue in exc_info.value.errors} == {"malformed_ai_output"}
+    assert any(issue.field == expected_field for issue in exc_info.value.errors)
+
+
+def test_rejected_ai_output_audit_payload_keeps_raw_output_and_no_substitute_move() -> None:
+    raw_output = {
+        **_base("action_decision"),
+        "expected_event_sequence": 12,
+        "action": {"type": "ROLL_DICE", "payload": {}},
+    }
+
+    with pytest.raises(AIDecisionValidationError) as exc_info:
+        validate_ai_decision_output(raw_output)
+
+    audit_payload = rejected_ai_output(raw_output, exc_info.value)
+
+    assert audit_payload.reason_code == "malformed_ai_output"
+    assert audit_payload.raw_output
+    assert "action_decision" in audit_payload.raw_output
+    assert audit_payload.validation_errors
+    assert audit_payload.game_id == GAME_ID
+    assert audit_payload.player_id == PLAYER_ID
+    assert audit_payload.substitute_move is None
+    assert audit_payload.no_substitute_move is True
+    assert audit_payload.audit_payload["raw_output"] == audit_payload.raw_output
+    assert audit_payload.audit_payload["validation_errors"][0]["code"] == "malformed_ai_output"
+    assert audit_payload.audit_payload["no_substitute_move"] is True
