@@ -15,12 +15,25 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette import status
 
+from app.contracts.execution import (
+    ContractCreationResult,
+    ContractExecutionError,
+    create_contract_from_accepted_deal,
+)
+from app.contracts.settlement_engine import (
+    SettlementEngineError,
+    SettlementEngineResult,
+    enforce_contracts,
+    settle_contract,
+)
 from app.db.metadata import (
     action_idempotency_keys,
+    contracts,
     deals,
     games,
     negotiation_messages,
     negotiations,
+    obligations,
     players,
     rejected_actions,
 )
@@ -380,6 +393,79 @@ class DealDecisionRequest(BaseModel):
     player_id: UUID | None = None
 
 
+class CreateContractFromDealRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deal_id: UUID
+
+
+class ContractSettleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    obligation_id: UUID | None = None
+    trigger_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class EnforceContractsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_context: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContractResponse(BaseModel):
+    id: UUID
+    game_id: UUID
+    deal_id: UUID | None
+    effective_event_id: UUID | None
+    status: str
+    terms: Mapping[str, Any]
+    created_at: Any
+    updated_at: Any
+    executed_at: Any | None
+    closed_at: Any | None
+
+
+class ObligationResponse(BaseModel):
+    id: UUID
+    game_id: UUID
+    contract_id: UUID
+    owed_by_player_id: UUID | None
+    owed_to_player_id: UUID | None
+    settled_event_id: UUID | None
+    status: str
+    obligation_type: str
+    schedule: Mapping[str, Any] | None
+    terms: Mapping[str, Any]
+    due_at: Any | None
+    settled_at: Any | None
+    created_at: Any
+    updated_at: Any
+
+
+class ContractsResponse(BaseModel):
+    contracts: list[ContractResponse]
+
+
+class ObligationsResponse(BaseModel):
+    obligations: list[ObligationResponse]
+
+
+class ContractCreationResponse(BaseModel):
+    status: Literal["created", "existing"]
+    contract: ContractResponse
+    obligations: list[ObligationResponse]
+
+
+class ContractSettlementResponse(BaseModel):
+    status: Literal["ok"]
+    game_id: UUID
+    settled_obligation_ids: list[UUID]
+    defaulted_obligation_ids: list[UUID]
+    accepted_events: list[AcceptedEventResponse]
+    state_hash: str
+    event_sequence: int
+
+
 class AiDecisionAttemptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -648,6 +734,124 @@ async def list_rejections(
     return RejectedActionsResponse(
         rejected_actions=[_rejected_response(record) for record in records],
     )
+
+
+@router.get("/{game_id}/contracts", response_model=ContractsResponse)
+async def list_contracts(game_id: UUID, request: Request) -> ContractsResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(contracts)
+            .where(contracts.c.game_id == game_id)
+            .order_by(contracts.c.created_at, contracts.c.id)
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+    return ContractsResponse(contracts=[_contract_response(row) for row in rows])
+
+
+@router.get("/{game_id}/obligations", response_model=ObligationsResponse)
+async def list_obligations(game_id: UUID, request: Request) -> ObligationsResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(obligations)
+            .where(obligations.c.game_id == game_id)
+            .order_by(obligations.c.created_at, obligations.c.id)
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+    return ObligationsResponse(obligations=[_obligation_response(row) for row in rows])
+
+
+@router.post(
+    "/{game_id}/contracts/from-deal",
+    response_model=ContractCreationResponse | LifecycleRejectedResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_contract_from_deal_endpoint(
+    game_id: UUID,
+    request: Request,
+    payload: CreateContractFromDealRequest,
+) -> JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        async with session.begin():
+            try:
+                result = await create_contract_from_accepted_deal(
+                    session=session,
+                    session_factory=session_factory,
+                    game_id=game_id,
+                    deal_id=payload.deal_id,
+                )
+            except ContractExecutionError as exc:
+                if exc.reason_code == "deal_not_found":
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="deal not found") from exc
+                return _lifecycle_rejection_response(exc.reason_code, exc.message, field=exc.field)
+
+    response = _contract_creation_response(result)
+    return JSONResponse(
+        status_code=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        content=response.model_dump(mode="json"),
+    )
+
+
+@router.post(
+    "/{game_id}/contracts/{contract_id}/settle",
+    response_model=ContractSettlementResponse | LifecycleRejectedResponse,
+)
+async def settle_contract_endpoint(
+    game_id: UUID,
+    contract_id: UUID,
+    request: Request,
+    payload: ContractSettleRequest | None = None,
+) -> ContractSettlementResponse | JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    body = payload or ContractSettleRequest()
+    async with session_factory() as session:
+        async with session.begin():
+            try:
+                result = await settle_contract(
+                    session=session,
+                    session_factory=session_factory,
+                    game_id=game_id,
+                    contract_id=contract_id,
+                    obligation_id=body.obligation_id,
+                    trigger_context=body.trigger_context,
+                )
+            except SettlementEngineError as exc:
+                if exc.reason_code == "contract_not_found":
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="contract not found") from exc
+                return _lifecycle_rejection_response(exc.reason_code, exc.message, field=exc.field)
+    return _contract_settlement_response(game_id, result)
+
+
+@router.post(
+    "/{game_id}/contracts/enforce",
+    response_model=ContractSettlementResponse | LifecycleRejectedResponse,
+)
+async def enforce_contracts_endpoint(
+    game_id: UUID,
+    request: Request,
+    payload: EnforceContractsRequest | None = None,
+) -> ContractSettlementResponse | JSONResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    body = payload or EnforceContractsRequest()
+    async with session_factory() as session:
+        async with session.begin():
+            try:
+                result = await enforce_contracts(
+                    session=session,
+                    session_factory=session_factory,
+                    game_id=game_id,
+                    trigger_context=body.trigger_context,
+                )
+            except SettlementEngineError as exc:
+                return _lifecycle_rejection_response(exc.reason_code, exc.message, field=exc.field)
+    return _contract_settlement_response(game_id, result)
 
 
 @router.get("/{game_id}/negotiations", response_model=NegotiationsResponse)
@@ -3151,6 +3355,82 @@ def _event_response(record: AcceptedEventRecord) -> AcceptedEventResponse:
 
 def _rejected_response(record: RejectedActionRecord) -> RejectedActionResponse:
     return RejectedActionResponse.model_validate(record.model_dump())
+
+
+def _contract_creation_response(result: ContractCreationResult) -> ContractCreationResponse:
+    return ContractCreationResponse(
+        status="created" if result.created else "existing",
+        contract=_contract_response(result.contract),
+        obligations=[_obligation_response(row) for row in result.obligations],
+    )
+
+
+def _contract_settlement_response(
+    game_id: UUID,
+    result: SettlementEngineResult,
+) -> ContractSettlementResponse:
+    return ContractSettlementResponse(
+        status="ok",
+        game_id=game_id,
+        settled_obligation_ids=result.settled_obligation_ids,
+        defaulted_obligation_ids=result.defaulted_obligation_ids,
+        accepted_events=[_event_response(record) for record in result.accepted_events],
+        state_hash=result.state.state_hash(),
+        event_sequence=result.state.event_sequence,
+    )
+
+
+def _contract_response(row: Mapping[str, Any]) -> ContractResponse:
+    return ContractResponse(
+        id=row["id"],
+        game_id=row["game_id"],
+        deal_id=row["deal_id"],
+        effective_event_id=row["effective_event_id"],
+        status=row["status"],
+        terms=row["terms"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        executed_at=row["executed_at"],
+        closed_at=row["closed_at"],
+    )
+
+
+def _obligation_response(row: Mapping[str, Any]) -> ObligationResponse:
+    schedule = row["schedule"] if isinstance(row["schedule"], Mapping) else None
+    terms = row["terms"] if isinstance(row["terms"], Mapping) else {}
+    settled_at = _settled_marker(schedule, terms)
+    return ObligationResponse(
+        id=row["id"],
+        game_id=row["game_id"],
+        contract_id=row["contract_id"],
+        owed_by_player_id=row["owed_by_player_id"],
+        owed_to_player_id=row["owed_to_player_id"],
+        settled_event_id=row["settled_event_id"],
+        status=row["status"],
+        obligation_type=row["obligation_type"],
+        schedule=schedule,
+        terms=terms,
+        due_at=row["due_at"],
+        settled_at=settled_at,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _settled_marker(
+    schedule: Mapping[str, Any] | None,
+    terms: Mapping[str, Any],
+) -> Any | None:
+    if schedule is not None and schedule.get("settled_at") is not None:
+        return schedule["settled_at"]
+    if terms.get("settled_at") is not None:
+        return terms["settled_at"]
+    if schedule is not None and schedule.get("defaulted_at") is not None:
+        return schedule["defaulted_at"]
+    default = terms.get("default")
+    if isinstance(default, Mapping):
+        return default.get("defaulted_at")
+    return None
 
 
 def _negotiation_message_response(row: Mapping[str, Any]) -> NegotiationMessageResponse:
