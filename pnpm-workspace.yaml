@@ -2,3 +2,7 @@ packages:
   - "apps/*"
   - "services/*"
   - "packages/*"
+onlyBuiltDependencies:
+  - sharp
+allowBuilds:
+  sharp: true

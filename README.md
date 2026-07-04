@@ -4,9 +4,68 @@ Local-only Monopoly-style AI research game. `PLANS.md` is the authoritative prod
 
 ## Phase 0 Status
 
-This branch is `feature/phase-0-project-control`. Phase 0 establishes project control, the fixed command surface, local toolchain documentation, and repository hygiene before the application tiers are scaffolded in Phase 1.
+The Phase 0 branch was `feature/phase-0-project-control`. Phase 0 establishes project control, the fixed command surface, local toolchain documentation, and repository hygiene before the application tiers are scaffolded in Phase 1.
 
-The Phase 0 `pnpm` commands are scaffold verifiers. They run through uv's pinned Python environment, prove the repository baseline is intact, and will be expanded into real frontend, backend, end-to-end, smoke, and regression suites as later phases add product code.
+The Phase 0 checks are still preserved in `scripts/phase0_check.py`. They run through uv's pinned Python environment and continue to prove the repository baseline, command metadata, and git hygiene contract as later phases add product code.
+
+## Phase 1 Stage 1.1 Status
+
+This branch is `feature/phase-1-local-3-tier-foundation`. Phase 1 Stage 1.1 adds the monorepo scaffold only:
+
+- `apps/web`: independent Next.js App Router TypeScript application scaffold.
+- `services/api`: independent FastAPI Python application scaffold.
+- `packages/schemas`: documented shared schema generation area.
+- `content/rules`: documented local rule, card, and property source data area.
+- `assets/vector`: documented original local SVG artwork area.
+
+This stage does not add Docker, docker-compose, database schema, Alembic migrations, generated OpenAPI clients, rules engine behavior, negotiation behavior, AI runtime, RAG, or MCP implementation.
+
+## Phase 1 Stage 1.2 Status
+
+Phase 1 Stage 1.2 adds the local Docker Compose runtime stack:
+
+- `postgres`: Postgres with pgvector using `pgvector/pgvector:pg17`.
+- `api`: FastAPI container built from `services/api/Dockerfile` on `python:3.14.6-slim`.
+- `web`: Next.js container built from `apps/web/Dockerfile`.
+- `monopoly-postgres-data`: named volume for local database persistence.
+
+Copy or reference `.env.example` for non-secret local defaults. The API connects to Postgres through `DATABASE_URL=postgresql://monopoly:monopoly@postgres:5432/monopoly_ai_game`. The web container can reach the API at `INTERNAL_API_BASE_URL=http://api:8000`, while browser-facing code defaults to `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`.
+
+Start the local stack:
+
+```powershell
+docker compose --env-file .env.example up --build
+```
+
+Run the Stage 1.2 stack contract check:
+
+```powershell
+pnpm run test:stack
+```
+
+## Phase 1 Stage 1.3 Status
+
+Phase 1 Stage 1.3 adds the FastAPI backend foundation:
+
+- FastAPI application factory with `GET /health`.
+- Pydantic settings through `pydantic-settings`.
+- Structured JSON logging.
+- Local Next.js CORS origins from `CORS_ORIGINS`.
+- SQLAlchemy 2.x async engine/session wiring with `asyncpg`.
+- Alembic configuration and an initial `foundation_metadata` migration.
+- Expanded pytest coverage for health, settings, CORS, database wiring, logging, and Alembic.
+
+Run the backend tests:
+
+```powershell
+pnpm --filter @monopoly-ai-game/api run test
+```
+
+Apply migrations against the configured Postgres database:
+
+```powershell
+uv run --directory services/api alembic upgrade head
+```
 
 ## Local-Only Architecture
 
@@ -104,25 +163,48 @@ pnpm run lint
 pnpm run typecheck
 ```
 
+Run the Stage 1.1 scaffold checks directly:
+
+```powershell
+pnpm run test:scaffold
+pnpm run test:web
+pnpm run test:api
+```
+
+Start each application tier independently:
+
+```powershell
+pnpm --filter @monopoly-ai-game/web run dev
+pnpm --filter @monopoly-ai-game/api run dev
+```
+
+The web scaffold listens on `http://127.0.0.1:3000` by default. The API scaffold listens on `http://127.0.0.1:8000` by default and exposes `GET /health`.
+
 Available root commands:
 
-| Command | Phase 0 behavior |
+| Command | Current behavior |
 | --- | --- |
-| `pnpm run dev` | Runs the Phase 0 scaffold verifier for the future local dev surface. |
+| `pnpm run dev` | Starts the web and API scaffold dev servers through workspace package scripts. |
 | `pnpm run test` | Runs unit, integration, e2e, and smoke scaffold gates. |
-| `pnpm run test:unit` | Verifies repository baseline and command metadata. |
-| `pnpm run test:integration` | Verifies repository baseline and command metadata. |
-| `pnpm run test:e2e` | Verifies repository baseline and command metadata. |
-| `pnpm run test:smoke` | Verifies repository baseline and command metadata. |
-| `pnpm run lint` | Verifies required file, `.gitignore`, package, and README contracts. |
+| `pnpm run test:unit` | Verifies Phase 0 metadata, Stage 1.1 scaffold structure, web checks, and API tests. |
+| `pnpm run test:integration` | Verifies Phase 0 metadata and Stage 1.1 scaffold structure. |
+| `pnpm run test:e2e` | Verifies Phase 0 metadata and Stage 1.1 scaffold structure until browser tests are added. |
+| `pnpm run test:smoke` | Starts each scaffold tier long enough to verify a local response. |
+| `pnpm run test:scaffold` | Runs the Stage 1.1 scaffold verifier directly. |
+| `pnpm run test:web` | Runs the web package scaffold check. |
+| `pnpm run test:api` | Runs the API package pytest scaffold test. |
+| `pnpm run lint` | Verifies metadata/scaffold contracts, web TypeScript checks, and backend Ruff checks. |
 | `pnpm run format` | Runs the Phase 0 formatting gate placeholder. |
-| `pnpm run typecheck` | Verifies package and repository metadata contracts. |
+| `pnpm run typecheck` | Verifies metadata/scaffold contracts plus web TypeScript and backend basedpyright. |
 | `pnpm run review` | Runs lint, typecheck, and test. |
 
 Equivalent Makefile targets delegate to pnpm:
 
 ```powershell
 make test
+make test-scaffold
+make test-web
+make test-api
 make lint
 make typecheck
 make review

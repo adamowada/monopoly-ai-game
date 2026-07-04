@@ -1,0 +1,29 @@
+{
+  "name": "@monopoly-ai-game/schemas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared schema generation workspace for frontend and backend contracts.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./openapi.json": "./openapi.json"
+  },
+  "scripts": {
+    "generate:openapi": "uv run --directory ../.. --project services/api --python 3.14.6 python services/api/scripts/generate_openapi.py packages/schemas/openapi.json",
+    "generate:types": "openapi-typescript openapi.json -o src/generated/openapi.ts",
+    "generate": "pnpm run generate:openapi && pnpm run generate:types",
+    "test": "pnpm run typecheck && vitest run",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.0",
+    "openapi-typescript": "^7.10.1",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9",
+    "zod": "^4.4.3"
+  }
+}
