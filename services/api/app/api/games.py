@@ -20,6 +20,10 @@ from app.contracts.execution import (
     ContractExecutionError,
     create_contract_from_accepted_deal,
 )
+from app.contracts.outcome_explanation import (
+    ContractOutcomeExplanation,
+    load_contract_outcome_explanations,
+)
 from app.contracts.settlement_engine import (
     SettlementEngineError,
     SettlementEngineResult,
@@ -466,6 +470,15 @@ class ContractSettlementResponse(BaseModel):
     event_sequence: int
 
 
+class ContractOutcomesResponse(BaseModel):
+    outcomes: list[ContractOutcomeExplanation]
+
+
+class ContractExplainResponse(BaseModel):
+    contract_id: UUID
+    outcomes: list[ContractOutcomeExplanation]
+
+
 class AiDecisionAttemptRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -762,6 +775,34 @@ async def list_obligations(game_id: UUID, request: Request) -> ObligationsRespon
         )
         rows = [dict(row) for row in result.mappings().all()]
     return ObligationsResponse(obligations=[_obligation_response(row) for row in rows])
+
+
+@router.get("/{game_id}/contracts/outcomes", response_model=ContractOutcomesResponse)
+async def list_contract_outcomes(game_id: UUID, request: Request) -> ContractOutcomesResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        outcomes = await load_contract_outcome_explanations(session=session, game_id=game_id)
+    return ContractOutcomesResponse(outcomes=outcomes)
+
+
+@router.get("/{game_id}/contracts/{contract_id}/explain", response_model=ContractExplainResponse)
+async def explain_contract_outcomes(
+    game_id: UUID,
+    contract_id: UUID,
+    request: Request,
+) -> ContractExplainResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        outcomes = await load_contract_outcome_explanations(
+            session=session,
+            game_id=game_id,
+            contract_id=contract_id,
+        )
+    if not outcomes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="contract not found")
+    return ContractExplainResponse(contract_id=contract_id, outcomes=outcomes)
 
 
 @router.post(

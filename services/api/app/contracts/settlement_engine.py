@@ -2,14 +2,23 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.contracts.classic_rules import (
+    ContractRuleDecision,
+    impossible_state_prevention_check,
+    rent_share_cash_amount,
+    resolve_contract_classic_rule_interaction,
+)
 from app.contracts.default_handling import ContractDefault, default_handling
+from app.contracts.outcome_explanation import (
+    CONTRACT_OUTCOME_EXPLANATION_KEY,
+    contract_outcome_explanation_payload,
+)
 from app.contracts.trigger_system import trigger_system
 from app.db.metadata import contracts, deals, negotiation_messages, obligations
 from app.db.persistence import AcceptedEventRecord, AcceptedEventTemplate, EventPersistence
@@ -86,7 +95,7 @@ async def settlement_engine(
             if outcome.default is not None:
                 defaults.append(outcome.default)
                 defaulted_ids.append(obligation_row["id"])
-            else:
+            elif outcome.settled:
                 settled_ids.append(obligation_row["id"])
                 accepted_events.extend(outcome.accepted_events)
         await _close_contract_if_complete(session=session, contract_id=contract_row["id"])
@@ -143,6 +152,7 @@ class _SingleSettlementOutcome:
     accepted_events: list[AcceptedEventRecord]
     default: ContractDefault | None
     state: GameState
+    settled: bool = True
 
 
 async def _settle_one_obligation(
@@ -155,18 +165,80 @@ async def _settle_one_obligation(
     state: GameState,
     trigger_context: Mapping[str, Any],
 ) -> _SingleSettlementOutcome:
-    reason = _default_reason_for_obligation(obligation_row, state, trigger_context)
-    if reason is not None:
-        default = await default_handling(
+    decision = resolve_contract_classic_rule_interaction(
+        obligation_row,
+        state=state,
+        trigger_context=trigger_context,
+    )
+    if decision.status == "defer":
+        await _record_obligation_outcome(
             session=session,
             contract_row=contract_row,
             obligation_row=obligation_row,
-            reason_code=reason[0],
-            detail=reason[1],
+            decision=decision,
+            accepted_events=[],
+            status="pending",
+        )
+        return _SingleSettlementOutcome(
+            accepted_events=[],
+            default=None,
+            state=state,
+            settled=False,
+        )
+
+    if decision.status == "default":
+        default = await _default_obligation_with_outcome(
+            session=session,
+            contract_row=contract_row,
+            obligation_row=obligation_row,
+            decision=decision,
         )
         return _SingleSettlementOutcome(accepted_events=[], default=default, state=state)
 
-    templates = _event_templates_for_obligation(obligation_row, trigger_context)
+    templates = list(decision.event_templates) if decision.event_templates else _event_templates_for_obligation(
+        obligation_row,
+        trigger_context,
+    )
+    impossible_state_issues = impossible_state_prevention_check(
+        state=state,
+        obligation_row=obligation_row,
+        event_templates=templates,
+    )
+    if impossible_state_issues:
+        prevention_decision = ContractRuleDecision(
+            status="default",
+            decision="impossible_state_prevention_rejected",
+            policy_key="impossible_state_prevention",
+            policy_value="strict",
+            trigger=decision.trigger,
+            classic_rule_interaction={
+                **dict(decision.classic_rule_interaction),
+                "policy_key": "impossible_state_prevention",
+                "policy_value": "strict",
+                "issues": impossible_state_issues,
+            },
+            resulting_state_effect={
+                "rejected_event_templates": [
+                    {"event_type": template.event_type, "payload": dict(template.payload)}
+                    for template in templates
+                ],
+                "issues": impossible_state_issues,
+            },
+            explanation_text=(
+                "Contract outcome explanation: impossible_state_prevention=strict rejected "
+                f"decision {decision.decision}; issues {impossible_state_issues}."
+            ),
+            reason_code="impossible_state_prevention",
+            detail="contract obligation would leave money/property in an impossible state",
+        )
+        default = await _default_obligation_with_outcome(
+            session=session,
+            contract_row=contract_row,
+            obligation_row=obligation_row,
+            decision=prevention_decision,
+        )
+        return _SingleSettlementOutcome(accepted_events=[], default=default, state=state)
+
     records: list[AcceptedEventRecord] = []
     next_state = state
     if templates:
@@ -185,14 +257,25 @@ async def _settle_one_obligation(
     settled_event_id = records[-1].id if records else None
     schedule = obligation_row["schedule"] if isinstance(obligation_row["schedule"], Mapping) else {}
     terms = obligation_row["terms"] if isinstance(obligation_row["terms"], Mapping) else {}
+    terminal_status = "rejected" if decision.status == "reject" else "settled"
+    outcome_payload = contract_outcome_explanation_payload(
+        contract_row=contract_row,
+        obligation_row=obligation_row,
+        decision=decision,
+        accepted_event_ids=[str(record.id) for record in records],
+    )
     await session.execute(
         obligations.update()
         .where(obligations.c.id == obligation_row["id"])
         .values(
-            status="settled",
+            status=terminal_status,
             settled_event_id=settled_event_id,
             schedule={**dict(schedule), "settled_at": "settled"},
-            terms={**dict(terms), "settled_at": "settled"},
+            terms={
+                **dict(terms),
+                "settled_at": "settled",
+                CONTRACT_OUTCOME_EXPLANATION_KEY: outcome_payload,
+            },
             updated_at=sa.func.now(),
         )
     )
@@ -204,6 +287,64 @@ async def _settle_one_obligation(
         settled_event_id=settled_event_id,
     )
     return _SingleSettlementOutcome(accepted_events=records, default=None, state=next_state)
+
+
+async def _default_obligation_with_outcome(
+    *,
+    session: AsyncSession,
+    contract_row: Mapping[str, Any],
+    obligation_row: Mapping[str, Any],
+    decision: ContractRuleDecision,
+) -> ContractDefault:
+    default = await default_handling(
+        session=session,
+        contract_row=contract_row,
+        obligation_row=obligation_row,
+        reason_code=decision.reason_code or "contract_rule_default",
+        detail=decision.detail or decision.explanation_text,
+    )
+    await _record_obligation_outcome(
+        session=session,
+        contract_row=contract_row,
+        obligation_row=obligation_row,
+        decision=decision,
+        accepted_events=[],
+        status="defaulted",
+    )
+    return default
+
+
+async def _record_obligation_outcome(
+    *,
+    session: AsyncSession,
+    contract_row: Mapping[str, Any],
+    obligation_row: Mapping[str, Any],
+    decision: ContractRuleDecision,
+    accepted_events: list[AcceptedEventRecord],
+    status: str,
+) -> None:
+    result = await session.execute(sa.select(obligations.c.terms).where(obligations.c.id == obligation_row["id"]))
+    current_terms = result.scalar_one_or_none()
+    terms = current_terms if isinstance(current_terms, Mapping) else _terms(obligation_row)
+    outcome_payload = contract_outcome_explanation_payload(
+        contract_row=contract_row,
+        obligation_row=obligation_row,
+        decision=decision,
+        accepted_event_ids=[str(record.id) for record in accepted_events],
+    )
+    await session.execute(
+        obligations.update()
+        .where(obligations.c.id == obligation_row["id"])
+        .values(
+            status=status,
+            terms={
+                **dict(terms),
+                CONTRACT_OUTCOME_EXPLANATION_KEY: outcome_payload,
+                "last_classic_rule_decision": decision.model_dump(mode="json"),
+            },
+            updated_at=sa.func.now(),
+        )
+    )
 
 
 def _default_reason_for_obligation(
@@ -405,15 +546,7 @@ def _cash_amount(terms: Mapping[str, Any], trigger_context: Mapping[str, Any]) -
     if raw_amount is not None:
         return _positive_money(raw_amount)
     if terms.get("settlement_action") in {"rent_share", "rent_share_cash_payment"}:
-        rent_amount = _positive_money(trigger_context.get("amount"))
-        share_percent = Decimal(str(terms.get("share_percent", 0)))
-        if rent_amount is None or share_percent <= 0:
-            return None
-        amount = (Decimal(rent_amount) * share_percent / Decimal("100")).quantize(
-            Decimal("1"),
-            rounding=ROUND_HALF_UP,
-        )
-        return int(amount)
+        return rent_share_cash_amount(terms, trigger_context)
     return None
 
 

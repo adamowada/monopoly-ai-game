@@ -123,6 +123,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/contracts/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Contract Outcomes */
+        get: operations["list_contract_outcomes_games__game_id__contracts_outcomes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/contracts/{contract_id}/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Explain Contract Outcomes */
+        get: operations["explain_contract_outcomes_games__game_id__contracts__contract_id__explain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/contracts/{contract_id}/settle": {
         parameters: {
             query?: never;
@@ -520,6 +554,60 @@ export interface components {
              * @enum {string}
              */
             status: "created" | "existing";
+        };
+        /** ContractExplainResponse */
+        ContractExplainResponse: {
+            /**
+             * Contract Id
+             * Format: uuid
+             */
+            contract_id: string;
+            /** Outcomes */
+            outcomes: components["schemas"]["ContractOutcomeExplanation"][];
+        };
+        /** ContractOutcomeExplanation */
+        ContractOutcomeExplanation: {
+            /** Classic Rule Interaction */
+            classic_rule_interaction: {
+                [key: string]: unknown;
+            };
+            /**
+             * Contract Id
+             * Format: uuid
+             */
+            contract_id: string;
+            /** Decision */
+            decision: {
+                [key: string]: unknown;
+            };
+            /** Explanation Text */
+            explanation_text: string;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Id */
+            id: string;
+            /** Obligation Id */
+            obligation_id: string | null;
+            /** Obligation Type */
+            obligation_type: string;
+            /** Resulting State Effect */
+            resulting_state_effect: {
+                [key: string]: unknown;
+            };
+            /** Source Deal Id */
+            source_deal_id: string | null;
+            /** Trigger */
+            trigger: {
+                [key: string]: unknown;
+            };
+        };
+        /** ContractOutcomesResponse */
+        ContractOutcomesResponse: {
+            /** Outcomes */
+            outcomes: components["schemas"]["ContractOutcomeExplanation"][];
         };
         /** ContractResponse */
         ContractResponse: {
@@ -1355,6 +1443,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContractCreationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_contract_outcomes_games__game_id__contracts_outcomes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractOutcomesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    explain_contract_outcomes_games__game_id__contracts__contract_id__explain_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                contract_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractExplainResponse"];
                 };
             };
             /** @description Validation Error */

@@ -208,6 +208,130 @@
         "title": "ContractCreationResponse",
         "type": "object"
       },
+      "ContractExplainResponse": {
+        "properties": {
+          "contract_id": {
+            "format": "uuid",
+            "title": "Contract Id",
+            "type": "string"
+          },
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/ContractOutcomeExplanation"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "contract_id",
+          "outcomes"
+        ],
+        "title": "ContractExplainResponse",
+        "type": "object"
+      },
+      "ContractOutcomeExplanation": {
+        "additionalProperties": false,
+        "properties": {
+          "classic_rule_interaction": {
+            "additionalProperties": true,
+            "title": "Classic Rule Interaction",
+            "type": "object"
+          },
+          "contract_id": {
+            "format": "uuid",
+            "title": "Contract Id",
+            "type": "string"
+          },
+          "decision": {
+            "additionalProperties": true,
+            "title": "Decision",
+            "type": "object"
+          },
+          "explanation_text": {
+            "title": "Explanation Text",
+            "type": "string"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "obligation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obligation Id"
+          },
+          "obligation_type": {
+            "title": "Obligation Type",
+            "type": "string"
+          },
+          "resulting_state_effect": {
+            "additionalProperties": true,
+            "title": "Resulting State Effect",
+            "type": "object"
+          },
+          "source_deal_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Deal Id"
+          },
+          "trigger": {
+            "additionalProperties": true,
+            "title": "Trigger",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "game_id",
+          "source_deal_id",
+          "contract_id",
+          "obligation_id",
+          "obligation_type",
+          "trigger",
+          "classic_rule_interaction",
+          "decision",
+          "resulting_state_effect",
+          "explanation_text"
+        ],
+        "title": "ContractOutcomeExplanation",
+        "type": "object"
+      },
+      "ContractOutcomesResponse": {
+        "properties": {
+          "outcomes": {
+            "items": {
+              "$ref": "#/components/schemas/ContractOutcomeExplanation"
+            },
+            "title": "Outcomes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outcomes"
+        ],
+        "title": "ContractOutcomesResponse",
+        "type": "object"
+      },
       "ContractResponse": {
         "properties": {
           "closed_at": {
@@ -2235,6 +2359,102 @@
           }
         },
         "summary": "Create Contract From Deal Endpoint",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/contracts/outcomes": {
+      "get": {
+        "operationId": "list_contract_outcomes_games__game_id__contracts_outcomes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractOutcomesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Contract Outcomes",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/contracts/{contract_id}/explain": {
+      "get": {
+        "operationId": "explain_contract_outcomes_games__game_id__contracts__contract_id__explain_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contract Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractExplainResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain Contract Outcomes",
         "tags": [
           "games"
         ]

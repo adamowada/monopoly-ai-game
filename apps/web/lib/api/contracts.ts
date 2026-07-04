@@ -1,7 +1,26 @@
 import { z } from "zod";
 
-export const ContractStatusSchema = z.enum(["draft", "active", "fulfilled", "void", "cancelled", "breached"]);
-export const ObligationStatusSchema = z.enum(["pending", "due", "scheduled", "settled", "cancelled", "failed"]);
+export const ContractStatusSchema = z.enum([
+  "draft",
+  "active",
+  "closed",
+  "fulfilled",
+  "void",
+  "cancelled",
+  "breached",
+  "defaulted",
+]);
+export const ObligationStatusSchema = z.enum([
+  "pending",
+  "due",
+  "scheduled",
+  "settled",
+  "deferred",
+  "rejected",
+  "cancelled",
+  "failed",
+  "defaulted",
+]);
 
 export const ContractTermSchema = z
   .object({
@@ -49,8 +68,27 @@ export const ObligationsResponseSchema = z.object({
   obligations: z.array(ObligationRecordSchema),
 });
 
+export const ContractOutcomeExplanationSchema = z.object({
+  id: z.string().min(1),
+  game_id: z.string().min(1),
+  source_deal_id: z.string().min(1).nullable(),
+  contract_id: z.string().min(1),
+  obligation_id: z.string().min(1).nullable(),
+  obligation_type: z.string().min(1),
+  trigger: z.record(z.string(), z.unknown()),
+  classic_rule_interaction: z.record(z.string(), z.unknown()),
+  decision: z.record(z.string(), z.unknown()),
+  resulting_state_effect: z.record(z.string(), z.unknown()),
+  explanation_text: z.string().min(1),
+});
+
+export const ContractOutcomesResponseSchema = z.object({
+  outcomes: z.array(ContractOutcomeExplanationSchema),
+});
+
 export type ContractRecord = z.infer<typeof ContractRecordSchema>;
 export type ObligationRecord = z.infer<typeof ObligationRecordSchema>;
+export type ContractOutcomeExplanation = z.infer<typeof ContractOutcomeExplanationSchema>;
 
 type ApiFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -124,4 +162,17 @@ export async function readObligations({
   });
   const payload = await readJson(response, "Load obligations");
   return parseOrThrow(ObligationsResponseSchema, payload, "obligations").obligations;
+}
+
+export async function readContractOutcomes({
+  gameId,
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: GameApiOptions): Promise<ContractOutcomeExplanation[]> {
+  const response = await fetcher(gameUrl(baseUrl, gameId, "/contracts/outcomes"), {
+    cache: "no-store",
+    headers: { accept: "application/json" },
+  });
+  const payload = await readJson(response, "Load contract outcomes");
+  return parseOrThrow(ContractOutcomesResponseSchema, payload, "contract outcomes").outcomes;
 }
