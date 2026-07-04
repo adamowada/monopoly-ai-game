@@ -1,10 +1,16 @@
-.PHONY: dev test test-unit test-integration test-e2e test-smoke test-scaffold test-web test-api lint format typecheck review python-install python-sync
+.PHONY: dev generate-api test test-contract test-unit test-integration test-e2e test-smoke test-scaffold test-web test-api lint format typecheck review python-install python-sync
 
 dev:
 	pnpm run dev
 
+generate-api:
+	pnpm run generate:api
+
 test:
 	pnpm run test
+
+test-contract:
+	pnpm run test:contract
 
 test-unit:
 	pnpm run test:unit

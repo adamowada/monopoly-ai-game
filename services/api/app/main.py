@@ -18,11 +18,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 class HealthResponse(BaseModel):
-    status: Literal["ok"] = "ok"
-    service: Literal["api"] = "api"
-    stage: Literal["phase-1-stage-1.3"] = "phase-1-stage-1.3"
+    status: Literal["ok"]
+    service: Literal["api"]
+    stage: Literal["phase-1-stage-1.3"]
     environment: str
-    database: Literal["configured"] = "configured"
+    database: Literal["configured"]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -62,7 +62,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
-        return HealthResponse(environment=resolved_settings.api_env)
+        return HealthResponse(
+            status="ok",
+            service="api",
+            stage="phase-1-stage-1.3",
+            environment=resolved_settings.api_env,
+            database="configured",
+        )
 
     return app
 

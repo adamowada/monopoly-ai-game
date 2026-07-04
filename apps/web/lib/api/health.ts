@@ -1,11 +1,15 @@
+import type { paths } from "@monopoly-ai-game/schemas";
 import { z } from "zod";
 
-export const BackendHealthSchema = z.object({
+export type BackendHealth =
+  paths["/health"]["get"]["responses"][200]["content"]["application/json"];
+
+export const BackendHealthSchema: z.ZodType<BackendHealth> = z.object({
   status: z.literal("ok"),
   service: z.literal("api"),
-  stage: z.string().min(1),
+  stage: z.literal("phase-1-stage-1.3"),
   environment: z.string().min(1),
-  database: z.string().min(1),
+  database: z.literal("configured"),
 });
 
 export const HealthSnapshotSchema = z.discriminatedUnion("state", [
@@ -21,7 +25,6 @@ export const HealthSnapshotSchema = z.discriminatedUnion("state", [
   }),
 ]);
 
-export type BackendHealth = z.infer<typeof BackendHealthSchema>;
 export type HealthSnapshot = z.infer<typeof HealthSnapshotSchema>;
 
 type HealthFetcher = (input: string, init: RequestInit) => Promise<Response>;

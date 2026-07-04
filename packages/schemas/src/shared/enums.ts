@@ -1,0 +1,44 @@
+export const PHASE_NAMES = [
+  "START_TURN",
+  "PRE_ROLL_MANAGEMENT",
+  "ROLL_REQUIRED",
+  "MOVEMENT_RESOLUTION",
+  "SPACE_RESOLUTION",
+  "PURCHASE_OR_AUCTION",
+  "PAYMENT_RESOLUTION",
+  "JAIL_RESOLUTION",
+  "POST_ROLL_MANAGEMENT",
+  "NEGOTIATION_WINDOW",
+  "END_TURN",
+  "BANKRUPTCY_RESOLUTION",
+  "GAME_OVER",
+] as const;
+
+export type PhaseName = (typeof PHASE_NAMES)[number];
+
+export const ACTION_TYPES = [
+  "ROLL_DICE",
+  "END_TURN",
+  "BUY_PROPERTY",
+  "DECLINE_PURCHASE",
+  "START_AUCTION",
+  "BID_AUCTION",
+  "PASS_AUCTION",
+  "PAY_JAIL_FINE",
+  "USE_GET_OUT_OF_JAIL_CARD",
+  "BUY_HOUSE",
+  "SELL_HOUSE",
+  "MORTGAGE_PROPERTY",
+  "UNMORTGAGE_PROPERTY",
+  "PROPOSE_DEAL",
+  "ACCEPT_DEAL",
+  "REJECT_DEAL",
+  "CANCEL_DEAL",
+  "DECLARE_BANKRUPTCY",
+] as const;
+
+export type ActionType = (typeof ACTION_TYPES)[number];
+
+export const PLAYER_TYPES = ["human", "ai"] as const;
+
+export type PlayerType = (typeof PLAYER_TYPES)[number];
