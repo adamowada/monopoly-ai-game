@@ -1,10 +1,23 @@
+"""create domain and audit schema
+
+This revision adds the durable Phase 4.1 schema for accepted events, rejected action audits,
+negotiation records, contract records, AI audit records, memory records, and retrieval records.
+"""
+
 from __future__ import annotations
 
+from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 
-metadata = sa.MetaData()
+revision: str = "0002_create_domain_audit_schema"
+down_revision: str | None = "0001_create_foundation_metadata"
+branch_labels: str | tuple[str, ...] | None = None
+depends_on: str | tuple[str, ...] | None = None
+
+
+stage_metadata = sa.MetaData()
 
 
 def uuid_pk() -> sa.Column:
@@ -42,18 +55,9 @@ def updated_at() -> sa.Column:
     )
 
 
-foundation_metadata = sa.Table(
-    "foundation_metadata",
-    metadata,
-    sa.Column("id", sa.Integer, primary_key=True),
-    sa.Column("key", sa.String(length=100), nullable=False, unique=True),
-    sa.Column("value", sa.Text, nullable=True),
-    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-)
-
-games = sa.Table(
+sa.Table(
     "games",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column("status", sa.String(length=50), nullable=False, server_default=sa.text("'setup'")),
     sa.Column("ruleset_version", sa.String(length=50), nullable=False, server_default=sa.text("'classic-v1'")),
@@ -65,9 +69,9 @@ games = sa.Table(
     updated_at(),
 )
 
-players = sa.Table(
+sa.Table(
     "players",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -88,9 +92,9 @@ players = sa.Table(
     sa.Index("ix_players_game_seat_order", "game_id", "seat_order"),
 )
 
-game_events = sa.Table(
+sa.Table(
     "game_events",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -117,9 +121,9 @@ game_events = sa.Table(
     sa.Index("ix_game_events_event_type", "event_type"),
 )
 
-game_snapshots = sa.Table(
+sa.Table(
     "game_snapshots",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -143,9 +147,9 @@ game_snapshots = sa.Table(
     sa.Index("ix_game_snapshots_last_event_id", "last_event_id"),
 )
 
-rejected_actions = sa.Table(
+sa.Table(
     "rejected_actions",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -172,9 +176,9 @@ rejected_actions = sa.Table(
     sa.Index("ix_rejected_actions_game_phase", "game_id", "phase"),
 )
 
-negotiations = sa.Table(
+sa.Table(
     "negotiations",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -200,9 +204,9 @@ negotiations = sa.Table(
     sa.Index("ix_negotiations_game_created_at", "game_id", "created_at"),
 )
 
-negotiation_messages = sa.Table(
+sa.Table(
     "negotiation_messages",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -237,9 +241,9 @@ negotiation_messages = sa.Table(
     sa.Index("ix_negotiation_messages_sender_player_id", "sender_player_id"),
 )
 
-deals = sa.Table(
+sa.Table(
     "deals",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -278,9 +282,9 @@ deals = sa.Table(
     sa.Index("ix_deals_proposed_by_player_id", "proposed_by_player_id"),
 )
 
-contracts = sa.Table(
+sa.Table(
     "contracts",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -311,9 +315,9 @@ contracts = sa.Table(
     sa.Index("ix_contracts_effective_event_id", "effective_event_id"),
 )
 
-obligations = sa.Table(
+sa.Table(
     "obligations",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -358,9 +362,9 @@ obligations = sa.Table(
     sa.Index("ix_obligations_owed_to_player_id", "owed_to_player_id"),
 )
 
-ai_profiles = sa.Table(
+sa.Table(
     "ai_profiles",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -384,9 +388,9 @@ ai_profiles = sa.Table(
     sa.Index("ix_ai_profiles_player_id", "player_id"),
 )
 
-ai_decisions = sa.Table(
+sa.Table(
     "ai_decisions",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -447,9 +451,9 @@ ai_decisions = sa.Table(
     sa.Index("ix_ai_decisions_prompt_context_hash", "prompt_context_hash"),
 )
 
-ai_self_dialogue = sa.Table(
+sa.Table(
     "ai_self_dialogue",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -478,9 +482,9 @@ ai_self_dialogue = sa.Table(
     sa.Index("ix_ai_self_dialogue_game_player_created_at", "game_id", "player_id", "created_at"),
 )
 
-ai_memory_entries = sa.Table(
+sa.Table(
     "ai_memory_entries",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -537,9 +541,9 @@ ai_memory_entries = sa.Table(
     sa.Index("ix_ai_memory_entries_category", "category"),
 )
 
-retrieval_records = sa.Table(
+sa.Table(
     "retrieval_records",
-    metadata,
+    stage_metadata,
     uuid_pk(),
     sa.Column(
         "game_id",
@@ -578,3 +582,12 @@ retrieval_records = sa.Table(
     sa.Index("ix_retrieval_records_memory_entry_id", "memory_entry_id"),
     sa.Index("ix_retrieval_records_source", "source_type", "source_id"),
 )
+
+
+def upgrade() -> None:
+    op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    stage_metadata.create_all(op.get_bind())
+
+
+def downgrade() -> None:
+    stage_metadata.drop_all(op.get_bind())
