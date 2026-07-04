@@ -178,6 +178,7 @@ function createGame(payload) {
     deals: [],
     contracts: [],
     obligations: [],
+    contract_outcomes: [],
     ai_profiles: [],
     ai_decisions: [],
     ai_self_dialogue: [],
@@ -679,6 +680,38 @@ function configureContractsLogSeed(game) {
       triggering_event_id: transferEvent.id,
       settled_at: transferAt,
       created_at: acceptedAt,
+    },
+  ];
+  game.contract_outcomes = [
+    {
+      id: `${contract.id}:${settledObligationId}`,
+      game_id: game.id,
+      source_deal_id: deal.id,
+      contract_id: contract.id,
+      obligation_id: settledObligationId,
+      obligation_type: "rent_share",
+      trigger: { type: "rent_collected", property_id: "property_reading_railroad" },
+      classic_rule_interaction: {
+        policy: {
+          rent_share_reduced_rent: "share_actual_paid",
+          impossible_state_prevention: "strict",
+        },
+        policy_key: "rent_share_reduced_rent",
+        policy_value: "share_actual_paid",
+        deterministic: true,
+      },
+      decision: { status: "settled", decision: "rent_share_cash_transfer" },
+      resulting_state_effect: {
+        cash_transfers: [
+          { player_id: ada.id, amount: -75 },
+          { player_id: grace.id, amount: 75 },
+        ],
+      },
+      explanation_text:
+        `Contract outcome explanation: source deal ${deal.id} produced contract ${contract.id} ` +
+        `and obligation ${settledObligationId} with trigger rent_collected; ` +
+        "classic-rule interaction rent_share_reduced_rent=share_actual_paid; " +
+        "decision rent_share_cash_transfer; resulting state/effect cash transfer.",
     },
   ];
 
@@ -1753,6 +1786,36 @@ const server = createServer(async (request, response) => {
       return;
     }
     json(response, 200, { obligations: game.obligations ?? [] });
+    return;
+  }
+
+  const contractOutcomesMatch = url.pathname.match(/^\/games\/([^/]+)\/contracts\/outcomes$/);
+  if (request.method === "GET" && contractOutcomesMatch) {
+    const gameId = decodeURIComponent(contractOutcomesMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    json(response, 200, { outcomes: game.contract_outcomes ?? [] });
+    return;
+  }
+
+  const contractExplainMatch = url.pathname.match(/^\/games\/([^/]+)\/contracts\/([^/]+)\/explain$/);
+  if (request.method === "GET" && contractExplainMatch) {
+    const gameId = decodeURIComponent(contractExplainMatch[1]);
+    const contractId = decodeURIComponent(contractExplainMatch[2]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const outcomes = (game.contract_outcomes ?? []).filter((outcome) => outcome.contract_id === contractId);
+    if (outcomes.length === 0) {
+      json(response, 404, { error: "contract not found" });
+      return;
+    }
+    json(response, 200, { contract_id: contractId, outcomes });
     return;
   }
 

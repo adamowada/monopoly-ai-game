@@ -72,6 +72,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Contracts */
+        get: operations["list_contracts_games__game_id__contracts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/contracts/enforce": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enforce Contracts Endpoint */
+        post: operations["enforce_contracts_endpoint_games__game_id__contracts_enforce_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/contracts/from-deal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Contract From Deal Endpoint */
+        post: operations["create_contract_from_deal_endpoint_games__game_id__contracts_from_deal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/contracts/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Contract Outcomes */
+        get: operations["list_contract_outcomes_games__game_id__contracts_outcomes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/contracts/{contract_id}/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Explain Contract Outcomes */
+        get: operations["explain_contract_outcomes_games__game_id__contracts__contract_id__explain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/contracts/{contract_id}/settle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Settle Contract Endpoint */
+        post: operations["settle_contract_endpoint_games__game_id__contracts__contract_id__settle_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/deals": {
         parameters: {
             query?: never;
@@ -83,6 +185,40 @@ export interface paths {
         put?: never;
         /** Create Deal */
         post: operations["create_deal_games__game_id__deals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/deals/{deal_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Deal */
+        post: operations["accept_deal_games__game_id__deals__deal_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/deals/{deal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Deal */
+        post: operations["reject_deal_games__game_id__deals__deal_id__reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -147,10 +283,114 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Negotiations */
+        get: operations["list_negotiations_games__game_id__negotiations_get"];
         put?: never;
         /** Create Negotiation */
         post: operations["create_negotiation_games__game_id__negotiations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Negotiation */
+        get: operations["get_negotiation_games__game_id__negotiations__negotiation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Negotiation */
+        post: operations["execute_negotiation_games__game_id__negotiations__negotiation_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}/expire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Expire Negotiation */
+        post: operations["expire_negotiation_games__game_id__negotiations__negotiation_id__expire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Negotiation Messages */
+        get: operations["list_negotiation_messages_games__game_id__negotiations__negotiation_id__messages_get"];
+        put?: never;
+        /** Create Negotiation Message */
+        post: operations["create_negotiation_message_games__game_id__negotiations__negotiation_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/negotiations/{negotiation_id}/messages/{message_id}/ai-decision-attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Negotiation Ai Decision Attempt */
+        post: operations["record_negotiation_ai_decision_attempt_games__game_id__negotiations__negotiation_id__messages__message_id__ai_decision_attempts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/obligations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Obligations */
+        get: operations["list_obligations_games__game_id__obligations_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -262,6 +502,11 @@ export interface components {
              */
             status: "accepted";
         };
+        /** AiDecisionAttemptRequest */
+        AiDecisionAttemptRequest: {
+            /** Player Id */
+            player_id?: string | null;
+        };
         /** AiStepNotImplementedResponse */
         AiStepNotImplementedResponse: {
             /**
@@ -299,21 +544,165 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** ContractCreationResponse */
+        ContractCreationResponse: {
+            contract: components["schemas"]["ContractResponse"];
+            /** Obligations */
+            obligations: components["schemas"]["ObligationResponse"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "created" | "existing";
+        };
+        /** ContractExplainResponse */
+        ContractExplainResponse: {
+            /**
+             * Contract Id
+             * Format: uuid
+             */
+            contract_id: string;
+            /** Outcomes */
+            outcomes: components["schemas"]["ContractOutcomeExplanation"][];
+        };
+        /** ContractOutcomeExplanation */
+        ContractOutcomeExplanation: {
+            /** Classic Rule Interaction */
+            classic_rule_interaction: {
+                [key: string]: unknown;
+            };
+            /**
+             * Contract Id
+             * Format: uuid
+             */
+            contract_id: string;
+            /** Decision */
+            decision: {
+                [key: string]: unknown;
+            };
+            /** Explanation Text */
+            explanation_text: string;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Id */
+            id: string;
+            /** Obligation Id */
+            obligation_id: string | null;
+            /** Obligation Type */
+            obligation_type: string;
+            /** Resulting State Effect */
+            resulting_state_effect: {
+                [key: string]: unknown;
+            };
+            /** Source Deal Id */
+            source_deal_id: string | null;
+            /** Trigger */
+            trigger: {
+                [key: string]: unknown;
+            };
+        };
+        /** ContractOutcomesResponse */
+        ContractOutcomesResponse: {
+            /** Outcomes */
+            outcomes: components["schemas"]["ContractOutcomeExplanation"][];
+        };
+        /** ContractResponse */
+        ContractResponse: {
+            /** Closed At */
+            closed_at: unknown | null;
+            /** Created At */
+            created_at: unknown;
+            /** Deal Id */
+            deal_id: string | null;
+            /** Effective Event Id */
+            effective_event_id: string | null;
+            /** Executed At */
+            executed_at: unknown | null;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Terms */
+            terms: {
+                [key: string]: unknown;
+            };
+            /** Updated At */
+            updated_at: unknown;
+        };
+        /** ContractSettleRequest */
+        ContractSettleRequest: {
+            /** Obligation Id */
+            obligation_id?: string | null;
+            /** Trigger Context */
+            trigger_context?: {
+                [key: string]: unknown;
+            };
+        };
+        /** ContractSettlementResponse */
+        ContractSettlementResponse: {
+            /** Accepted Events */
+            accepted_events: components["schemas"]["AcceptedEventResponse"][];
+            /** Defaulted Obligation Ids */
+            defaulted_obligation_ids: string[];
+            /** Event Sequence */
+            event_sequence: number;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Settled Obligation Ids */
+            settled_obligation_ids: string[];
+            /** State Hash */
+            state_hash: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "ok";
+        };
+        /** ContractsResponse */
+        ContractsResponse: {
+            /** Contracts */
+            contracts: components["schemas"]["ContractResponse"][];
+        };
+        /** CreateContractFromDealRequest */
+        CreateContractFromDealRequest: {
+            /**
+             * Deal Id
+             * Format: uuid
+             */
+            deal_id: string;
+        };
         /** CreateDealRequest */
         CreateDealRequest: {
             /** Negotiation Id */
             negotiation_id?: string | null;
             /** Parent Deal Id */
             parent_deal_id?: string | null;
-            /**
-             * Proposed By Player Id
-             * Format: uuid
-             */
-            proposed_by_player_id: string;
+            /** Participant Player Ids */
+            participant_player_ids?: string[] | null;
+            /** Proposed By Player Id */
+            proposed_by_player_id?: string | null;
+            /** Proposer Player Id */
+            proposer_player_id?: string | null;
             /** Terms */
             terms: {
                 [key: string]: unknown;
-            };
+            } | {
+                [key: string]: unknown;
+            }[];
         };
         /** CreateGameRequest */
         CreateGameRequest: {
@@ -326,12 +715,23 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** CreateNegotiationMessageRequest */
+        CreateNegotiationMessageRequest: {
+            /** Author Player Id */
+            author_player_id?: string | null;
+            /** Body */
+            body: string;
+            /** Sender Player Id */
+            sender_player_id?: string | null;
+        };
         /** CreateNegotiationRequest */
         CreateNegotiationRequest: {
             /** Context */
             context?: {
                 [key: string]: unknown;
             };
+            /** Expires At */
+            expires_at?: string | null;
             /**
              * Opened By Player Id
              * Format: uuid
@@ -340,12 +740,23 @@ export interface components {
             /** Participant Player Ids */
             participant_player_ids: string[];
         };
+        /** DealDecisionRequest */
+        DealDecisionRequest: {
+            /** Player Id */
+            player_id?: string | null;
+        };
         /** DealResponse */
         DealResponse: {
             /** Accepted At */
             accepted_at: unknown | null;
             /** Created At */
             created_at: unknown;
+            /** Deal Schema Version */
+            deal_schema_version: number | null;
+            /** Deal Version */
+            deal_version: number;
+            /** Eligible For Contract */
+            eligible_for_contract: boolean;
             /**
              * Game Id
              * Format: uuid
@@ -360,14 +771,22 @@ export interface components {
             negotiation_id: string | null;
             /** Parent Deal Id */
             parent_deal_id: string | null;
+            /** Participant Player Ids */
+            participant_player_ids: string[];
             /** Proposed By Player Id */
             proposed_by_player_id: string | null;
+            /** Proposer Player Id */
+            proposer_player_id: string | null;
             /** Status */
             status: string;
+            /** Structured Deal */
+            structured_deal: boolean;
             /** Terms */
             terms: {
                 [key: string]: unknown;
             };
+            /** Terms Hash */
+            terms_hash: string;
             /** Updated At */
             updated_at: unknown;
             /** Validation Errors */
@@ -376,6 +795,13 @@ export interface components {
             }[] | null;
             /** Version */
             version: number;
+        };
+        /** EnforceContractsRequest */
+        EnforceContractsRequest: {
+            /** Trigger Context */
+            trigger_context?: {
+                [key: string]: unknown;
+            };
         };
         /** EventsResponse */
         EventsResponse: {
@@ -494,14 +920,33 @@ export interface components {
             /** State Hash */
             state_hash: string;
         };
-        /** NegotiationResponse */
-        NegotiationResponse: {
-            /** Closed At */
-            closed_at: unknown | null;
-            /** Context */
-            context: {
-                [key: string]: unknown;
-            };
+        /** LifecycleRejectedResponse */
+        LifecycleRejectedResponse: {
+            /** Reason Code */
+            reason_code: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: "rejected";
+            /** Validation Errors */
+            validation_errors: components["schemas"]["ValidationIssueResponse"][];
+        };
+        /** NegotiationMessageMutationResponse */
+        NegotiationMessageMutationResponse: {
+            message: components["schemas"]["NegotiationMessageResponse"];
+            /**
+             * Status
+             * @constant
+             */
+            status: "ok";
+        };
+        /** NegotiationMessageResponse */
+        NegotiationMessageResponse: {
+            /** Author Player Id */
+            author_player_id: string | null;
+            /** Body */
+            body: string | null;
             /** Created At */
             created_at: unknown;
             /**
@@ -514,18 +959,155 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Message Type */
+            message_type: string;
+            /**
+             * Negotiation Id
+             * Format: uuid
+             */
+            negotiation_id: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Recipient Player Id */
+            recipient_player_id: string | null;
+            /** Sender Player Id */
+            sender_player_id: string | null;
+        };
+        /** NegotiationMessagesResponse */
+        NegotiationMessagesResponse: {
+            /** Messages */
+            messages: components["schemas"]["NegotiationMessageResponse"][];
+        };
+        /** NegotiationResponse */
+        NegotiationResponse: {
+            /** Acceptances */
+            acceptances: {
+                [key: string]: string[];
+            };
+            /** Ai Decision Attempts By Message Id */
+            ai_decision_attempts_by_message_id: {
+                [key: string]: number;
+            };
+            /** Closed At */
+            closed_at: unknown | null;
+            /** Context */
+            context: {
+                [key: string]: unknown;
+            };
+            /** Created At */
+            created_at: unknown;
+            /** Current Deal Id */
+            current_deal_id: string | null;
+            /** Current Deal Version */
+            current_deal_version: number | null;
+            /** Current Terms Hash */
+            current_terms_hash: string | null;
+            /** Cutoff Policy */
+            cutoff_policy: {
+                [key: string]: unknown;
+            };
+            /** Cutoff Reason */
+            cutoff_reason: string | null;
+            /** Expired By Cutoff */
+            expired_by_cutoff: boolean;
+            /** Expires At */
+            expires_at: unknown | null;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Invalidated Acceptances */
+            invalidated_acceptances: {
+                [key: string]: string[];
+            };
             /** Opened By Player Id */
             opened_by_player_id: string | null;
             /** Participant Player Ids */
             participant_player_ids: string[];
+            /** Pending Deal Id */
+            pending_deal_id: string | null;
+            /** Pending Offer Counts By Player Id */
+            pending_offer_counts_by_player_id: {
+                [key: string]: number;
+            };
             /** Phase */
             phase: string | null;
+            /** Proposal Counts By Player Id */
+            proposal_counts_by_player_id: {
+                [key: string]: number;
+            };
             /** Round Number */
             round_number: number;
             /** Status */
             status: string;
+            /** Status History */
+            status_history: {
+                [key: string]: unknown;
+            }[];
             /** Updated At */
             updated_at: unknown;
+        };
+        /** NegotiationsResponse */
+        NegotiationsResponse: {
+            /** Negotiations */
+            negotiations: components["schemas"]["NegotiationResponse"][];
+        };
+        /** ObligationResponse */
+        ObligationResponse: {
+            /**
+             * Contract Id
+             * Format: uuid
+             */
+            contract_id: string;
+            /** Created At */
+            created_at: unknown;
+            /** Due At */
+            due_at: unknown | null;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Obligation Type */
+            obligation_type: string;
+            /** Owed By Player Id */
+            owed_by_player_id: string | null;
+            /** Owed To Player Id */
+            owed_to_player_id: string | null;
+            /** Schedule */
+            schedule: {
+                [key: string]: unknown;
+            } | null;
+            /** Settled At */
+            settled_at: unknown | null;
+            /** Settled Event Id */
+            settled_event_id: string | null;
+            /** Status */
+            status: string;
+            /** Terms */
+            terms: {
+                [key: string]: unknown;
+            };
+            /** Updated At */
+            updated_at: unknown;
+        };
+        /** ObligationsResponse */
+        ObligationsResponse: {
+            /** Obligations */
+            obligations: components["schemas"]["ObligationResponse"][];
         };
         /** PlayerCreateRequest */
         PlayerCreateRequest: {
@@ -620,6 +1202,15 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** ValidationIssueResponse */
+        ValidationIssueResponse: {
+            /** Code */
+            code: string;
+            /** Field */
+            field?: string | null;
+            /** Message */
+            message: string;
         };
     };
     responses: never;
@@ -764,6 +1355,206 @@ export interface operations {
             };
         };
     };
+    list_contracts_games__game_id__contracts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enforce_contracts_endpoint_games__game_id__contracts_enforce_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["EnforceContractsRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractSettlementResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_contract_from_deal_endpoint_games__game_id__contracts_from_deal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateContractFromDealRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractCreationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_contract_outcomes_games__game_id__contracts_outcomes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractOutcomesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    explain_contract_outcomes_games__game_id__contracts__contract_id__explain_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                contract_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractExplainResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    settle_contract_endpoint_games__game_id__contracts__contract_id__settle_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                contract_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ContractSettleRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractSettlementResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_deal_games__game_id__deals_post: {
         parameters: {
             query?: never;
@@ -785,7 +1576,79 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DealResponse"];
+                    "application/json": components["schemas"]["DealResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_deal_games__game_id__deals__deal_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                deal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DealDecisionRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_deal_games__game_id__deals__deal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                deal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DealDecisionRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealResponse"] | components["schemas"]["LifecycleRejectedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -894,6 +1757,37 @@ export interface operations {
             };
         };
     };
+    list_negotiations_games__game_id__negotiations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_negotiation_games__game_id__negotiations_post: {
         parameters: {
             query?: never;
@@ -916,6 +1810,238 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NegotiationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_negotiation_games__game_id__negotiations__negotiation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_negotiation_games__game_id__negotiations__negotiation_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    expire_negotiation_games__game_id__negotiations__negotiation_id__expire_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_negotiation_messages_games__game_id__negotiations__negotiation_id__messages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationMessagesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_negotiation_message_games__game_id__negotiations__negotiation_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNegotiationMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationMessageMutationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_negotiation_ai_decision_attempt_games__game_id__negotiations__negotiation_id__messages__message_id__ai_decision_attempts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+                negotiation_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AiDecisionAttemptRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_obligations_games__game_id__obligations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObligationsResponse"];
                 };
             };
             /** @description Validation Error */

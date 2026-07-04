@@ -7,7 +7,7 @@ import { ContractsPanel } from "./contracts-panel";
 import type { AcceptedEvent } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
 import type { RejectedActionRecord } from "../lib/api/rejected-actions";
-import type { ContractRecord, ObligationRecord } from "../lib/api/contracts";
+import type { ContractOutcomeExplanation, ContractRecord, ObligationRecord } from "../lib/api/contracts";
 import type { Deal } from "../lib/api/negotiations";
 
 const apiBaseUrl = "http://api.test";
@@ -131,6 +131,30 @@ function obligationsFixture(): ObligationRecord[] {
   ];
 }
 
+function outcomesFixture(): ContractOutcomeExplanation[] {
+  return [
+    {
+      id: "contract-1:obligation-settled",
+      game_id: gameId,
+      source_deal_id: "deal-1",
+      contract_id: "contract-1",
+      obligation_id: "obligation-settled",
+      obligation_type: "rent_share",
+      trigger: { type: "rent_collected", property_id: "property_orange" },
+      classic_rule_interaction: {
+        policy: { rent_share_reduced_rent: "share_actual_paid", impossible_state_prevention: "strict" },
+        policy_key: "rent_share_reduced_rent",
+        policy_value: "share_actual_paid",
+        deterministic: true,
+      },
+      decision: { status: "settled", decision: "rent_share_cash_transfer" },
+      resulting_state_effect: { cash_transfers: [{ player_id: graceId, amount: 75 }] },
+      explanation_text:
+        "Contract outcome explanation: source deal deal-1 produced contract contract-1 and obligation obligation-settled with trigger rent_collected; decision rent_share_cash_transfer.",
+    },
+  ];
+}
+
 function dealFixture(): Deal {
   return {
     id: "deal-1",
@@ -234,10 +258,12 @@ function rejectedActionFixture(): RejectedActionRecord {
 function createContractsFetchMock({
   contracts = [contractFixture()],
   obligations = obligationsFixture(),
+  outcomes = outcomesFixture(),
   deals = [dealFixture()],
 }: {
   contracts?: ContractRecord[];
   obligations?: ObligationRecord[];
+  outcomes?: ContractOutcomeExplanation[];
   deals?: Deal[];
 } = {}): FetchMock {
   return vi.fn<typeof fetch>(async (input, init) => {
@@ -250,6 +276,10 @@ function createContractsFetchMock({
 
     if (url === `${apiBaseUrl}/games/${gameId}/obligations` && method === "GET") {
       return Response.json({ obligations });
+    }
+
+    if (url === `${apiBaseUrl}/games/${gameId}/contracts/outcomes` && method === "GET") {
+      return Response.json({ outcomes });
     }
 
     if (url === `${apiBaseUrl}/games/${gameId}/deals` && method === "GET") {
@@ -320,6 +350,12 @@ describe("ContractsPanel", () => {
     expect(panel).toHaveTextContent("triggering event event-transfer");
     expect(panel).toHaveTextContent("linked contract_id contract-1");
     expect(panel).toHaveTextContent("Ada paid Grace $75 from the source agreement.");
+
+    expect(panel).toHaveTextContent("Contract outcome explanation");
+    expect(panel).toHaveTextContent("contract_id contract-1");
+    expect(panel).toHaveTextContent("obligation_id obligation-settled");
+    expect(panel).toHaveTextContent("source_deal_id deal-1");
+    expect(panel).toHaveTextContent("decision rent_share_cash_transfer");
 
     const log = within(panel).getByRole("region", { name: "Game log" });
     expect(log).toHaveTextContent("Full game log");

@@ -1,10 +1,17 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRightLeft, Bot, CalendarClock, FileText, History, ListFilter, ShieldAlert } from "lucide-react";
+import { ArrowRightLeft, Bot, CalendarClock, FileText, History, Info, ListFilter, ShieldAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { readContracts, readObligations, type ContractRecord, type ObligationRecord } from "../lib/api/contracts";
+import {
+  readContractOutcomes,
+  readContracts,
+  readObligations,
+  type ContractOutcomeExplanation,
+  type ContractRecord,
+  type ObligationRecord,
+} from "../lib/api/contracts";
 import type { AcceptedEvent } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
 import { readDeals, type Deal } from "../lib/api/negotiations";
@@ -400,6 +407,55 @@ function SettlementHistory({
   );
 }
 
+function ContractOutcomeExplanations({
+  isLoading,
+  outcomes,
+}: Readonly<{
+  isLoading: boolean;
+  outcomes: ContractOutcomeExplanation[];
+}>) {
+  return (
+    <section
+      className="rounded-md border border-neutral-200 bg-white p-4"
+      aria-labelledby="contract-outcome-explanation-title"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 id="contract-outcome-explanation-title" className="text-sm font-semibold text-neutral-950">
+            Contract outcome explanation
+          </h2>
+          <p className="mt-1 text-xs text-neutral-600">Classic-rule effects returned by the API.</p>
+        </div>
+        <Info aria-hidden="true" className="size-4 text-teal-700" />
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        {isLoading ? (
+          <EmptyState text="Loading contract outcome explanations from the API." />
+        ) : outcomes.length === 0 ? (
+          <EmptyState text="No contract outcome explanations returned by the API." />
+        ) : (
+          outcomes.map((outcome) => (
+            <article key={outcome.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2 text-neutral-700">
+                <span className="font-semibold text-neutral-950">contract_id {outcome.contract_id}</span>
+                <span className="rounded bg-white px-1.5 py-0.5 font-medium text-neutral-600">
+                  {String(outcome.decision.status ?? "recorded")}
+                </span>
+              </div>
+              <p className="mt-1 text-neutral-600">obligation_id {outcome.obligation_id ?? "contract"}</p>
+              <p className="mt-1 text-neutral-600">source_deal_id {outcome.source_deal_id ?? "not linked"}</p>
+              <p className="mt-2 rounded-md bg-white px-3 py-2 leading-5 text-neutral-700">
+                {outcome.explanation_text}
+              </p>
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
 function FilterToggle({
   checked,
   filter,
@@ -529,6 +585,11 @@ export function ContractsPanel({
     queryFn: () => readObligations({ gameId, baseUrl: apiBaseUrl }),
   });
 
+  const outcomesQuery = useQuery({
+    queryKey: ["contract-outcomes", gameId],
+    queryFn: () => readContractOutcomes({ gameId, baseUrl: apiBaseUrl }),
+  });
+
   const dealsQuery = useQuery({
     queryKey: ["deals", gameId],
     queryFn: () => readDeals({ gameId, baseUrl: apiBaseUrl }),
@@ -536,6 +597,7 @@ export function ContractsPanel({
 
   const contracts = contractsQuery.data ?? [];
   const obligations = obligationsQuery.data ?? [];
+  const outcomes = outcomesQuery.data ?? [];
   const deals = dealsQuery.data ?? [];
   const logEntries = useMemo(
     () => buildLogEntries({ deals, events, game, rejectedActions }),
@@ -544,13 +606,14 @@ export function ContractsPanel({
 
   return (
     <section aria-label="Contracts obligations panel" className="grid content-start gap-4">
-      {contractsQuery.isError || obligationsQuery.isError || dealsQuery.isError ? (
-        <ErrorNote text="Contracts, obligations, or deal records are unavailable from the API." />
+      {contractsQuery.isError || obligationsQuery.isError || outcomesQuery.isError || dealsQuery.isError ? (
+        <ErrorNote text="Contracts, obligations, outcomes, or deal records are unavailable from the API." />
       ) : null}
 
       <ActiveContracts contracts={contracts} game={game} isLoading={contractsQuery.isLoading} />
       <UpcomingObligations game={game} isLoading={obligationsQuery.isLoading} obligations={obligations} />
       <SettlementHistory isLoading={obligationsQuery.isLoading} obligations={obligations} />
+      <ContractOutcomeExplanations isLoading={outcomesQuery.isLoading} outcomes={outcomes} />
       <FullGameLog entries={logEntries} />
     </section>
   );
