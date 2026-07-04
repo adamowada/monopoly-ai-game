@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Next.js
+.next/
+out/
+
+# Build and test artifacts
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+*.log
+
+# Environment and local state
+.env
+.env.*
+!.env.example
+*.local
+
+# Docker and database local data
+postgres-data/
+docker-data/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Codex/local caches
+.codex-cache/
+tmp/
+temp/
