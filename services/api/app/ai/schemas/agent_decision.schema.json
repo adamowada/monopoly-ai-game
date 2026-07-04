@@ -1,0 +1,720 @@
+{
+  "$defs": {
+    "AIActionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "additionalProperties": true,
+          "description": "Game action payload to validate before mutation.",
+          "title": "Payload",
+          "type": "object"
+        },
+        "type": {
+          "description": "Game action type selected by the AI.",
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "title": "AIActionPayload",
+      "type": "object"
+    },
+    "AcceptRejectOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "accept_reject": {
+          "$ref": "#/$defs/AcceptRejectPayload"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "decision_type": {
+          "const": "accept_reject",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "negotiation_id": {
+          "format": "uuid",
+          "title": "Negotiation Id",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type",
+        "negotiation_id",
+        "accept_reject"
+      ],
+      "title": "AcceptRejectOutput",
+      "type": "object"
+    },
+    "AcceptRejectPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "deal_id": {
+          "format": "uuid",
+          "title": "Deal Id",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "accept",
+            "reject"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        }
+      },
+      "required": [
+        "deal_id",
+        "decision"
+      ],
+      "title": "AcceptRejectPayload",
+      "type": "object"
+    },
+    "ActionDecisionOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/AIActionPayload"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "decision_type": {
+          "const": "action_decision",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "expected_event_sequence": {
+          "minimum": 0,
+          "title": "Expected Event Sequence",
+          "type": "integer"
+        },
+        "expected_state_hash": {
+          "minLength": 1,
+          "title": "Expected State Hash",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type",
+        "expected_state_hash",
+        "expected_event_sequence",
+        "action"
+      ],
+      "title": "ActionDecisionOutput",
+      "type": "object"
+    },
+    "CounterofferOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "counteroffer": {
+          "$ref": "#/$defs/CounterofferPayload"
+        },
+        "decision_type": {
+          "const": "counteroffer",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "negotiation_id": {
+          "format": "uuid",
+          "title": "Negotiation Id",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type",
+        "negotiation_id",
+        "counteroffer"
+      ],
+      "title": "CounterofferOutput",
+      "type": "object"
+    },
+    "CounterofferPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "responds_to_deal_id": {
+          "format": "uuid",
+          "title": "Responds To Deal Id",
+          "type": "string"
+        },
+        "terms": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Terms",
+          "type": "object"
+        }
+      },
+      "required": [
+        "responds_to_deal_id",
+        "terms"
+      ],
+      "title": "CounterofferPayload",
+      "type": "object"
+    },
+    "DealProposalOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "deal": {
+          "$ref": "#/$defs/DealProposalPayload"
+        },
+        "decision_type": {
+          "const": "deal_proposal",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "negotiation_id": {
+          "format": "uuid",
+          "title": "Negotiation Id",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type",
+        "negotiation_id",
+        "deal"
+      ],
+      "title": "DealProposalOutput",
+      "type": "object"
+    },
+    "DealProposalPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "recipient_player_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Recipient Player Ids",
+          "type": "array"
+        },
+        "terms": {
+          "additionalProperties": true,
+          "minProperties": 1,
+          "title": "Terms",
+          "type": "object"
+        }
+      },
+      "required": [
+        "recipient_player_ids",
+        "terms"
+      ],
+      "title": "DealProposalPayload",
+      "type": "object"
+    },
+    "MemoryUpdateOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "decision_type": {
+          "const": "memory_update",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "minItems": 1,
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type"
+      ],
+      "title": "MemoryUpdateOutput",
+      "type": "object"
+    },
+    "MemoryUpdatePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "minLength": 1,
+          "title": "Category",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "importance": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Importance",
+          "type": "integer"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "visibility": {
+          "enum": [
+            "private",
+            "public",
+            "table",
+            "audit"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "visibility",
+        "category",
+        "importance",
+        "content"
+      ],
+      "title": "MemoryUpdatePayload",
+      "type": "object"
+    },
+    "NegotiationMessageOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "decision_type": {
+          "const": "negotiation_message",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "message": {
+          "$ref": "#/$defs/NegotiationMessagePayload"
+        },
+        "negotiation_id": {
+          "format": "uuid",
+          "title": "Negotiation Id",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type",
+        "negotiation_id",
+        "message"
+      ],
+      "title": "NegotiationMessageOutput",
+      "type": "object"
+    },
+    "NegotiationMessagePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "Negotiation text to send.",
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "recipient_player_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional specific recipient for a negotiation message.",
+          "title": "Recipient Player Id"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "title": "NegotiationMessagePayload",
+      "type": "object"
+    },
+    "SelfDialogueOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "decision_type": {
+          "const": "self_dialogue",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type"
+      ],
+      "title": "SelfDialogueOutput",
+      "type": "object"
+    },
+    "SelfDialoguePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "status": {
+          "enum": [
+            "provided",
+            "empty",
+            "rejected"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "SelfDialoguePayload",
+      "type": "object"
+    }
+  },
+  "description": "Root AI output contract for `codex exec --json --output-schema`.",
+  "discriminator": {
+    "mapping": {
+      "accept_reject": "#/$defs/AcceptRejectOutput",
+      "action_decision": "#/$defs/ActionDecisionOutput",
+      "counteroffer": "#/$defs/CounterofferOutput",
+      "deal_proposal": "#/$defs/DealProposalOutput",
+      "memory_update": "#/$defs/MemoryUpdateOutput",
+      "negotiation_message": "#/$defs/NegotiationMessageOutput",
+      "self_dialogue": "#/$defs/SelfDialogueOutput"
+    },
+    "propertyName": "decision_type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ActionDecisionOutput"
+    },
+    {
+      "$ref": "#/$defs/NegotiationMessageOutput"
+    },
+    {
+      "$ref": "#/$defs/DealProposalOutput"
+    },
+    {
+      "$ref": "#/$defs/CounterofferOutput"
+    },
+    {
+      "$ref": "#/$defs/AcceptRejectOutput"
+    },
+    {
+      "$ref": "#/$defs/SelfDialogueOutput"
+    },
+    {
+      "$ref": "#/$defs/MemoryUpdateOutput"
+    }
+  ],
+  "title": "AIDecisionOutput"
+}
