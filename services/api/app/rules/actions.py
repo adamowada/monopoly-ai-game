@@ -31,6 +31,7 @@ from app.rules.static_data import (
     load_classic_monopoly_data,
 )
 from app.rules.state import GameState, PlayerState, PropertyOwnershipState
+from app.rules.timing import ActionTimingIssue, is_action_allowed_now, timing_issue_for_action
 
 
 SUPPORTED_ACTION_TYPES: Final[frozenset[str]] = frozenset(
@@ -153,6 +154,8 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
         schema: Mapping[str, object] | None = None,
         description: str | None = None,
     ) -> None:
+        if not is_action_allowed_now(state, action_type):
+            return
         actions.append(
             LegalAction(
                 actor_id=actor_id,
@@ -276,6 +279,10 @@ def validate_action(state: GameState, action: GameAction) -> ValidatedAction:
         _raise_issue("illegal_action", f"unknown actor {action.actor_id}", "actor_id")
     if actor.is_bankrupt:
         _raise_issue("illegal_action", f"{action.actor_id} is bankrupt", "actor_id")
+
+    timing_issue = timing_issue_for_action(state, action.type)
+    if timing_issue is not None:
+        _raise_timing_issue(timing_issue)
 
     if action.type == "ROLL_DICE":
         _validate_roll_timing(state, action.actor_id)
@@ -571,8 +578,6 @@ def _validate_roll_timing(state: GameState, actor_id: str) -> None:
         _raise_issue("mistimed_action", "players cannot roll dice during an active auction", "type")
     if actor_id != state.turn.current_player_id:
         _raise_issue("mistimed_action", f"{actor_id} is not the current turn player", "actor_id")
-    if state.turn.phase != "START_TURN":
-        _raise_issue("mistimed_action", f"ROLL_DICE is not legal during {state.turn.phase}", "type")
 
 
 def _validate_purchase_action(
@@ -811,6 +816,18 @@ def _required_int(payload: Mapping[str, object], field_name: str) -> int:
 
 def _raise_issue(code: str, message: str, field: str | None = None) -> NoReturn:
     raise ActionValidationError((ActionValidationIssue(code=code, message=message, field=field),))
+
+
+def _raise_timing_issue(issue: ActionTimingIssue) -> NoReturn:
+    raise ActionValidationError(
+        (
+            ActionValidationIssue(
+                code=issue.code,
+                message=issue.message,
+                field=issue.field,
+            ),
+        )
+    )
 
 
 def _player_by_id(state: GameState, player_id: str) -> PlayerState | None:
