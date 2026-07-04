@@ -36,6 +36,7 @@ import { readGame, type GameMetadata } from "../lib/api/games";
 import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
 import { ClassicGameBoard, getPlayerColor } from "./game-board";
+import { PropertyManagementPanel } from "./property-management";
 
 type GamePlaySurfaceProps = {
   gameId: string;
@@ -653,7 +654,17 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
-      <ClassicGameBoard game={game} />
+      <div className="grid content-start gap-4">
+        <ClassicGameBoard game={game} />
+        <PropertyManagementPanel
+          controlsDisabled={controlsDisabled}
+          game={game}
+          legalActions={legalActions}
+          onSubmit={handleSubmit}
+          pendingActionType={pendingActionType}
+          snapshot={stateQuery.data}
+        />
+      </div>
 
       <aside className="grid content-start gap-4">
         <ActivePlayerPanel player={currentPlayer} phase={phase} />

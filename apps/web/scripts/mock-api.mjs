@@ -1,8 +1,14 @@
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const port = Number.parseInt(process.env.MOCK_API_PORT ?? "18101", 10);
 const games = new Map();
 let gameCounter = 0;
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+const classicData = JSON.parse(readFileSync(resolve(scriptDir, "../../../content/rules/classic_monopoly.json"), "utf8"));
+const propertyData = classicData.properties;
 
 const corsHeaders = {
   "access-control-allow-headers": "accept, content-type, Idempotency-Key",
@@ -166,6 +172,8 @@ function createGame(payload) {
     event_sequence: 0,
     events: [],
     rejected_actions: [],
+    property_ownership: createDefaultPropertyOwnership(),
+    bank_inventory: { houses: 32, hotels: 12 },
     stream_clients: new Set(),
     created_at: createdAt,
     updated_at: createdAt,
@@ -184,8 +192,79 @@ function createGame(payload) {
       updated_at: createdAt,
     })),
   };
+  configurePropertyManagementSeed(game);
   games.set(id, game);
   return game;
+}
+
+function createDefaultPropertyOwnership() {
+  return propertyData.map((property) => ({
+    property_id: property.id,
+    owner_id: null,
+    mortgaged: false,
+    houses: 0,
+    hotel: false,
+    hotels: 0,
+  }));
+}
+
+function isPropertyManagementSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-5-property-management");
+}
+
+function propertyOwnership(game, propertyId) {
+  return game.property_ownership.find((ownership) => ownership.property_id === propertyId) ?? null;
+}
+
+function setPropertyOwnership(game, propertyId, patch) {
+  const ownership = propertyOwnership(game, propertyId);
+  if (!ownership) {
+    return;
+  }
+  Object.assign(ownership, patch);
+  if (ownership.hotel) {
+    ownership.hotels = 1;
+    ownership.houses = 0;
+  } else {
+    ownership.hotels = 0;
+  }
+}
+
+function configurePropertyManagementSeed(game) {
+  if (!isPropertyManagementSeed(game.seed)) {
+    return;
+  }
+  const ada = game.players[0]?.id ?? null;
+  const grace = game.players[1]?.id ?? null;
+  game.current_phase = "PRE_ROLL_MANAGEMENT";
+  setPropertyOwnership(game, "property_mediterranean_avenue", {
+    owner_id: ada,
+    mortgaged: false,
+    houses: 0,
+    hotel: false,
+    hotels: 0,
+  });
+  setPropertyOwnership(game, "property_baltic_avenue", {
+    owner_id: ada,
+    mortgaged: false,
+    houses: 0,
+    hotel: false,
+    hotels: 0,
+  });
+  setPropertyOwnership(game, "property_park_place", {
+    owner_id: grace,
+    mortgaged: true,
+    houses: 0,
+    hotel: false,
+    hotels: 0,
+  });
+  setPropertyOwnership(game, "property_boardwalk", {
+    owner_id: grace,
+    mortgaged: false,
+    houses: 0,
+    hotel: true,
+    hotels: 1,
+  });
 }
 
 function gameState(game) {
@@ -198,6 +277,8 @@ function gameState(game) {
         id: player.id,
         ...player.state,
       })),
+      property_ownership: game.property_ownership,
+      bank_inventory: game.bank_inventory,
       turn: {
         phase: game.current_phase,
         current_player_index: 0,
@@ -235,6 +316,9 @@ function legalActionsFor(game, actorPlayerId) {
   if (!actor || actor.id !== actorPlayerId) {
     return [];
   }
+  if (isPropertyManagementSeed(game.seed) && game.current_phase === "PRE_ROLL_MANAGEMENT") {
+    return propertyManagementLegalActionsFor(game);
+  }
   if (game.current_phase === "PURCHASE_OR_AUCTION") {
     return [
       legalAction(game, "BUY_PROPERTY", { property_id: "property_chance_7" }),
@@ -242,6 +326,27 @@ function legalActionsFor(game, actorPlayerId) {
     ];
   }
   return [legalAction(game, "ROLL_DICE")];
+}
+
+function propertyManagementLegalActionsFor(game) {
+  if (game.seed.startsWith("stage-5-property-management-reject")) {
+    return [legalAction(game, "BUY_HOUSE", { property_id: "property_baltic_avenue", cost: 50 })];
+  }
+
+  const mediterranean = propertyOwnership(game, "property_mediterranean_avenue");
+  const baltic = propertyOwnership(game, "property_baltic_avenue");
+  const parkPlace = propertyOwnership(game, "property_park_place");
+  const actions = [];
+  if (mediterranean?.owner_id === activePlayer(game)?.id && !mediterranean.mortgaged && mediterranean.houses === 0 && !mediterranean.hotel) {
+    actions.push(legalAction(game, "BUY_HOUSE", { property_id: "property_mediterranean_avenue", cost: 50 }));
+  }
+  if (baltic?.owner_id === activePlayer(game)?.id && !baltic.mortgaged && mediterranean?.houses === 0 && !mediterranean?.hotel) {
+    actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_baltic_avenue", proceeds: 30 }));
+  }
+  if (parkPlace?.owner_id === activePlayer(game)?.id && parkPlace.mortgaged) {
+    actions.push(legalAction(game, "UNMORTGAGE_PROPERTY", { property_id: "property_park_place", cost: 220 }));
+  }
+  return actions;
 }
 
 function createAcceptedEvent(game, eventType, payload, actorPlayerId) {
@@ -356,6 +461,114 @@ function rejectAction(game, action, reasonCode, message, field = "expected_state
     payload: { rejected_action_id: record.id, reason_code: reasonCode },
   });
   return rejectedPayload(record, action);
+}
+
+function actionMatchesLegalAction(candidate, action) {
+  if (candidate.type !== action.type) {
+    return false;
+  }
+  const candidatePropertyId = isObject(candidate.payload) ? candidate.payload.property_id : undefined;
+  const actionPropertyId = isObject(action.payload) ? action.payload.property_id : undefined;
+  if (candidatePropertyId !== undefined || actionPropertyId !== undefined) {
+    return candidatePropertyId === actionPropertyId;
+  }
+  return true;
+}
+
+function createManagementAcceptedResponse(game, acceptedEvents) {
+  game.updated_at = nowIso();
+  for (const event of acceptedEvents) {
+    broadcastSse(game, event);
+  }
+  return {
+    status: "accepted",
+    game_id: game.id,
+    accepted_events: acceptedEvents,
+    state: gameState(game).state,
+    state_hash: stateHash(game),
+    event_sequence: game.event_sequence,
+  };
+}
+
+function acceptBankInventory(game, actorPlayerId, houses, hotels) {
+  game.bank_inventory = { houses, hotels };
+  return createAcceptedEvent(game, "BANK_INVENTORY_SET", { houses, hotels }, actorPlayerId);
+}
+
+function acceptPropertyImprovements(game, actorPlayerId, propertyId, houses, hotel) {
+  setPropertyOwnership(game, propertyId, { houses, hotel, hotels: hotel ? 1 : 0 });
+  return createAcceptedEvent(
+    game,
+    "PROPERTY_IMPROVEMENTS_SET",
+    { property_id: propertyId, houses, hotel },
+    actorPlayerId,
+  );
+}
+
+function acceptPropertyMortgage(game, actorPlayerId, propertyId, mortgaged) {
+  setPropertyOwnership(game, propertyId, { mortgaged });
+  return createAcceptedEvent(
+    game,
+    "PROPERTY_MORTGAGE_SET",
+    { property_id: propertyId, mortgaged },
+    actorPlayerId,
+  );
+}
+
+function acceptBuyHouse(game, action) {
+  const propertyId = action.payload.property_id;
+  const ownership = propertyOwnership(game, propertyId);
+  if (!ownership) {
+    return createManagementAcceptedResponse(game, []);
+  }
+  const actorPlayerId = action.actor_id;
+  const events = [];
+  if (ownership.houses < 4) {
+    events.push(acceptBankInventory(game, actorPlayerId, game.bank_inventory.houses - 1, game.bank_inventory.hotels));
+    events.push(acceptPropertyImprovements(game, actorPlayerId, propertyId, ownership.houses + 1, false));
+    return createManagementAcceptedResponse(game, events);
+  }
+  events.push(acceptBankInventory(game, actorPlayerId, game.bank_inventory.houses + 4, game.bank_inventory.hotels - 1));
+  events.push(acceptPropertyImprovements(game, actorPlayerId, propertyId, 0, true));
+  return createManagementAcceptedResponse(game, events);
+}
+
+function acceptSellHouse(game, action) {
+  const propertyId = action.payload.property_id;
+  const ownership = propertyOwnership(game, propertyId);
+  if (!ownership) {
+    return createManagementAcceptedResponse(game, []);
+  }
+  const actorPlayerId = action.actor_id;
+  const events = [];
+  if (ownership.hotel) {
+    events.push(acceptBankInventory(game, actorPlayerId, game.bank_inventory.houses - 4, game.bank_inventory.hotels + 1));
+    events.push(acceptPropertyImprovements(game, actorPlayerId, propertyId, 4, false));
+    return createManagementAcceptedResponse(game, events);
+  }
+  events.push(acceptBankInventory(game, actorPlayerId, game.bank_inventory.houses + 1, game.bank_inventory.hotels));
+  events.push(acceptPropertyImprovements(game, actorPlayerId, propertyId, Math.max(0, ownership.houses - 1), false));
+  return createManagementAcceptedResponse(game, events);
+}
+
+function acceptManagementAction(game, action) {
+  if (action.type === "BUY_HOUSE") {
+    return acceptBuyHouse(game, action);
+  }
+  if (action.type === "SELL_HOUSE") {
+    return acceptSellHouse(game, action);
+  }
+  if (action.type === "MORTGAGE_PROPERTY") {
+    return createManagementAcceptedResponse(game, [
+      acceptPropertyMortgage(game, action.actor_id, action.payload.property_id, true),
+    ]);
+  }
+  if (action.type === "UNMORTGAGE_PROPERTY") {
+    return createManagementAcceptedResponse(game, [
+      acceptPropertyMortgage(game, action.actor_id, action.payload.property_id, false),
+    ]);
+  }
+  return null;
 }
 
 function setMockPlayerPosition(gameId, seatOrder, position) {
@@ -546,14 +759,35 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      const legalTypes = new Set(legalActionsFor(game, action.actor_id).map((candidate) => candidate.type));
-      if (!legalTypes.has(action.type)) {
+      const legalActions = legalActionsFor(game, action.actor_id);
+      if (!legalActions.some((candidate) => actionMatchesLegalAction(candidate, action))) {
         json(response, 422, rejectAction(game, action, "illegal_action", `${action.type} is not currently legal`, "type"));
+        return;
+      }
+
+      if (game.seed.startsWith("stage-5-property-management-reject") && action.type === "BUY_HOUSE") {
+        json(
+          response,
+          409,
+          rejectAction(
+            game,
+            action,
+            "even_building_rule",
+            "building must follow the even building rule",
+            "payload.property_id",
+          ),
+        );
         return;
       }
 
       if (action.type === "ROLL_DICE") {
         json(response, 200, acceptRollDice(game, action));
+        return;
+      }
+
+      const managementResponse = acceptManagementAction(game, action);
+      if (managementResponse) {
+        json(response, 200, managementResponse);
         return;
       }
 
