@@ -43,11 +43,23 @@ docker compose up --build
 
 The repository pins the JavaScript package manager with `packageManager: pnpm@11.7.0`, configures pnpm workspaces in `pnpm-workspace.yaml`, and records the Python runtime in `.python-version` as exactly `3.14.6`.
 
-Python setup is owned by uv:
+Stage 0.2 verification confirmed the fixed Node.js, npm, pnpm, global Python, project Python, uv, Git, and Codex CLI versions on this machine. Docker currently reports `29.6.1` and Docker Compose reports `v5.3.0`, which are newer than the fixed `PLANS.md` decisions of Docker `29.5.3` and Docker Compose `v5.1.4`; `PLANS.md` remains the authoritative target.
+
+Python setup is owned by uv. `pyproject.toml` pins the project runtime to Python `==3.14.6`; `uv.toml` pins uv `==0.11.7` and points at `toolchain/python-downloads.json` so `uv python install 3.14.6` can install the required Windows x64 Python runtime even when uv's embedded download table does not include that patch release.
+
+Install the local toolchain metadata and Python environment:
 
 ```powershell
+pnpm install
 uv python install 3.14.6
 uv sync --python 3.14.6
+```
+
+Verify Codex non-interactive execution support:
+
+```powershell
+codex exec --help
+codex exec --json -c 'model_reasoning_effort="xhigh"' --help
 ```
 
 The backend Docker image must use `python:3.14.6-slim` once the backend is scaffolded.

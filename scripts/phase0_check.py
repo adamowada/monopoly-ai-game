@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -27,7 +28,11 @@ REQUIRED_FILES = {
     ".gitignore",
     ".python-version",
     "package.json",
+    "pyproject.toml",
     "pnpm-workspace.yaml",
+    "toolchain/python-downloads.json",
+    "uv.toml",
+    "uv.lock",
     "Makefile",
 }
 
@@ -59,6 +64,9 @@ README_MARKERS = {
     "docker compose up --build",
     "feature/phase-0-project-control",
     "codex-supervisor",
+    "uv python install 3.14.6",
+    "uv sync --python 3.14.6",
+    "codex exec --json",
 }
 
 
@@ -77,7 +85,7 @@ def check_required_files() -> None:
 
 
 def check_python_version() -> None:
-    require(read_text(".python-version").strip() == "3.14.6", ".python-version must contain exactly 3.14.6")
+    require(read_text(".python-version") == "3.14.6", ".python-version must contain exactly 3.14.6")
 
 
 def check_package_scripts() -> None:
@@ -86,6 +94,35 @@ def check_package_scripts() -> None:
     missing = sorted(REQUIRED_SCRIPTS - scripts)
     require(not missing, f"package.json missing scripts: {', '.join(missing)}")
     require(package.get("packageManager") == "pnpm@11.7.0", "packageManager must be pnpm@11.7.0")
+
+
+def check_pnpm_workspace() -> None:
+    workspace = read_text("pnpm-workspace.yaml")
+    for workspace_glob in ('"apps/*"', '"services/*"', '"packages/*"'):
+        require(workspace_glob in workspace, f"pnpm-workspace.yaml missing {workspace_glob}")
+
+
+def check_pyproject() -> None:
+    pyproject = tomllib.loads(read_text("pyproject.toml"))
+    project = pyproject.get("project", {})
+    require(project.get("requires-python") == "==3.14.6", "pyproject.toml must require Python ==3.14.6")
+    tool_uv = pyproject.get("tool", {}).get("uv", {})
+    require(tool_uv.get("package") is False, "pyproject.toml must set tool.uv.package = false")
+
+
+def check_uv_config() -> None:
+    uv_config = tomllib.loads(read_text("uv.toml"))
+    require(uv_config.get("required-version") == "==0.11.7", "uv.toml must require uv ==0.11.7")
+    require(
+        uv_config.get("python-downloads-json-url") == "toolchain/python-downloads.json",
+        "uv.toml must point uv at the project Python downloads manifest",
+    )
+    manifest = json.loads(read_text("toolchain/python-downloads.json"))
+    download = manifest.get("cpython-3.14.6-windows-x86_64-none", {})
+    require(download.get("major") == 3, "Python downloads manifest must describe Python major version 3")
+    require(download.get("minor") == 14, "Python downloads manifest must describe Python minor version 14")
+    require(download.get("patch") == 6, "Python downloads manifest must describe Python patch version 6")
+    require("x86_64-pc-windows-msvc-install_only_stripped.tar.gz" in download.get("url", ""), "Python downloads manifest must point to the Windows x64 install-only archive")
 
 
 def check_gitignore() -> None:
@@ -116,6 +153,9 @@ def run_gate(gate: str) -> None:
     check_required_files()
     check_python_version()
     check_package_scripts()
+    check_pnpm_workspace()
+    check_pyproject()
+    check_uv_config()
     check_gitignore()
     check_readme()
     check_makefile()
