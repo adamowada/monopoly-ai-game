@@ -38,6 +38,7 @@ from app.rules.actions import (
     execute_action,
     list_legal_actions,
 )
+from app.rules.financial_instruments import combination_deal
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
@@ -1705,6 +1706,16 @@ def _prepare_deal_terms(
         )
 
     ordered_participants = _ordered_participants(participants, participant_player_ids)
+    if term_items:
+        instruments, instrument_errors = combination_deal(
+            term_items,
+            player_ids=ordered_participants,
+            field="terms",
+        )
+        validation_errors.extend(error.model_dump(mode="json") for error in instrument_errors)
+        if not instrument_errors:
+            term_items = [instrument.payload for instrument in instruments]
+
     canonical_terms: dict[str, Any] = {
         "kind": STRUCTURED_DEAL_KIND,
         "deal_schema_version": deal_schema_version or DEAL_SCHEMA_VERSION,

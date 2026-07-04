@@ -102,7 +102,6 @@ def structured_terms(
     player_ids: list[str],
     *,
     amount: int = 100,
-    summary: str = "Ada pays Grace to keep the trade alive",
 ) -> dict[str, Any]:
     return {
         "kind": "structured_deal",
@@ -110,11 +109,10 @@ def structured_terms(
         "participants": player_ids,
         "terms": [
             {
-                "kind": "cash_transfer",
+                "kind": "immediate_cash_transfer",
                 "from_player_id": player_ids[0],
                 "to_player_id": player_ids[1],
                 "amount": amount,
-                "summary": summary,
             }
         ],
     }
