@@ -173,6 +173,12 @@ function createGame(payload) {
     event_sequence: 0,
     events: [],
     rejected_actions: [],
+    negotiations: [],
+    negotiation_messages: {},
+    deals: [],
+    negotiation_counter: 0,
+    message_counter: 0,
+    deal_counter: 0,
     property_ownership: createDefaultPropertyOwnership(),
     bank_inventory: { houses: 32, hotels: 12 },
     active_auction: null,
@@ -195,6 +201,7 @@ function createGame(payload) {
     })),
   };
   configurePropertyManagementSeed(game);
+  configureNegotiationSeed(game);
   games.set(id, game);
   return game;
 }
@@ -288,6 +295,264 @@ function configurePropertyManagementSeed(game) {
     hotel: true,
     hotels: 1,
   });
+}
+
+function isNegotiationSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-5-6-seeded");
+}
+
+function createNegotiationRecord(game, payload) {
+  const createdAt = nowIso();
+  game.negotiation_counter += 1;
+  const negotiation = {
+    id: `${game.id}-negotiation-${game.negotiation_counter}`,
+    game_id: game.id,
+    opened_by_player_id: payload.opened_by_player_id,
+    participant_player_ids: [...payload.participant_player_ids],
+    topic: payload.topic,
+    context: payload.context ?? "",
+    status: "open",
+    round_number: 1,
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+  game.negotiations.unshift(negotiation);
+  game.negotiation_messages[negotiation.id] = [];
+  game.updated_at = createdAt;
+  return negotiation;
+}
+
+function configureNegotiationSeed(game) {
+  if (!isNegotiationSeed(game.seed) || game.players.length < 2) {
+    return;
+  }
+  const participants = game.players.slice(0, 2).map((player) => player.id);
+  const negotiation = createNegotiationRecord(game, {
+    opened_by_player_id: participants[0],
+    participant_player_ids: participants,
+    topic: "Seeded negotiation",
+    context: "Stage 5.6 deterministic seeded negotiation.",
+  });
+  game.message_counter += 1;
+  game.negotiation_messages[negotiation.id].push({
+    id: `${game.id}-message-${game.message_counter}`,
+    game_id: game.id,
+    negotiation_id: negotiation.id,
+    author_player_id: participants[0],
+    body: "Seeded opening message.",
+    created_at: nowIso(),
+  });
+}
+
+function negotiationById(game, negotiationId) {
+  return game.negotiations.find((negotiation) => negotiation.id === negotiationId) ?? null;
+}
+
+function dealById(game, dealId) {
+  return game.deals.find((deal) => deal.id === dealId) ?? null;
+}
+
+function negotiationValidationError(reasonCode, message, field) {
+  return {
+    status: "rejected",
+    reason_code: reasonCode,
+    validation_errors: [
+      {
+        code: reasonCode,
+        message,
+        field,
+      },
+    ],
+  };
+}
+
+function validParticipantIds(game, participantIds) {
+  return (
+    Array.isArray(participantIds) &&
+    participantIds.length >= 2 &&
+    participantIds.every((playerId) => typeof playerId === "string" && Boolean(playerById(game, playerId)))
+  );
+}
+
+function validateCreateNegotiationPayload(game, payload) {
+  if (!isObject(payload)) {
+    return negotiationValidationError("malformed_negotiation", "request body must be a JSON object", "body");
+  }
+  if (!playerById(game, payload.opened_by_player_id)) {
+    return negotiationValidationError("invalid_participant", "opened_by_player_id must reference a player", "opened_by_player_id");
+  }
+  if (!validParticipantIds(game, payload.participant_player_ids)) {
+    return negotiationValidationError(
+      "invalid_participant",
+      "participant_player_ids must contain at least two game players",
+      "participant_player_ids",
+    );
+  }
+  if (!payload.participant_player_ids.includes(payload.opened_by_player_id)) {
+    return negotiationValidationError("invalid_participant", "opened_by_player_id must be a participant", "opened_by_player_id");
+  }
+  if (typeof payload.topic !== "string" || payload.topic.trim().length === 0) {
+    return negotiationValidationError("missing_topic", "topic is required", "topic");
+  }
+  return null;
+}
+
+function validateOpenNegotiation(negotiation) {
+  if (!negotiation) {
+    return negotiationValidationError("missing_negotiation", "negotiation was not found", "negotiation_id");
+  }
+  if (negotiation.status !== "open") {
+    return negotiationValidationError("closed_negotiation", "negotiation is closed and cannot mutate", "negotiation_id");
+  }
+  return null;
+}
+
+function validateMessagePayload(game, negotiation, payload) {
+  const closed = validateOpenNegotiation(negotiation);
+  if (closed) {
+    return closed;
+  }
+  if (!isObject(payload)) {
+    return negotiationValidationError("malformed_message", "request body must be a JSON object", "body");
+  }
+  if (!negotiation.participant_player_ids.includes(payload.author_player_id)) {
+    return negotiationValidationError("invalid_author", "author_player_id must be a negotiation participant", "author_player_id");
+  }
+  if (typeof payload.body !== "string" || payload.body.trim().length === 0) {
+    return negotiationValidationError("missing_message", "message body is required", "body");
+  }
+  return null;
+}
+
+function isValidTerm(term) {
+  return (
+    isObject(term) &&
+    ["cash_transfer", "property_transfer", "loan", "option", "rent_share", "risk_transfer"].includes(term.kind)
+  );
+}
+
+function validateDealPayload(game, payload) {
+  if (!isObject(payload)) {
+    return negotiationValidationError("malformed_deal", "request body must be a JSON object", "body");
+  }
+  const negotiation = negotiationById(game, payload.negotiation_id);
+  const closed = validateOpenNegotiation(negotiation);
+  if (closed) {
+    return closed;
+  }
+  if (!negotiation.participant_player_ids.includes(payload.proposer_player_id)) {
+    return negotiationValidationError("invalid_proposer", "proposer_player_id must be a negotiation participant", "proposer_player_id");
+  }
+  if (!validParticipantIds(game, payload.participant_player_ids)) {
+    return negotiationValidationError("invalid_participant", "participant_player_ids must contain game players", "participant_player_ids");
+  }
+  if (!Array.isArray(payload.terms) || payload.terms.length === 0 || !payload.terms.every(isValidTerm)) {
+    return negotiationValidationError(
+      "invalid_terms",
+      "terms must include at least one supported structured deal term",
+      "terms",
+    );
+  }
+  if (payload.parent_deal_id !== null && payload.parent_deal_id !== undefined) {
+    const parent = dealById(game, payload.parent_deal_id);
+    if (!parent || parent.negotiation_id !== negotiation.id) {
+      return negotiationValidationError("invalid_parent_deal", "parent_deal_id must reference this negotiation", "parent_deal_id");
+    }
+  }
+  return null;
+}
+
+function createDealRecord(game, payload) {
+  const createdAt = nowIso();
+  const negotiationDeals = game.deals.filter((deal) => deal.negotiation_id === payload.negotiation_id);
+  game.deal_counter += 1;
+  const deal = {
+    id: `${game.id}-deal-${game.deal_counter}`,
+    game_id: game.id,
+    negotiation_id: payload.negotiation_id,
+    proposer_player_id: payload.proposer_player_id,
+    participant_player_ids: [...payload.participant_player_ids],
+    parent_deal_id: payload.parent_deal_id ?? null,
+    version: negotiationDeals.length + 1,
+    status: "proposed",
+    terms: payload.terms,
+    validation_errors: [],
+    accepted_at: null,
+    rejected_at: null,
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+  game.deals.unshift(deal);
+  const negotiation = negotiationById(game, payload.negotiation_id);
+  if (negotiation) {
+    negotiation.round_number = Math.max(negotiation.round_number, deal.version);
+    negotiation.updated_at = createdAt;
+  }
+  game.updated_at = createdAt;
+  return deal;
+}
+
+function validateDealMutation(game, dealId, action) {
+  const deal = dealById(game, dealId);
+  if (!deal) {
+    return {
+      deal: null,
+      error: negotiationValidationError("missing_deal", "deal was not found", "deal_id"),
+    };
+  }
+  const negotiation = negotiationById(game, deal.negotiation_id);
+  const closed = validateOpenNegotiation(negotiation);
+  if (closed) {
+    return { deal, error: closed };
+  }
+  if (deal.status !== "proposed") {
+    return {
+      deal,
+      error: negotiationValidationError(`invalid_${action}`, `${action} requires a proposed deal`, "status"),
+    };
+  }
+  return { deal, error: null };
+}
+
+function acceptDealRecord(game, deal) {
+  const acceptedAt = nowIso();
+  deal.status = "accepted";
+  deal.accepted_at = acceptedAt;
+  deal.updated_at = acceptedAt;
+  const negotiation = negotiationById(game, deal.negotiation_id);
+  if (negotiation) {
+    negotiation.status = "closed";
+    negotiation.updated_at = acceptedAt;
+  }
+  game.updated_at = acceptedAt;
+  return deal;
+}
+
+function rejectDealRecord(game, deal) {
+  const rejectedAt = nowIso();
+  deal.status = "rejected";
+  deal.rejected_at = rejectedAt;
+  deal.updated_at = rejectedAt;
+  const negotiation = negotiationById(game, deal.negotiation_id);
+  if (negotiation) {
+    negotiation.updated_at = rejectedAt;
+  }
+  game.updated_at = rejectedAt;
+  return deal;
+}
+
+function expireNegotiationRecord(game, negotiation) {
+  const expiredAt = nowIso();
+  negotiation.status = "expired";
+  negotiation.updated_at = expiredAt;
+  for (const deal of game.deals) {
+    if (deal.negotiation_id === negotiation.id && deal.status === "proposed") {
+      deal.status = "expired";
+      deal.updated_at = expiredAt;
+    }
+  }
+  game.updated_at = expiredAt;
+  return negotiation;
 }
 
 function gameState(game) {
@@ -980,6 +1245,187 @@ const server = createServer(async (request, response) => {
       state_hash: stateHash(game),
       event_sequence: game.event_sequence,
     });
+    return;
+  }
+
+  const negotiationsMatch = url.pathname.match(/^\/games\/([^/]+)\/negotiations$/);
+  if (negotiationsMatch) {
+    const gameId = decodeURIComponent(negotiationsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+
+    if (request.method === "GET") {
+      json(response, 200, { negotiations: game.negotiations });
+      return;
+    }
+
+    if (request.method === "POST") {
+      try {
+        const payload = await readBody(request);
+        const validation = validateCreateNegotiationPayload(game, payload);
+        if (validation) {
+          json(response, 422, validation);
+          return;
+        }
+        const negotiation = createNegotiationRecord(game, {
+          opened_by_player_id: payload.opened_by_player_id,
+          participant_player_ids: [...new Set(payload.participant_player_ids)],
+          topic: payload.topic.trim(),
+          context: typeof payload.context === "string" ? payload.context.trim() : "",
+        });
+        json(response, 201, { status: "ok", negotiation });
+        return;
+      } catch {
+        json(response, 400, negotiationValidationError("malformed_json", "request body must be valid JSON", "body"));
+        return;
+      }
+    }
+  }
+
+  const messagesMatch = url.pathname.match(/^\/games\/([^/]+)\/negotiations\/([^/]+)\/messages$/);
+  if (messagesMatch) {
+    const gameId = decodeURIComponent(messagesMatch[1]);
+    const negotiationId = decodeURIComponent(messagesMatch[2]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const negotiation = negotiationById(game, negotiationId);
+
+    if (request.method === "GET") {
+      if (!negotiation) {
+        json(response, 404, { error: "negotiation not found" });
+        return;
+      }
+      json(response, 200, { messages: game.negotiation_messages[negotiationId] ?? [] });
+      return;
+    }
+
+    if (request.method === "POST") {
+      try {
+        const payload = await readBody(request);
+        const validation = validateMessagePayload(game, negotiation, payload);
+        if (validation) {
+          json(response, 422, validation);
+          return;
+        }
+        game.message_counter += 1;
+        const message = {
+          id: `${game.id}-message-${game.message_counter}`,
+          game_id: game.id,
+          negotiation_id: negotiation.id,
+          author_player_id: payload.author_player_id,
+          body: payload.body.trim(),
+          created_at: nowIso(),
+        };
+        game.negotiation_messages[negotiation.id] = [...(game.negotiation_messages[negotiation.id] ?? []), message];
+        negotiation.updated_at = message.created_at;
+        game.updated_at = message.created_at;
+        json(response, 201, { status: "ok", message });
+        return;
+      } catch {
+        json(response, 400, negotiationValidationError("malformed_json", "request body must be valid JSON", "body"));
+        return;
+      }
+    }
+  }
+
+  const dealsMatch = url.pathname.match(/^\/games\/([^/]+)\/deals$/);
+  if (dealsMatch) {
+    const gameId = decodeURIComponent(dealsMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+
+    if (request.method === "GET") {
+      const negotiationId = url.searchParams.get("negotiation_id");
+      const deals = negotiationId ? game.deals.filter((deal) => deal.negotiation_id === negotiationId) : game.deals;
+      json(response, 200, { deals });
+      return;
+    }
+
+    if (request.method === "POST") {
+      try {
+        const payload = await readBody(request);
+        const validation = validateDealPayload(game, payload);
+        if (validation) {
+          json(response, 422, validation);
+          return;
+        }
+        const deal = createDealRecord(game, {
+          negotiation_id: payload.negotiation_id,
+          proposer_player_id: payload.proposer_player_id,
+          participant_player_ids: [...new Set(payload.participant_player_ids)],
+          parent_deal_id: payload.parent_deal_id ?? null,
+          terms: payload.terms,
+        });
+        json(response, 201, { status: "ok", deal });
+        return;
+      } catch {
+        json(response, 400, negotiationValidationError("malformed_json", "request body must be valid JSON", "body"));
+        return;
+      }
+    }
+  }
+
+  const acceptDealMatch = url.pathname.match(/^\/games\/([^/]+)\/deals\/([^/]+)\/accept$/);
+  if (request.method === "POST" && acceptDealMatch) {
+    const gameId = decodeURIComponent(acceptDealMatch[1]);
+    const dealId = decodeURIComponent(acceptDealMatch[2]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const result = validateDealMutation(game, dealId, "accept");
+    if (result.error) {
+      json(response, 409, result.error);
+      return;
+    }
+    json(response, 200, { status: "ok", deal: acceptDealRecord(game, result.deal) });
+    return;
+  }
+
+  const rejectDealMatch = url.pathname.match(/^\/games\/([^/]+)\/deals\/([^/]+)\/reject$/);
+  if (request.method === "POST" && rejectDealMatch) {
+    const gameId = decodeURIComponent(rejectDealMatch[1]);
+    const dealId = decodeURIComponent(rejectDealMatch[2]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const result = validateDealMutation(game, dealId, "reject");
+    if (result.error) {
+      json(response, 409, result.error);
+      return;
+    }
+    json(response, 200, { status: "ok", deal: rejectDealRecord(game, result.deal) });
+    return;
+  }
+
+  const expireNegotiationMatch = url.pathname.match(/^\/games\/([^/]+)\/negotiations\/([^/]+)\/expire$/);
+  if (request.method === "POST" && expireNegotiationMatch) {
+    const gameId = decodeURIComponent(expireNegotiationMatch[1]);
+    const negotiationId = decodeURIComponent(expireNegotiationMatch[2]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const negotiation = negotiationById(game, negotiationId);
+    const validation = validateOpenNegotiation(negotiation);
+    if (validation) {
+      json(response, 409, validation);
+      return;
+    }
+    json(response, 200, { status: "ok", negotiation: expireNegotiationRecord(game, negotiation) });
     return;
   }
 

@@ -37,6 +37,7 @@ import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejec
 import { cn } from "../lib/ui";
 import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
 import { ClassicGameBoard, getPlayerColor } from "./game-board";
+import { NegotiationPanel } from "./negotiation-panel";
 import { PropertyManagementPanel } from "./property-management";
 
 type GamePlaySurfaceProps = {
@@ -716,6 +717,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           pendingActionType={pendingActionType}
           snapshot={stateQuery.data}
         />
+        <NegotiationPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
       </div>
 
       <aside className="grid content-start gap-4">
