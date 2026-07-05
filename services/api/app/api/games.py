@@ -82,6 +82,10 @@ NEGOTIATION_TERMINAL_STATUSES = frozenset(
         NEGOTIATION_STATUS_EXECUTED,
     }
 )
+AI_NEGOTIATION_DECISION_TYPES = frozenset(
+    {"negotiation_message", "deal_proposal", "counteroffer", "accept_reject"}
+)
+AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE = "ai_response_opportunity_consumed"
 
 DEAL_STATUS_PROPOSED = "proposed"
 DEAL_STATUS_ACCEPTED = "accepted"
@@ -1813,12 +1817,20 @@ async def ai_step(
             "negotiation_id is required for AI negotiation decisions",
             field="negotiation_id",
         )
+    mandatory = payload.mandatory if payload.mandatory is not None else payload.decision_type == "action_decision"
     if payload.negotiation_id is not None:
         await _ensure_negotiation_in_game(session_factory, game_id, payload.negotiation_id)
+        consumed_rejection = await _ai_consumed_response_opportunity_rejection(
+            session_factory=session_factory,
+            game_id=game_id,
+            payload=payload,
+            mandatory=mandatory,
+        )
+        if consumed_rejection is not None:
+            return consumed_rejection
 
     from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
 
-    mandatory = payload.mandatory if payload.mandatory is not None else payload.decision_type == "action_decision"
     enforcement_kwargs = _ai_enforcement_kwargs(request)
     enforcement_result = await enforce_ai_output(
         session_factory,
@@ -1935,6 +1947,69 @@ def _ai_enforcement_kwargs(request: Request) -> dict[str, Any]:
     if work_dir is not None:
         kwargs["work_dir"] = work_dir
     return kwargs
+
+
+async def _ai_consumed_response_opportunity_rejection(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    payload: AiStepRequest,
+    mandatory: bool,
+) -> AiStepResponse | None:
+    if mandatory or payload.negotiation_id is None or payload.decision_type not in AI_NEGOTIATION_DECISION_TYPES:
+        return None
+
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(negotiations.c.round_number, negotiations.c.context).where(
+                negotiations.c.game_id == game_id,
+                negotiations.c.id == payload.negotiation_id,
+            )
+        )
+        negotiation_row = result.mappings().first()
+        if negotiation_row is None:
+            return None
+
+        context = _normalized_negotiation_context({"context": negotiation_row["context"]})
+        round_number = int(negotiation_row["round_number"])
+        key = f"round:{round_number}:player:{payload.player_id}"
+        consumed = context.get("ai_response_opportunities_consumed")
+        if not isinstance(consumed, Mapping) or key not in consumed:
+            return None
+
+        consumed_marker = consumed.get(key)
+        if not isinstance(consumed_marker, Mapping):
+            return None
+        ai_decision_id = UUID(str(consumed_marker["ai_decision_id"]))
+        consumed_payload = _consumed_negotiation_opportunity_payload(context)
+        game_status = await _game_status_in_session(session, game_id)
+
+    validation_error = {
+        "code": AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE,
+        "message": "AI response opportunity for this negotiation round has already been consumed",
+        "field": "ai_response_opportunities_consumed",
+    }
+    return AiStepResponse(
+        status="rejected",
+        game_id=game_id,
+        player_id=payload.player_id,
+        decision_type=payload.decision_type,
+        negotiation_id=payload.negotiation_id,
+        ai_decision_id=ai_decision_id,
+        accepted_events=[],
+        accepted_event_id=None,
+        rejected_action_id=None,
+        game_status=game_status,
+        consumed_response_opportunity=True,
+        consumed_negotiation_opportunity=consumed_payload,
+        outcome={
+            "kind": "ai_rejected",
+            "status": "rejected",
+            "reason_code": AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE,
+        },
+        reason_code=AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE,
+        validation_errors=(validation_error,),
+    )
 
 
 async def _ai_step_response_from_enforcement(

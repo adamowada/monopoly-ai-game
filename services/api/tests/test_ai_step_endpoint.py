@@ -441,6 +441,77 @@ async def test_rejected_ai_lifecycle_applications_persist_rejected_action_id_and
         await delete_game(session_factory, game_id)
 
 
+@pytest.mark.asyncio
+async def test_consumed_ai_negotiation_opportunities_reject_before_launching_codex(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    # Consumed AI negotiation opportunities reject before launching Codex
+    created = await create_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    ai_player_id = created["players"][1]["id"]
+    negotiation = await create_negotiation(client, game_id, human_player_id, ai_player_id)
+    current_deal = await create_human_deal(
+        client,
+        game_id,
+        negotiation["id"],
+        human_player_id,
+        ai_player_id,
+    )
+    first_accept = await client.post(
+        f"/games/{game_id}/deals/{current_deal['id']}/accept",
+        json={"player_id": ai_player_id},
+    )
+    runner = QueueFakeCodexRunner(
+        [
+            accept_reject_output(game_id, ai_player_id, negotiation["id"], current_deal["id"]),
+            accept_reject_output(game_id, ai_player_id, negotiation["id"], current_deal["id"]),
+        ]
+    )
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        request_payload = {
+            "player_id": ai_player_id,
+            "decision_type": "accept_reject",
+            "negotiation_id": negotiation["id"],
+            "mandatory": False,
+        }
+        first_response = await client.post(f"/games/{game_id}/ai/step", json=request_payload)
+        first_body = first_response.json()
+        attempt_key = f"round:1:player:{ai_player_id}"
+        consumed_payload = first_body["consumed_negotiation_opportunity"]
+        ai_decision_count_after_first_rejection = await table_count(session_factory, ai_decisions, game_id)
+
+        second_response = await client.post(f"/games/{game_id}/ai/step", json=request_payload)
+        second_body = second_response.json()
+
+        assert first_accept.status_code == 200, first_accept.text
+        assert first_response.status_code == 200, first_response.text
+        assert first_body["status"] == "rejected"
+        assert first_body["consumed_response_opportunity"] is True
+        assert consumed_payload is not None
+        assert attempt_key in consumed_payload["ai_response_opportunities_consumed"]
+        assert second_response.status_code == 200, second_response.text
+        assert second_body["status"] == "rejected"
+        assert second_body["reason_code"] == "ai_response_opportunity_consumed"
+        assert second_body["validation_errors"][0]["code"] == "ai_response_opportunity_consumed"
+        assert second_body["accepted_events"] == []
+        assert second_body["accepted_event_id"] is None
+        assert second_body["rejected_action_id"] is None
+        assert second_body["consumed_response_opportunity"] is True
+        assert second_body["consumed_negotiation_opportunity"] == consumed_payload
+        assert attempt_key in second_body["consumed_negotiation_opportunity"]["ai_response_opportunities_consumed"]
+        assert len(runner.calls) == 1
+        assert ai_decision_count_after_first_rejection == 1
+        assert await table_count(session_factory, ai_decisions, game_id) == ai_decision_count_after_first_rejection
+    finally:
+        await delete_game(session_factory, game_id)
+
+
 async def create_game(client: httpx.AsyncClient, *, ai_first: bool = False) -> dict[str, Any]:
     players = (
         [{"name": "Grace", "kind": "ai"}, {"name": "Ada", "kind": "human"}]
