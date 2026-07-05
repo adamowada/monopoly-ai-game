@@ -472,6 +472,9 @@ async def load_negotiation_history_corpus_from_db(
             visible_negotiations.c.game_id == game_uuid,
             sa.or_(
                 visible_negotiations.c.opened_by_player_id == player_uuid,
+                visible_negotiations.c.context.contains(
+                    {"participant_player_ids": [str(player_uuid)]}
+                ),
                 visible_negotiations.c.id.in_(visible_message_negotiation_ids),
             ),
         )

@@ -637,6 +637,135 @@ async def test_stage_9_1_rag_visibility_filters_db_negotiation_metadata_and_deal
         await _delete_rag_visibility_game(session_factory, game_id)
 
 
+@pytest.mark.asyncio
+async def test_stage_9_1_rag_visibility_includes_invited_participant_negotiations_without_messages(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    game_id = UUID("00000000-0000-0000-0000-000000009184")
+    actor_id = UUID("00000000-0000-0000-0000-000000009185")
+    other_id = UUID("00000000-0000-0000-0000-000000009186")
+    third_id = UUID("00000000-0000-0000-0000-000000009187")
+    profile_id = UUID("00000000-0000-0000-0000-000000009188")
+    invited_negotiation_id = UUID("00000000-0000-0000-0000-000000009189")
+    uninvited_negotiation_id = UUID("00000000-0000-0000-0000-00000000918a")
+    invited_deal_id = UUID("00000000-0000-0000-0000-00000000918b")
+    uninvited_deal_id = UUID("00000000-0000-0000-0000-00000000918c")
+    uninvited_message_id = UUID("00000000-0000-0000-0000-00000000918d")
+
+    await _insert_rag_visibility_game(
+        session_factory,
+        game_id=game_id,
+        player_ids=(actor_id, other_id, third_id),
+        ai_profile_id=profile_id,
+        ai_profile_player_id=actor_id,
+    )
+    try:
+        async with session_factory() as session:
+            now = datetime(2026, 7, 5, 13, 30, tzinfo=UTC)
+            negotiation_rows = [
+                (
+                    invited_negotiation_id,
+                    other_id,
+                    "invited participant visible metadata without messages",
+                    [other_id, actor_id],
+                ),
+                (
+                    uninvited_negotiation_id,
+                    other_id,
+                    "uninvited side negotiation metadata leak",
+                    [other_id, third_id],
+                ),
+            ]
+            for offset, (
+                negotiation_id,
+                opened_by_player_id,
+                topic,
+                participant_ids,
+            ) in enumerate(negotiation_rows):
+                timestamp = now + timedelta(seconds=offset)
+                await session.execute(
+                    negotiations.insert().values(
+                        id=negotiation_id,
+                        game_id=game_id,
+                        opened_by_player_id=opened_by_player_id,
+                        status="active",
+                        phase="NEGOTIATION_WINDOW",
+                        round_number=1,
+                        context={
+                            "topic": topic,
+                            "participant_player_ids": [
+                                str(participant_id) for participant_id in participant_ids
+                            ],
+                        },
+                        created_at=timestamp,
+                        updated_at=timestamp,
+                    )
+                )
+
+            deal_rows = [
+                (
+                    invited_deal_id,
+                    invited_negotiation_id,
+                    "invited participant visible deal terms without messages",
+                ),
+                (
+                    uninvited_deal_id,
+                    uninvited_negotiation_id,
+                    "uninvited side deal terms leak",
+                ),
+            ]
+            for offset, (deal_id, negotiation_id, marker) in enumerate(deal_rows):
+                await session.execute(
+                    deals.insert().values(
+                        id=deal_id,
+                        game_id=game_id,
+                        negotiation_id=negotiation_id,
+                        proposed_by_player_id=other_id,
+                        status="proposed",
+                        version=1,
+                        terms={"visibility_marker": marker},
+                        validation_errors=[],
+                        created_at=now + timedelta(seconds=20 + offset),
+                        updated_at=now + timedelta(seconds=20 + offset),
+                    )
+                )
+            await session.execute(
+                negotiation_messages.insert().values(
+                    id=uninvited_message_id,
+                    game_id=game_id,
+                    negotiation_id=uninvited_negotiation_id,
+                    sender_player_id=other_id,
+                    recipient_player_id=third_id,
+                    message_type="freeform_message",
+                    body="uninvited side direct message leak",
+                    payload={"fixture": "stage-9-1-invited-participant-visibility"},
+                    created_at=now + timedelta(seconds=40),
+                )
+            )
+            await session.commit()
+
+            documents = await load_negotiation_history_corpus_from_db(
+                session,
+                game_id=game_id,
+                player_id=actor_id,
+            )
+
+        assert _source_ids_by_row_type(documents, "negotiation") == {
+            str(invited_negotiation_id)
+        }
+        assert _source_ids_by_row_type(documents, "deal") == {str(invited_deal_id)}
+        assert _source_ids_by_row_type(documents, "negotiation_message") == set()
+
+        text = _corpus_text(documents)
+        assert "invited participant visible metadata without messages" in text
+        assert "invited participant visible deal terms without messages" in text
+        assert "uninvited side negotiation metadata leak" not in text
+        assert "uninvited side deal terms leak" not in text
+        assert "uninvited side direct message leak" not in text
+    finally:
+        await _delete_rag_visibility_game(session_factory, game_id)
+
+
 def test_stage_9_1_local_retrieval_corpus_jsonl_index_command_is_deterministic(
     tmp_path: Path,
 ) -> None:
