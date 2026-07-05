@@ -1055,7 +1055,8 @@ async def list_negotiation_messages(
     game_id: UUID,
     negotiation_id: UUID,
     request: Request,
-) -> NegotiationMessagesResponse:
+    viewer_player_id: UUID | None = Query(default=None),
+) -> NegotiationMessagesResponse | JSONResponse:
     session_factory = _session_factory(request)
     await _ensure_game_exists(session_factory, game_id)
     async with session_factory() as session:
@@ -1066,12 +1067,27 @@ async def list_negotiation_messages(
         )
         if negotiation_row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="negotiation not found")
+        context = _normalized_negotiation_context(negotiation_row)
+        if viewer_player_id is not None and str(viewer_player_id) not in context["participant_player_ids"]:
+            return _lifecycle_rejection_response(
+                "viewer_not_participant",
+                "viewer_player_id must be a negotiation participant",
+                field="viewer_player_id",
+            )
+        visibility_filter = negotiation_messages.c.recipient_player_id.is_(None)
+        if viewer_player_id is not None:
+            visibility_filter = sa.or_(
+                visibility_filter,
+                negotiation_messages.c.sender_player_id == viewer_player_id,
+                negotiation_messages.c.recipient_player_id == viewer_player_id,
+            )
         result = await session.execute(
             sa.select(negotiation_messages)
             .where(
                 negotiation_messages.c.game_id == game_id,
                 negotiation_messages.c.negotiation_id == negotiation_id,
                 negotiation_messages.c.message_type == MESSAGE_TYPE_FREEFORM,
+                visibility_filter,
             )
             .order_by(negotiation_messages.c.created_at, negotiation_messages.c.id)
         )

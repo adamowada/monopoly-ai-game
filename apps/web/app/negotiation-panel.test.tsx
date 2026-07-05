@@ -194,7 +194,7 @@ function createNegotiationFetchMock({
       return Response.json({ status: "ok", negotiation });
     }
 
-    const messagesMatch = url.match(new RegExp(`${apiBaseUrl}/games/${gameId}/negotiations/([^/]+)/messages$`));
+    const messagesMatch = url.match(new RegExp(`${apiBaseUrl}/games/${gameId}/negotiations/([^/]+)/messages(?:\\?.*)?$`));
     if (messagesMatch && method === "GET") {
       return Response.json({ messages: state.messages[messagesMatch[1]] ?? [] });
     }

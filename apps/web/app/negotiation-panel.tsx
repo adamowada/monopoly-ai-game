@@ -333,6 +333,9 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   const selectedNegotiation = selectedNegotiationId
     ? negotiations.find((negotiation) => negotiation.id === selectedNegotiationId) ?? null
     : negotiations[0] ?? null;
+  const messageViewerPlayerId = selectedNegotiation?.participant_player_ids.includes(messageAuthorId)
+    ? messageAuthorId
+    : selectedNegotiation?.participant_player_ids[0] ?? "";
 
   useEffect(() => {
     if (!selectedNegotiationId && negotiations[0]) {
@@ -351,6 +354,13 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
       setParentDealId(null);
     }
   }, [negotiations, negotiationsQuery.isFetching, selectedNegotiationId]);
+
+  useEffect(() => {
+    const participantIds = selectedNegotiation?.participant_player_ids ?? [];
+    if (participantIds.length > 0 && !participantIds.includes(messageAuthorId)) {
+      setMessageAuthorId(participantIds[0] ?? "");
+    }
+  }, [messageAuthorId, selectedNegotiation?.participant_player_ids]);
 
   useEffect(() => {
     if (aiPlayerIds.length === 0) {
@@ -376,14 +386,15 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   }, [participantPlayerIds, selectedNegotiation]);
 
   const messagesQuery = useQuery({
-    queryKey: ["negotiation-messages", gameId, selectedNegotiation?.id],
+    queryKey: ["negotiation-messages", gameId, selectedNegotiation?.id, messageViewerPlayerId],
     queryFn: () =>
       readNegotiationMessages({
         gameId,
         negotiationId: selectedNegotiation?.id ?? "",
+        viewerPlayerId: messageViewerPlayerId,
         baseUrl: apiBaseUrl,
       }),
-    enabled: Boolean(selectedNegotiation?.id),
+    enabled: Boolean(selectedNegotiation?.id && messageViewerPlayerId),
   });
 
   const selectedDeals = useMemo(

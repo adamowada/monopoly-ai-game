@@ -2078,7 +2078,9 @@ export interface operations {
     };
     list_negotiation_messages_games__game_id__negotiations__negotiation_id__messages_get: {
         parameters: {
-            query?: never;
+            query?: {
+                viewer_player_id?: string | null;
+            };
             header?: never;
             path: {
                 game_id: string;

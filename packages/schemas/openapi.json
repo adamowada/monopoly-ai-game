@@ -3574,6 +3574,23 @@
               "title": "Negotiation Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "viewer_player_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Viewer Player Id"
+            }
           }
         ],
         "responses": {
