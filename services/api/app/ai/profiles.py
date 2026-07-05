@@ -109,7 +109,8 @@ def seeded_personality_generator(
     seat_order: int,
     player_name: str,
 ) -> dict[str, Any]:
-    seed_material = f"{game_seed}|{player_id}|{seat_order}|{player_name}"
+    player_stable_key = _player_stable_key(seat_order=seat_order, player_name=player_name)
+    seed_material = f"{game_seed}|{player_stable_key}"
     trait_values = {
         trait: _bounded_trait_value(seed_material, trait) for trait in STRATEGY_TRAIT_FIELDS
     }
@@ -139,9 +140,9 @@ def seeded_personality_generator(
         "persona_summary": summary,
         "source": {
             "game_seed": game_seed,
-            "player_id": str(player_id),
             "seat_order": seat_order,
             "player_name": player_name,
+            "player_stable_key": player_stable_key,
         },
     }
     return {
@@ -294,6 +295,10 @@ def _bounded_trait_value(seed_material: str, trait: str) -> float:
     digest = hashlib.sha256(f"{seed_material}|{trait}".encode("utf-8")).digest()
     raw = int.from_bytes(digest[:8], "big") / ((1 << 64) - 1)
     return round(0.1 + raw * 0.8, 2)
+
+
+def _player_stable_key(*, seat_order: int, player_name: str) -> str:
+    return f"seat-{seat_order}:{player_name}"
 
 
 def _pick(options: tuple[str, ...], seed_material: str, key: str) -> str:
