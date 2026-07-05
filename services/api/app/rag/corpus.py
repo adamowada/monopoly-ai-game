@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.context_pack import VISIBLE_MEMORY_SCOPES
 from app.ai.memory import memory_row_is_usable_for_context
+from app.core.paths import require_content_rules_dir, resolve_content_rules_dir
 from app.db.metadata import (
     ai_decisions,
     ai_memory_entries,
@@ -41,8 +42,8 @@ SOURCE_TYPES: tuple[SourceType, ...] = (
     "past_decision",
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-CONTENT_RULES_DIR = REPO_ROOT / "content" / "rules"
+CONTENT_RULES_DIR = resolve_content_rules_dir(Path(__file__))
+REPO_ROOT = CONTENT_RULES_DIR.parents[1]
 CLASSIC_RULES_PATH = CONTENT_RULES_DIR / "classic_monopoly.json"
 HOUSE_RULES_PATH = CONTENT_RULES_DIR / "house_rules_and_deviations.json"
 CONTRACT_EXAMPLES_PATH = CONTENT_RULES_DIR / "contract_examples.json"
@@ -74,6 +75,7 @@ def build_static_local_corpus(
 ) -> list[CorpusDocument]:
     """Build deterministic local static documents without database access."""
 
+    content_rules_dir = require_content_rules_dir(content_rules_dir)
     documents = [
         *build_rules_corpus(content_rules_dir / "classic_monopoly.json"),
         *build_house_rule_corpus(content_rules_dir / "house_rules_and_deviations.json"),
@@ -689,6 +691,8 @@ def _document(
 
 
 def _read_json(path: Path) -> Mapping[str, Any]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Required corpus source file does not exist: {path}")
     with path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, Mapping):

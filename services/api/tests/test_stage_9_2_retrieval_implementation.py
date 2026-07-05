@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -27,10 +29,13 @@ from app.db.metadata import (
     rag_index_entries,
     retrieval_records,
 )
+from app.rag import corpus as rag_corpus
 from app.rag.retrieval import refresh_rag_index_entries, search_retrieval
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+CONTENT_RULES = REPO_ROOT / "content" / "rules"
 TEST_DATABASE_URL = os.getenv(
     "MONOPOLY_TEST_DATABASE_URL",
     "postgresql+asyncpg://monopoly:monopoly@127.0.0.1:5432/monopoly_ai_game",
@@ -78,6 +83,56 @@ def _state() -> GameState:
             PlayerSetup(id=str(OTHER_PLAYER_ID), name="Ada", kind="ai"),
         ),
     )
+
+
+def test_stage_9_2_corpus_rules_path_supports_packaged_runtime_layout(
+    tmp_path: Path,
+) -> None:
+    packaged_root = tmp_path / "app"
+    packaged_rules_dir = packaged_root / "content" / "rules"
+    shutil.copytree(CONTENT_RULES, packaged_rules_dir)
+
+    packaged_corpus_file = packaged_root / "app" / "rag" / "corpus.py"
+    packaged_corpus_file.parent.mkdir(parents=True)
+    packaged_corpus_file.touch()
+
+    resolved_rules_dir = rag_corpus.resolve_content_rules_dir(packaged_corpus_file)
+    documents = rag_corpus.build_static_local_corpus(content_rules_dir=resolved_rules_dir)
+
+    assert resolved_rules_dir == packaged_rules_dir.resolve()
+    assert {document.source_type for document in documents} >= {
+        "rules",
+        "house_rules",
+        "contract_examples",
+    }
+    assert "property_boardwalk" in {document.source_id for document in documents}
+    assert "no_fallback_ai_decisions" in {document.source_id for document in documents}
+    assert "rent_share_boardwalk_example" in {document.source_id for document in documents}
+    assert {
+        document.metadata["file"]
+        for document in documents
+        if document.source_type in {"rules", "house_rules", "contract_examples"}
+    } == {
+        "content/rules/classic_monopoly.json",
+        "content/rules/contract_examples.json",
+        "content/rules/house_rules_and_deviations.json",
+    }
+
+
+def test_stage_9_2_corpus_rules_path_missing_required_files_fails_explicitly(
+    tmp_path: Path,
+) -> None:
+    packaged_root = tmp_path / "app"
+    packaged_rules_dir = packaged_root / "content" / "rules"
+    shutil.copytree(CONTENT_RULES, packaged_rules_dir)
+    (packaged_rules_dir / "contract_examples.json").unlink()
+
+    packaged_corpus_file = packaged_root / "app" / "rag" / "corpus.py"
+    packaged_corpus_file.parent.mkdir(parents=True)
+    packaged_corpus_file.touch()
+
+    with pytest.raises(FileNotFoundError, match="contract_examples\\.json"):
+        rag_corpus.resolve_content_rules_dir(packaged_corpus_file)
 
 
 @pytest.mark.asyncio
