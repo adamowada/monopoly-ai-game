@@ -37,6 +37,26 @@ test("mixed human/AI game progresses through the AI step path and stalls remain 
   await expect(page.getByRole("alert", { name: "Rejected action" })).toContainText("codex_exec_timeout");
 });
 
+test("Mock AI step decisions satisfy AI audit schema", async ({ page }) => {
+  await createAiFirstGame(page, "stage-7-6-ai-step-audit-schema");
+
+  const controls = page.getByRole("region", { name: "Turn controls" });
+  const aiStepResponse = page.waitForResponse(
+    (response) => response.url().includes("/ai/step") && response.request().method() === "POST",
+  );
+  await controls.getByRole("button", { name: "Step AI" }).click();
+  const aiStepBody = (await (await aiStepResponse).json()) as { ai_decision_id?: string };
+
+  expect(aiStepBody.ai_decision_id).toMatch(/^mock-game-\d+-ai-decision-\d+$/);
+  await expect(page.getByRole("status", { name: "AI step status" })).toContainText("AI done");
+
+  await page.reload();
+
+  const panel = page.getByRole("region", { name: "AI audit" });
+  await expect(panel).toContainText("Decision history");
+  await expect(panel).toContainText(`ai_decision_id ${aiStepBody.ai_decision_id}`);
+});
+
 test("AIs initiate and respond to negotiations through AI controls", async ({ page }) => {
   // AIs initiate and respond to negotiations
   await page.goto("/");

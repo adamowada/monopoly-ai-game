@@ -1219,21 +1219,42 @@ function aiValidationError(reasonCode, message, field) {
   };
 }
 
+function aiProfileIdForPlayer(game, playerId) {
+  const profile = game.ai_profiles.find((candidate) => candidate.player_id === playerId);
+  return profile?.ai_profile_id ?? `${game.id}-runtime-ai-profile-${playerId || "unknown-player"}`;
+}
+
 function createAiDecisionRecord(game, payload, status, patch = {}) {
   const createdAt = nowIso();
+  const decisionNumber = game.ai_decisions.length + 1;
+  const decisionId = `${game.id}-ai-decision-${decisionNumber}`;
+  const playerId = typeof payload.player_id === "string" && payload.player_id.length > 0 ? payload.player_id : "unknown-player";
+  const decisionType = payload.decision_type ?? "action_decision";
+  const legalActions = legalActionsFor(game, playerId);
   const decision = {
-    id: `${game.id}-ai-decision-${game.ai_decisions.length + 1}`,
+    id: decisionId,
+    ai_decision_id: decisionId,
     game_id: game.id,
-    player_id: payload.player_id,
-    decision_type: payload.decision_type ?? "action_decision",
+    ai_profile_id: aiProfileIdForPlayer(game, playerId),
+    player_id: playerId,
+    decision_type: decisionType,
     negotiation_id: payload.negotiation_id ?? null,
     status,
     phase: game.current_phase,
     state_hash: stateHash(game),
-    prompt_context_hash: `mock-ai-context-${game.ai_decisions.length + 1}`,
-    prompt_context: { mock: true, request_context: payload.request_context ?? {} },
-    raw_output: JSON.stringify({ mock: true, decision_type: payload.decision_type ?? "action_decision" }),
-    parsed_output: { mock: true, decision_type: payload.decision_type ?? "action_decision" },
+    legal_actions: legalActions,
+    prompt_context_hash: `mock-ai-context-${decisionNumber}`,
+    prompt_context: {
+      mock: true,
+      phase: game.current_phase,
+      legal_action_count: legalActions.length,
+      request_context: payload.request_context ?? {},
+    },
+    raw_output: JSON.stringify({ mock: true, decision_type: decisionType }),
+    parsed_output: { mock: true, decision_type: decisionType },
+    validation_errors: [],
+    memory_entry_ids: [],
+    retrieval_record_ids: [],
     validation_result: { no_substitute_move: true, substitute_move: null },
     accepted_event_id: null,
     rejected_action_id: null,
@@ -1265,13 +1286,14 @@ function aiStepPayload({
   if (rejectedActionId) {
     decision.rejected_action_id = rejectedActionId;
   }
+  decision.validation_errors = validationErrors;
   return {
     status,
     game_id: game.id,
     player_id: payload.player_id,
     decision_type: payload.decision_type ?? "action_decision",
     negotiation_id: payload.negotiation_id ?? null,
-    ai_decision_id: decision.id,
+    ai_decision_id: decision.ai_decision_id ?? decision.id,
     accepted_events: acceptedEvents,
     accepted_event_id: acceptedEventId,
     rejected_action_id: rejectedActionId,
