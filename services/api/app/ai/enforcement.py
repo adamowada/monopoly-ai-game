@@ -1051,7 +1051,16 @@ def _rejected_validation_result(
             "rejected_ai_output_records": True,
             "schema_validation": reason_code != "malformed_ai_output",
             "legal_action_validation": reason_code
-            not in {"malformed_ai_output", "codex_exec_timeout", "codex_exec_process_error"},
+            not in {
+                "codex_exec_process_error",
+                "codex_exec_timeout",
+                "illegal_action",
+                "malformed_action",
+                "malformed_ai_output",
+                "mistimed_action",
+                "stale_action",
+                "unknown_action",
+            },
             "deal_validation": reason_code != "invalid_structured_deal",
             "phase_timing_validation": reason_code not in {"mistimed_action", "stale_action"},
             "no_substitute_move": True,

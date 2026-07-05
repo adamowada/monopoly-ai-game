@@ -296,6 +296,7 @@ async def test_illegal_stale_and_mistimed_ai_actions_are_rejected_like_human_act
         assert decisions[0]["accepted_event_id"] is None
         assert decisions[0]["validation_result"]["no_substitute_move"] is True
         assert decisions[0]["validation_result"]["substitute_move"] is None
+        assert decisions[0]["validation_result"]["legal_action_validation"] is False
         assert await table_count(session_factory, game_events) == 0
     finally:
         await delete_game(session_factory)
