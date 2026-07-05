@@ -792,11 +792,6 @@ async def _reject_ai_output(
                     "validation_errors": [dict(error) for error in validation_errors],
                 },
             )
-            await compact_memory_after_scheduled_decision_if_due(
-                session,
-                game_id=_coerce_uuid(request.game_id),
-                player_id=_coerce_uuid(request.player_id),
-            )
             if request.mandatory:
                 await session.execute(
                     games.update()
@@ -876,11 +871,6 @@ async def _reject_ai_output_in_session(
             "reason_code": reason_code,
             "validation_errors": [dict(error) for error in validation_errors],
         },
-    )
-    await compact_memory_after_scheduled_decision_if_due(
-        session,
-        game_id=_coerce_uuid(request.game_id),
-        player_id=_coerce_uuid(request.player_id),
     )
     game_status = await _game_status_in_session(session, _coerce_uuid(request.game_id))
     return AIOutputEnforcementResult(

@@ -471,6 +471,7 @@ def _summary_metadata(
     source_decision_ids = _unique_source_ids(source_rows, "source_decision_id")
     source_event_ids = _unique_source_ids(source_rows, "source_event_id")
     source_message_ids = _unique_source_ids(source_rows, "source_negotiation_message_id")
+    source_decision_statuses = _unique_source_statuses(source_rows)
     scoring_inputs_by_memory_id = {
         str(row["id"]): {
             **_mapping(row.get("context_scoring_inputs")),
@@ -492,6 +493,7 @@ def _summary_metadata(
                 "source_memory_ids": source_id_strings,
                 "source_count": len(source_id_strings),
                 "source_decision_ids": source_decision_ids,
+                "source_decision_statuses": source_decision_statuses,
                 "source_event_ids": source_event_ids,
                 "source_negotiation_message_ids": source_message_ids,
                 "source_category_counts": dict(sorted(category_counts.items())),
@@ -622,12 +624,32 @@ def memory_row_is_usable_for_context(row: Mapping[str, Any]) -> bool:
     for status in (metadata_status, source_decision_status):
         if status is not None and status not in FINAL_MEMORY_DECISION_STATUSES:
             return False
+    compaction = metadata_blob.get("compaction")
+    if isinstance(compaction, Mapping) and compaction.get("is_summary") is True:
+        source_statuses = _metadata_string_sequence(compaction.get("source_decision_statuses"))
+        for status in source_statuses:
+            if status not in FINAL_MEMORY_DECISION_STATUSES:
+                return False
+        source_decision_ids = _metadata_string_sequence(compaction.get("source_decision_ids"))
+        if source_decision_ids and not source_statuses:
+            return False
     return True
 
 
 def _unique_source_ids(rows: Sequence[Mapping[str, Any]], key: str) -> list[str]:
     values = {_string_or_none(row.get(key)) for row in rows}
     return sorted(value for value in values if value is not None)
+
+
+def _unique_source_statuses(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    values = {_string_or_none(row.get("source_decision_status")) for row in rows}
+    return sorted(value for value in values if value is not None)
+
+
+def _metadata_string_sequence(value: object) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    return [text for item in value if (text := _string_or_none(item)) is not None]
 
 
 def _mapping(value: Any) -> dict[str, Any]:

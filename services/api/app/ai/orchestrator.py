@@ -27,10 +27,6 @@ from app.ai.decision_schema import (
     rejected_ai_output,
     validate_ai_decision_output,
 )
-from app.ai.memory import (
-    compact_memory_after_scheduled_decision_if_due,
-    persist_memory_updates_for_trusted_output,
-)
 from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue, retrieval_records
 
 
@@ -38,7 +34,6 @@ DEFAULT_AI_SCHEMA_FILE = Path(__file__).resolve().parent / "schemas" / "agent_de
 DEFAULT_AI_SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 DEFAULT_AI_WORK_DIR = Path(__file__).resolve().parent / "runtime"
 XHIGH_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
-FINAL_NON_MUTATING_DECISION_TYPES = frozenset({"memory_update", "self_dialogue"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -491,27 +486,6 @@ async def _persist_attempt_result(
                     payload=self_dialogue_payload,
                 )
             )
-            if (
-                status == "validated"
-                and request.decision_type in FINAL_NON_MUTATING_DECISION_TYPES
-                and isinstance(persisted_parsed_output, Mapping)
-            ):
-                await persist_memory_updates_for_trusted_output(
-                    session,
-                    decision_id=decision_id,
-                    game_id=game_id,
-                    player_id=player_id,
-                    ai_profile_id=ai_profile_id,
-                    parsed_output=persisted_parsed_output,
-                    phase=request.phase,
-                    state_hash=request.state_hash,
-                    ai_decision_status=status,
-                )
-                await compact_memory_after_scheduled_decision_if_due(
-                    session,
-                    game_id=game_id,
-                    player_id=player_id,
-                )
 
     return CodexExecAIDecisionResult(
         ai_decision_id=decision_id,

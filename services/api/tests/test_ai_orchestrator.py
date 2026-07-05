@@ -28,6 +28,7 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
 from app.ai.orchestrator import (
     CodexExecAIDecisionRequest,
     CodexExecProcessResult,
@@ -561,9 +562,17 @@ async def test_stage_8_2_memory_trusted_non_mutating_ai_output_writes_entries_li
     ai_output = valid_memory_update_output(fixture.state)
     runner = FakeCodexRunner(final_output=ai_output)
     try:
-        result = await request_codex_ai_decision(
+        result = await enforce_ai_output(
             session_factory,
-            replace(decision_request(fixture), decision_type="memory_update"),
+            AIOutputEnforcementRequest(
+                game_id=fixture.game_id,
+                player_id=fixture.player_id,
+                ai_profile_id=fixture.ai_profile_id,
+                decision_type="memory_update",
+                mandatory=False,
+                request_context={"caller_context": "stage 8.2 finalization memory test"},
+                timeout_seconds=7,
+            ),
             runner=runner,
             schema_file=tmp_path / "schema.json",
             sandbox_dir=tmp_path / "sandbox",

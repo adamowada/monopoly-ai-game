@@ -3054,11 +3054,6 @@ async def _persist_ai_negotiation_application_rejection(
                     ),
                 },
             )
-            await compact_memory_after_scheduled_decision_if_due(
-                session,
-                game_id=game_id,
-                player_id=player_id,
-            )
 
             if mandatory:
                 await session.execute(

@@ -18,17 +18,17 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.ai.context_pack import build_ai_context_pack_from_db
+from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
 from app.ai.memory import (
     MEMORY_COMPACTION_REASON_ON_DEMAND,
     MEMORY_COMPACTION_REASON_SCHEDULED,
     compact_memory_for_player,
+    memory_row_is_usable_for_context,
     score_memory_entry_for_context,
 )
 from app.ai.orchestrator import (
     CodexExecProcessResult,
     CodexExecRunner,
-    CodexExecAIDecisionRequest,
-    request_codex_ai_decision,
 )
 from app.core.config import Settings
 from app.db.metadata import ai_decisions, ai_memory_entries, ai_profiles, games, metadata, players
@@ -280,7 +280,7 @@ async def test_stage_8_3_compaction_25_decision_schedule_targets_only_that_playe
         session_factory,
         player_id=AI_PLAYER_ID,
         profile_id=AI_PROFILE_ID,
-        memory_ids=[_uuid(835000 + index) for index in range(30)],
+        memory_ids=[_uuid(835000 + index) for index in range(25)],
         content_prefix="scheduled player memory",
         importance=1,
         category="deal_history",
@@ -290,7 +290,7 @@ async def test_stage_8_3_compaction_25_decision_schedule_targets_only_that_playe
         session_factory,
         player_id=OTHER_AI_PLAYER_ID,
         profile_id=OTHER_AI_PROFILE_ID,
-        memory_ids=[_uuid(836000 + index) for index in range(30)],
+        memory_ids=[_uuid(836000 + index) for index in range(25)],
         content_prefix="unrelated player memory",
         importance=1,
         category="deal_history",
@@ -299,16 +299,15 @@ async def test_stage_8_3_compaction_25_decision_schedule_targets_only_that_playe
 
     runner = FakeCodexRunner(_valid_memory_update_output(state, "scheduled compaction marker"))
     try:
-        result = await request_codex_ai_decision(
+        result = await enforce_ai_output(
             session_factory,
-            CodexExecAIDecisionRequest(
+            AIOutputEnforcementRequest(
                 game_id=GAME_ID,
                 player_id=AI_PLAYER_ID,
                 ai_profile_id=AI_PROFILE_ID,
                 decision_type="memory_update",
-                phase=state.turn.phase.value,
-                state_hash=state.state_hash(),
-                prompt_context={"stage": "8.3", "schedule": "25_decisions"},
+                mandatory=False,
+                request_context={"stage": "8.3", "schedule": "25_decisions"},
                 timeout_seconds=7,
             ),
             runner=runner,
@@ -334,6 +333,169 @@ async def test_stage_8_3_compaction_25_decision_schedule_targets_only_that_playe
         assert other_linked_raw == []
     finally:
         await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_review_compaction_finalization_rejected_non_mutating_output_does_not_persist_or_compact(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    state = _state()
+    await _insert_game_fixture(session_factory, state)
+    await _insert_prior_decisions(session_factory, player_id=AI_PLAYER_ID, count=24, id_offset=840000)
+    prior_memory_ids = [_uuid(840500 + index) for index in range(25)]
+    await _insert_memory_entries(
+        session_factory,
+        player_id=AI_PLAYER_ID,
+        profile_id=AI_PROFILE_ID,
+        memory_ids=prior_memory_ids,
+        content_prefix="review finalization prior memory",
+        importance=1,
+        category="deal_history",
+        source_decision_id=_uuid(840000),
+    )
+    poison = "Rejected wrong-player memory update must not become raw or compacted prompt memory."
+    ai_output = _valid_memory_update_output(state, poison)
+    ai_output["player_id"] = str(OTHER_AI_PLAYER_ID)
+    runner = FakeCodexRunner(ai_output)
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="memory_update",
+                mandatory=False,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+
+        rows = await _memory_rows(session_factory)
+        decisions = await _decision_rows(session_factory)
+        decision = next(row for row in decisions if row["id"] == result.ai_decision_id)
+        player_rows = [row for row in rows if row["player_id"] == AI_PLAYER_ID]
+        poison_rows = [row for row in rows if poison in str(row["content"])]
+
+        assert result.status == "rejected"
+        assert result.rejected_action_id is not None
+        assert decision["status"] == "rejected"
+        assert decision["validation_result"]["reason_code"] == "ai_output_identity_mismatch"
+        assert len(runner.calls) == 1
+        assert poison_rows == []
+        assert _summary_rows(rows, player_id=AI_PLAYER_ID) == []
+        assert {row["id"] for row in player_rows} == set(prior_memory_ids)
+        assert all(row["superseded_by_memory_id"] is None for row in player_rows)
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_review_compaction_finalization_valid_non_mutating_output_persists_and_compacts_after_validation(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    state = _state()
+    await _insert_game_fixture(session_factory, state)
+    await _insert_prior_decisions(session_factory, player_id=AI_PLAYER_ID, count=24, id_offset=841000)
+    await _insert_memory_entries(
+        session_factory,
+        player_id=AI_PLAYER_ID,
+        profile_id=AI_PROFILE_ID,
+        memory_ids=[_uuid(841500 + index) for index in range(25)],
+        content_prefix="review finalization accepted prior memory",
+        importance=1,
+        category="deal_history",
+        source_decision_id=_uuid(841000),
+    )
+    marker = "Final validated memory update can trigger scheduled compaction."
+    runner = FakeCodexRunner(_valid_memory_update_output(state, marker))
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="memory_update",
+                mandatory=False,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+
+        rows = await _memory_rows(session_factory)
+        decisions = await _decision_rows(session_factory)
+        decision = next(row for row in decisions if row["id"] == result.ai_decision_id)
+        persisted = [row for row in rows if row["source_decision_id"] == result.ai_decision_id]
+        summaries = _summary_rows(rows, player_id=AI_PLAYER_ID)
+
+        assert result.status == "validated"
+        assert result.rejected_action_id is None
+        assert decision["status"] == "validated"
+        assert len(runner.calls) == 1
+        assert len(persisted) == 1
+        assert persisted[0]["content"] == marker
+        assert persisted[0]["metadata_blob"]["ai_decision_status"] == "validated"
+        assert len(summaries) == 1
+        assert summaries[0]["metadata_blob"]["compaction"]["reason"] == MEMORY_COMPACTION_REASON_SCHEDULED
+    finally:
+        await _delete_game(session_factory)
+
+
+def test_stage_8_review_compaction_finalization_legacy_summary_without_final_source_status_is_not_usable() -> None:
+    source_decision_id = str(_uuid(842000))
+
+    assert (
+        memory_row_is_usable_for_context(
+            {
+                "metadata_blob": {
+                    "compaction": {
+                        "is_summary": True,
+                        "source_decision_ids": [source_decision_id],
+                    }
+                }
+            }
+        )
+        is False
+    )
+    assert (
+        memory_row_is_usable_for_context(
+            {
+                "metadata_blob": {
+                    "compaction": {
+                        "is_summary": True,
+                        "source_decision_ids": [source_decision_id],
+                        "source_decision_statuses": ["rejected"],
+                    }
+                }
+            }
+        )
+        is False
+    )
+    assert (
+        memory_row_is_usable_for_context(
+            {
+                "metadata_blob": {
+                    "compaction": {
+                        "is_summary": True,
+                        "source_decision_ids": [source_decision_id],
+                        "source_decision_statuses": ["validated"],
+                    }
+                }
+            }
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -552,6 +714,18 @@ async def _memory_rows(
             sa.select(ai_memory_entries)
             .where(ai_memory_entries.c.game_id == GAME_ID)
             .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+
+async def _decision_rows(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> list[dict[str, Any]]:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(ai_decisions)
+            .where(ai_decisions.c.game_id == GAME_ID)
+            .order_by(ai_decisions.c.created_at, ai_decisions.c.id)
         )
         return [dict(row) for row in result.mappings().all()]
 
