@@ -223,6 +223,71 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
     assert "Ada secretly wants the orange group." not in memory_text
 
 
+def test_context_pack_redacts_profile_seed_source_from_prompt() -> None:
+    state = _state()
+    hidden_seed = "hidden-profile-seed-must-not-reach-prompt"
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        ai_profile={
+            "id": AI_PROFILE_ID,
+            "player_id": AI_PLAYER_ID,
+            "persona_name": "Calculated Deal Architect",
+            "persona_summary": {
+                "summary": "Grace seeks enforceable deals while protecting liquidity."
+            },
+            "strategy_profile": {
+                "risk_tolerance": 0.35,
+                "liquidity_preference": 0.72,
+                "debt_appetite": 0.41,
+                "aggressiveness": 0.62,
+                "cooperation": 0.8,
+                "negotiation_creativity": 0.9,
+                "trust": 0.55,
+                "monopoly_focus": 0.67,
+                "personality": "Collaborative but strategic.",
+                "play_style": "Prioritizes color-set completion.",
+                "persona_summary": "Visible strategy summary remains prompt-safe.",
+                "traits": ["deal-friendly partner", "monopoly hunter"],
+                "source": {
+                    "game_seed": hidden_seed,
+                    "seat_order": 0,
+                    "player_name": "Grace",
+                },
+                "research_notes": {
+                    "visible_hint": "Prefer exact-term deals.",
+                    "game_seed": hidden_seed,
+                },
+                "scenario_weights": [
+                    {"name": "auction", "weight": 0.4, "game_seed": hidden_seed},
+                    {"name": "rent-defense", "weight": 0.6},
+                ],
+            },
+        },
+    )
+
+    strategy_profile = pack["personality_profile"]["strategy_profile"]
+
+    assert strategy_profile["risk_tolerance"] == 0.35
+    assert strategy_profile["cooperation"] == 0.8
+    assert strategy_profile["personality"] == "Collaborative but strategic."
+    assert strategy_profile["play_style"] == "Prioritizes color-set completion."
+    assert strategy_profile["persona_summary"] == "Visible strategy summary remains prompt-safe."
+    assert strategy_profile["research_notes"]["visible_hint"] == "Prefer exact-term deals."
+    assert strategy_profile["scenario_weights"] == [
+        {"name": "auction", "weight": 0.4},
+        {"name": "rent-defense", "weight": 0.6},
+    ]
+
+    serialized_strategy_profile = json.dumps(strategy_profile, sort_keys=True)
+    serialized_prompt_context = json.dumps(pack, sort_keys=True)
+
+    assert "source" not in strategy_profile
+    assert "source" not in serialized_strategy_profile
+    assert "game_seed" not in serialized_strategy_profile
+    assert hidden_seed not in serialized_prompt_context
+
+
 @pytest.mark.asyncio
 async def test_context_pack_includes_only_negotiation_messages_visible_to_acting_ai(
     session_factory: async_sessionmaker,

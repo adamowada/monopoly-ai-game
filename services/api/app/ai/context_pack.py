@@ -583,7 +583,7 @@ def _profile_summary(ai_profile: Mapping[str, Any] | None) -> dict[str, Any]:
         "player_id": _string_or_none(ai_profile.get("player_id")),
         "persona_name": _string_or_none(ai_profile.get("persona_name")),
         "persona_summary": summary_text or _string_or_none(persona_summary),
-        "strategy_profile": _mapping(ai_profile.get("strategy_profile")),
+        "strategy_profile": _prompt_strategy_profile(ai_profile.get("strategy_profile")),
     }
 
 
@@ -649,6 +649,28 @@ def _string_list(value: Any) -> list[str]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return _json_safe(value) if isinstance(value, Mapping) else {}
+
+
+def _prompt_strategy_profile(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    profile = _redact_game_seed_keys(_mapping(value))
+    if not isinstance(profile, dict):
+        return {}
+    profile.pop("source", None)
+    return profile
+
+
+def _redact_game_seed_keys(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            key: _redact_game_seed_keys(nested_value)
+            for key, nested_value in value.items()
+            if key != "game_seed"
+        }
+    if isinstance(value, list):
+        return [_redact_game_seed_keys(item) for item in value]
+    return value
 
 
 def _string_or_none(value: Any) -> str | None:
