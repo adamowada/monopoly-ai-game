@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import event
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 
 
 metadata = sa.MetaData()
+RAG_EMBEDDING_DIMENSIONS = 64
+
+
+@event.listens_for(metadata, "before_create")
+def create_postgres_extensions(target: sa.MetaData, connection: sa.Connection, **_: object) -> None:
+    if connection.dialect.name != "postgresql":
+        return
+    connection.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+    connection.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 
 def uuid_pk() -> sa.Column:
@@ -579,6 +590,50 @@ ai_memory_entries = sa.Table(
     sa.Index("ix_ai_memory_entries_source_decision_id", "source_decision_id"),
     sa.Index("ix_ai_memory_entries_source_event_id", "source_event_id"),
     sa.Index("ix_ai_memory_entries_category", "category"),
+)
+
+rag_index_entries = sa.Table(
+    "rag_index_entries",
+    metadata,
+    uuid_pk(),
+    sa.Column("index_key", sa.String(length=260), nullable=False, unique=True),
+    sa.Column("document_id", sa.String(length=260), nullable=False),
+    sa.Column(
+        "game_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("games.id", ondelete="CASCADE"),
+        nullable=True,
+    ),
+    sa.Column(
+        "player_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("players.id", ondelete="CASCADE"),
+        nullable=True,
+    ),
+    sa.Column("phase", sa.String(length=80), nullable=True),
+    sa.Column("source_type", sa.String(length=80), nullable=False),
+    sa.Column("source_id", sa.String(length=160), nullable=False),
+    sa.Column("title", sa.Text, nullable=False),
+    sa.Column("text", sa.Text, nullable=False),
+    required_jsonb("metadata_blob"),
+    sa.Column("search_vector", TSVECTOR, nullable=False),
+    sa.Column("embedding", Vector(RAG_EMBEDDING_DIMENSIONS), nullable=False),
+    created_at(),
+    updated_at(),
+    sa.UniqueConstraint("index_key", name="uq_rag_index_entries_index_key"),
+    sa.Index("ix_rag_index_entries_game_player_phase", "game_id", "player_id", "phase"),
+    sa.Index("ix_rag_index_entries_source", "source_type", "source_id"),
+    sa.Index(
+        "ix_rag_index_entries_search_vector",
+        "search_vector",
+        postgresql_using="gin",
+    ),
+    sa.Index(
+        "ix_rag_index_entries_embedding",
+        "embedding",
+        postgresql_using="hnsw",
+        postgresql_ops={"embedding": "vector_cosine_ops"},
+    ),
 )
 
 retrieval_records = sa.Table(

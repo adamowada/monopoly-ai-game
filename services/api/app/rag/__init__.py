@@ -12,6 +12,12 @@ from app.rag.corpus import (
     build_rules_corpus,
     build_static_local_corpus,
 )
+from app.rag.retrieval import (
+    RetrievalSearchResult,
+    embed_text,
+    refresh_rag_index_entries,
+    search_retrieval,
+)
 
 __all__ = [
     "CorpusDocument",
@@ -24,4 +30,8 @@ __all__ = [
     "build_past_decision_corpus",
     "build_rules_corpus",
     "build_static_local_corpus",
+    "RetrievalSearchResult",
+    "embed_text",
+    "refresh_rag_index_entries",
+    "search_retrieval",
 ]
