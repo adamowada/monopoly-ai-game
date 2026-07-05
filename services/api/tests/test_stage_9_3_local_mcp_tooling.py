@@ -655,6 +655,64 @@ async def test_stage_9_3_validate_deal_draft_reports_validation_without_mutation
         await delete_game(session_factory, game_id)
 
 
+@pytest.mark.asyncio
+async def test_stage_9_3_validate_deal_draft_rejects_structured_participants_outside_game(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    first_game = await create_game(client, player_kinds=("human", "human"))
+    second_game = await create_game(client, player_kinds=("human", "human"))
+    first_game_id = first_game["id"]
+    second_game_id = second_game["id"]
+    proposer_player_id = first_game["players"][0]["id"]
+    recipient_player_id = first_game["players"][1]["id"]
+    outside_player_id = second_game["players"][0]["id"]
+    context = LocalMCPContext(api_app=api_app)
+    try:
+        before_counts = await mutation_counts(session_factory, first_game_id)
+        result = await call_local_tool(
+            "validate_deal_draft",
+            {
+                "game_id": first_game_id,
+                "draft": {
+                    "proposed_by_player_id": proposer_player_id,
+                    "terms": {
+                        "kind": "structured_deal",
+                        "deal_schema_version": 1,
+                        "participants": [
+                            proposer_player_id,
+                            recipient_player_id,
+                            outside_player_id,
+                        ],
+                        "terms": [
+                            {
+                                "kind": "immediate_cash_transfer",
+                                "from_player_id": proposer_player_id,
+                                "to_player_id": recipient_player_id,
+                                "amount": 50,
+                            }
+                        ],
+                    },
+                },
+            },
+            context=context,
+        )
+        after_counts = await mutation_counts(session_factory, first_game_id)
+
+        assert result["valid"] is False
+        assert any(
+            error["code"] == "player_not_in_game"
+            for error in result["validation_errors"]
+        )
+        assert result["created_deal"] is False
+        assert result["created_contract"] is False
+        assert before_counts == after_counts
+    finally:
+        await delete_game(session_factory, first_game_id)
+        await delete_game(session_factory, second_game_id)
+
+
 def test_stage_9_3_mcp_tools_are_local_only_and_documented() -> None:
     docs = DOCS_PATH.read_text(encoding="utf-8")
     tool_payloads = list_local_tools()

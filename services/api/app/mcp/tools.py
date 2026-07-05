@@ -296,6 +296,13 @@ async def _validate_deal_draft(context: LocalMCPContext, arguments: JsonMapping)
 
     proposed_by_player_id = _deal_proposed_by_player_id(payload)
     participant_player_ids = [str(player_id) for player_id in payload.participant_player_ids or []]
+    prepared_terms = _prepare_deal_terms(
+        payload.terms,
+        participant_player_ids=participant_player_ids,
+    )
+    referenced_player_ids = [str(proposed_by_player_id), *participant_player_ids]
+    if prepared_terms.structured_deal:
+        referenced_player_ids.extend(prepared_terms.participant_player_ids)
 
     session_factory = context.session_factory()
     async with session_factory() as session:
@@ -304,14 +311,10 @@ async def _validate_deal_draft(context: LocalMCPContext, arguments: JsonMapping)
             await _player_reference_errors(
                 session,
                 game_id=game_id,
-                player_ids=[str(proposed_by_player_id), *participant_player_ids],
+                player_ids=referenced_player_ids,
             )
         )
 
-    prepared_terms = _prepare_deal_terms(
-        payload.terms,
-        participant_player_ids=participant_player_ids,
-    )
     validation_errors.extend(dict(error) for error in prepared_terms.validation_errors)
     valid = not validation_errors
     return _deal_draft_result(
