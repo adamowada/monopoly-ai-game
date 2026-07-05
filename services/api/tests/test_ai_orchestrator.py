@@ -42,6 +42,7 @@ from app.ai.orchestrator import (
 )
 from app.db.metadata import (
     ai_decisions,
+    ai_memory_entries,
     ai_profiles,
     ai_self_dialogue,
     game_events,
@@ -275,6 +276,19 @@ async def fetch_ai_self_dialogue_rows(
         return [dict(row) for row in result.mappings().all()]
 
 
+async def fetch_ai_memory_rows(
+    session_factory: async_sessionmaker,
+    game_id: UUID = GAME_ID,
+) -> list[dict[str, Any]]:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(ai_memory_entries)
+            .where(ai_memory_entries.c.game_id == game_id)
+            .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+
 async def count_events(session_factory: async_sessionmaker, game_id: UUID = GAME_ID) -> int:
     async with session_factory() as session:
         result = await session.execute(
@@ -299,6 +313,27 @@ def valid_action_output(state: GameState) -> dict[str, Any]:
         "confidence": 0.81,
         "rationale": "The turn is at START_TURN and a roll is available.",
     }
+
+
+def valid_action_output_with_memory(state: GameState) -> dict[str, Any]:
+    output = valid_action_output(state)
+    output["memory_updates"] = [
+        {
+            "visibility": "private",
+            "category": "strategic_belief",
+            "importance": 7,
+            "content": "Early rolling is tempo-positive when no negotiation is active.",
+            "metadata": {"stage": "8.2", "source": "schema-valid-output"},
+        },
+        {
+            "visibility": "table",
+            "category": "deal_history",
+            "importance": 4,
+            "content": "No deals have been offered before the first roll.",
+            "metadata": {"stage": "8.2", "visible_to_table": True},
+        },
+    ]
+    return output
 
 
 def decision_request(fixture: OrchestratorFixture) -> CodexExecAIDecisionRequest:
@@ -505,6 +540,79 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
 
 
 @pytest.mark.asyncio
+async def test_stage_8_2_memory_trusted_ai_output_writes_entries_linked_to_decision(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output_with_memory(fixture.state)
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        memory_rows = await fetch_ai_memory_rows(session_factory)
+
+        assert result.status == "validated"
+        assert len(memory_rows) == 2
+        rows_by_category = {row["category"]: row for row in memory_rows}
+        updates_by_category = {
+            update["category"]: update for update in ai_output["memory_updates"]
+        }
+        assert set(rows_by_category) == {"strategic_belief", "deal_history"}
+        for category, update in updates_by_category.items():
+            row = rows_by_category[category]
+            assert row["game_id"] == fixture.game_id
+            assert row["player_id"] == fixture.player_id
+            assert row["ai_profile_id"] == fixture.ai_profile_id
+            assert row["source_decision_id"] == result.ai_decision_id
+            assert row["source_event_id"] is None
+            assert row["source_negotiation_message_id"] is None
+            assert row["visibility"] == update["visibility"]
+            assert row["content"] == update["content"]
+            assert row["importance"] == update["importance"]
+            assert row["metadata_blob"]["memory_update"] == update["metadata"]
+            assert row["metadata_blob"]["trusted_ai_output"] is True
+            assert row["metadata_blob"]["ai_decision_status"] == "validated"
+            assert row["created_at"] is not None
+            assert row["updated_at"] is not None
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_2_memory_untrusted_malformed_output_does_not_write_entries(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output_with_memory(fixture.state)
+    del ai_output["self_dialogue"]
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        memory_rows = await fetch_ai_memory_rows(session_factory)
+
+        assert result.status == "rejected"
+        assert result.validation_result["reason_code"] == "malformed_ai_output"
+        assert memory_rows == []
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_stage_8_1_self_dialogue_valid_ai_decision_writes_linked_row(
     session_factory: async_sessionmaker,
     tmp_path: Path,
@@ -548,6 +656,15 @@ async def test_stage_8_1_self_dialogue_invalid_ai_decision_writes_rejected_row(
 ) -> None:
     fixture = await create_ai_game(session_factory)
     ai_output = valid_action_output(fixture.state)
+    ai_output["memory_updates"] = [
+        {
+            "visibility": "private",
+            "category": "mistake_lesson",
+            "importance": 6,
+            "content": "This malformed output must not persist memory.",
+            "metadata": {"stage": "8.2"},
+        }
+    ]
     del ai_output["self_dialogue"]
     runner = FakeCodexRunner(final_output=ai_output)
     try:
@@ -561,11 +678,13 @@ async def test_stage_8_1_self_dialogue_invalid_ai_decision_writes_rejected_row(
         )
         decision_rows = await fetch_ai_decision_rows(session_factory)
         dialogue_rows = await fetch_ai_self_dialogue_rows(session_factory)
+        memory_rows = await fetch_ai_memory_rows(session_factory)
 
         assert result.status == "rejected"
         assert result.validation_result["reason_code"] == "malformed_ai_output"
         assert len(decision_rows) == 1
         assert len(dialogue_rows) == 1
+        assert memory_rows == []
         dialogue = dialogue_rows[0]
         assert dialogue["game_id"] == fixture.game_id
         assert dialogue["player_id"] == fixture.player_id

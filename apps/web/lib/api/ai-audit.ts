@@ -56,12 +56,19 @@ export const AiSelfDialogueRecordSchema = z.object({
 export const AiMemoryEntrySchema = z.object({
   memory_entry_id: z.string().min(1),
   game_id: z.string().min(1),
-  ai_profile_id: z.string().min(1),
   player_id: z.string().min(1),
-  kind: z.string().min(1),
+  ai_profile_id: z.string().min(1).nullable(),
+  source_decision_id: z.string().min(1),
+  source_event_id: z.string().min(1).nullable(),
+  source_negotiation_message_id: z.string().min(1).nullable(),
+  sequence: z.number().int().positive(),
+  category: z.string().min(1),
+  visibility: z.string().min(1),
   content: z.string().min(1),
-  importance: z.number().min(0).max(1).nullable().optional(),
+  importance: z.number().int().min(0).max(10),
+  metadata: z.record(z.string(), z.unknown()),
   created_at: z.coerce.string().min(1),
+  updated_at: z.coerce.string().min(1),
 });
 
 export const AiRetrievalRecordSchema = z.object({

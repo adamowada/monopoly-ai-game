@@ -31,6 +31,30 @@ DECISION_TYPES: tuple[str, ...] = (
     "self_dialogue",
     "memory_update",
 )
+AI_MEMORY_CATEGORIES: tuple[str, ...] = (
+    "strategic_belief",
+    "player_trust_model",
+    "deal_history",
+    "promise_made",
+    "promise_received",
+    "threat",
+    "grudge",
+    "opportunity",
+    "long_term_plan",
+    "mistake_lesson",
+)
+MemoryCategory = Literal[
+    "strategic_belief",
+    "player_trust_model",
+    "deal_history",
+    "promise_made",
+    "promise_received",
+    "threat",
+    "grudge",
+    "opportunity",
+    "long_term_plan",
+    "mistake_lesson",
+]
 
 
 class _SchemaModel(BaseModel):
@@ -106,7 +130,7 @@ class SelfDialoguePayload(_SchemaModel):
 
 class MemoryUpdatePayload(_SchemaModel):
     visibility: Literal["private", "public", "table", "audit"]
-    category: str = Field(min_length=1)
+    category: MemoryCategory
     importance: int = Field(ge=0, le=10)
     content: str = Field(min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -427,6 +451,7 @@ def _string_or_none(value: Any) -> str | None:
 
 __all__ = [
     "AI_OUTPUT_SCHEMA",
+    "AI_MEMORY_CATEGORIES",
     "AIDecisionOutput",
     "AIDecisionValidationError",
     "AIDecisionValidationIssue",

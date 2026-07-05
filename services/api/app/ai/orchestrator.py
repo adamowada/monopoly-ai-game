@@ -27,6 +27,7 @@ from app.ai.decision_schema import (
     rejected_ai_output,
     validate_ai_decision_output,
 )
+from app.ai.memory import persist_memory_updates_for_trusted_output
 from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue
 
 
@@ -140,6 +141,7 @@ def write_ai_output_schema_file(path: Path | str = DEFAULT_AI_SCHEMA_FILE) -> Pa
     schema_path.write_text(
         json.dumps(AI_OUTPUT_SCHEMA, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     return schema_path
 
@@ -455,6 +457,18 @@ async def _persist_attempt_result(
                     payload=self_dialogue_payload,
                 )
             )
+            if status == "validated" and isinstance(persisted_parsed_output, Mapping):
+                await persist_memory_updates_for_trusted_output(
+                    session,
+                    decision_id=decision_id,
+                    game_id=game_id,
+                    player_id=player_id,
+                    ai_profile_id=ai_profile_id,
+                    parsed_output=persisted_parsed_output,
+                    phase=request.phase,
+                    state_hash=request.state_hash,
+                    ai_decision_status=status,
+                )
 
     return CodexExecAIDecisionResult(
         ai_decision_id=decision_id,

@@ -22,6 +22,7 @@ from app.ai.decision_schema import (
     AIDecisionValidationError,
     validate_ai_decision_output,
 )
+from app.ai.memory import link_memory_entries_to_decision_evidence
 from app.ai.orchestrator import (
     CodexExecAIDecisionRequest,
     CodexExecAIDecisionResult,
@@ -335,6 +336,17 @@ async def _enforce_action_decision(
                             "Legal action validation accepted through execute_action",
                         ),
                     )
+                )
+                await link_memory_entries_to_decision_evidence(
+                    session,
+                    decision_id=decision.ai_decision_id,
+                    ai_decision_status="accepted",
+                    source_event_id=accepted_event_id,
+                    evidence_metadata={
+                        "kind": "action_decision",
+                        "accepted_event_id": accepted_event_id,
+                        "accepted_event_count": len(append_result.events),
+                    },
                 )
                 game_status = await _game_status_in_session(
                     session,
@@ -760,6 +772,17 @@ async def _reject_ai_output(
                     ),
                 )
             )
+            await link_memory_entries_to_decision_evidence(
+                session,
+                decision_id=decision.ai_decision_id,
+                ai_decision_status="rejected",
+                rejected_action_id=rejected.id,
+                evidence_metadata={
+                    "kind": "ai_output_rejection",
+                    "reason_code": reason_code,
+                    "validation_errors": [dict(error) for error in validation_errors],
+                },
+            )
             if request.mandatory:
                 await session.execute(
                     games.update()
@@ -828,6 +851,17 @@ async def _reject_ai_output_in_session(
                 validation_errors=validation_errors,
             ),
         )
+    )
+    await link_memory_entries_to_decision_evidence(
+        session,
+        decision_id=decision.ai_decision_id,
+        ai_decision_status="rejected",
+        rejected_action_id=rejected_action_id,
+        evidence_metadata={
+            "kind": "ai_output_rejection",
+            "reason_code": reason_code,
+            "validation_errors": [dict(error) for error in validation_errors],
+        },
     )
     game_status = await _game_status_in_session(session, _coerce_uuid(request.game_id))
     return AIOutputEnforcementResult(
@@ -917,6 +951,15 @@ async def _mark_decision_validated(
                         "Deal validation and phase/timing validation accepted",
                     ),
                 )
+            )
+            await link_memory_entries_to_decision_evidence(
+                session,
+                decision_id=decision.ai_decision_id,
+                ai_decision_status="validated",
+                evidence_metadata={
+                    "kind": request.decision_type,
+                    "validation_status": "validated",
+                },
             )
             game_status = await _game_status_in_session(session, game_id)
     return AIOutputEnforcementResult(

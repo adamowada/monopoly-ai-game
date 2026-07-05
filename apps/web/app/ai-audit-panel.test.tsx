@@ -176,10 +176,17 @@ function memoryFixture(): AiMemoryEntry[] {
       game_id: gameId,
       ai_profile_id: graceProfileId,
       player_id: graceId,
-      kind: "strategy",
+      source_decision_id: decisionId,
+      source_event_id: "event-grace-1",
+      source_negotiation_message_id: null,
+      sequence: 1,
+      category: "player_trust_model",
+      visibility: "private",
       content: "Grace remembers Ada prefers keeping $200 cash after trades.",
-      importance: 0.74,
+      importance: 7,
+      metadata: { source: "unit-test" },
       created_at: "2026-07-04T00:01:30.000Z",
+      updated_at: "2026-07-04T00:01:31.000Z",
     },
   ];
 }
@@ -316,6 +323,9 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("Memory entries");
     expect(panel).toHaveTextContent("memory_entry_id memory-grace-1");
     expect(panel).toHaveTextContent("Used by decision decision-grace-1");
+    expect(panel).toHaveTextContent("player_trust_model");
+    expect(panel).toHaveTextContent("decision decision-grace-1");
+    expect(panel).toHaveTextContent("event event-grace-1");
     expect(panel).toHaveTextContent("Grace remembers Ada prefers keeping $200 cash after trades.");
 
     expect(panel).toHaveTextContent("Retrieved context records");

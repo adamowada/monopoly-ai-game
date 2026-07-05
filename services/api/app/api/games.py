@@ -21,6 +21,7 @@ from app.ai.profiles import (
     AIProfileGameNotFoundError,
     ensure_ai_profiles_for_game,
 )
+from app.ai.memory import link_memory_entries_to_decision_evidence
 from app.contracts.execution import (
     ContractCreationResult,
     ContractExecutionError,
@@ -39,6 +40,7 @@ from app.contracts.settlement_engine import (
 from app.db.metadata import (
     action_idempotency_keys,
     ai_decisions,
+    ai_memory_entries,
     ai_self_dialogue,
     contracts,
     deals,
@@ -600,6 +602,28 @@ class AISelfDialogueRecordResponse(BaseModel):
 
 class AISelfDialogueResponse(BaseModel):
     self_dialogue: list[AISelfDialogueRecordResponse]
+
+
+class AIMemoryRecordResponse(BaseModel):
+    memory_entry_id: UUID
+    game_id: UUID
+    player_id: UUID
+    ai_profile_id: UUID | None
+    source_decision_id: UUID
+    source_event_id: UUID | None
+    source_negotiation_message_id: UUID | None
+    sequence: int
+    category: str
+    visibility: str
+    content: str
+    importance: int
+    metadata: Mapping[str, Any]
+    created_at: Any
+    updated_at: Any
+
+
+class AIMemoryResponse(BaseModel):
+    memory_entries: list[AIMemoryRecordResponse]
 
 
 @router.post("", response_model=GameMetadataResponse, status_code=status.HTTP_201_CREATED)
@@ -1955,6 +1979,43 @@ async def get_ai_self_dialogue(game_id: UUID, request: Request) -> AISelfDialogu
     )
 
 
+@router.get("/{game_id}/ai/memory", response_model=AIMemoryResponse)
+async def get_ai_memory(game_id: UUID, request: Request) -> AIMemoryResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    sequence = (
+        sa.func.row_number()
+        .over(order_by=(ai_memory_entries.c.created_at, ai_memory_entries.c.id))
+        .label("sequence")
+    )
+
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(
+                ai_memory_entries.c.id.label("memory_id"),
+                ai_memory_entries.c.game_id,
+                ai_memory_entries.c.player_id,
+                ai_memory_entries.c.ai_profile_id,
+                ai_memory_entries.c.source_decision_id,
+                ai_memory_entries.c.source_event_id,
+                ai_memory_entries.c.source_negotiation_message_id,
+                sequence,
+                ai_memory_entries.c.category,
+                ai_memory_entries.c.visibility,
+                ai_memory_entries.c.content,
+                ai_memory_entries.c.importance,
+                ai_memory_entries.c.metadata_blob,
+                ai_memory_entries.c.created_at,
+                ai_memory_entries.c.updated_at,
+            )
+            .where(ai_memory_entries.c.game_id == game_id)
+            .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+
+    return AIMemoryResponse(memory_entries=[_ai_memory_response(row) for row in rows])
+
+
 @router.post(
     "/{game_id}/ai/step",
     response_model=AiStepResponse | LifecycleRejectedResponse,
@@ -2578,7 +2639,12 @@ async def _apply_ai_negotiation_output_with_lifecycle_context(
             "message_id": str(result.message.id),
             "negotiation_id": str(negotiation_id),
         }
-        await _mark_ai_decision_lifecycle_done(session_factory, ai_decision_id, outcome)
+        await _mark_ai_decision_lifecycle_done(
+            session_factory,
+            ai_decision_id,
+            outcome,
+            source_negotiation_message_id=result.message.id,
+        )
         return AiNegotiationApplication(
             status="done",
             outcome=outcome,
@@ -2694,6 +2760,7 @@ async def _mark_ai_decision_lifecycle_done(
     ai_decision_id: UUID,
     outcome: Mapping[str, Any],
     negotiation_id: UUID | None = None,
+    source_negotiation_message_id: UUID | None = None,
 ) -> None:
     async with session_factory() as session:
         async with session.begin():
@@ -2715,6 +2782,16 @@ async def _mark_ai_decision_lifecycle_done(
                 ai_decisions.update()
                 .where(ai_decisions.c.id == ai_decision_id)
                 .values(**update_values)
+            )
+            await link_memory_entries_to_decision_evidence(
+                session,
+                decision_id=ai_decision_id,
+                ai_decision_status="accepted",
+                source_negotiation_message_id=source_negotiation_message_id,
+                evidence_metadata={
+                    "kind": "ai_negotiation_lifecycle",
+                    "lifecycle_result": _json_safe_mapping(outcome),
+                },
             )
 
 
@@ -2780,6 +2857,22 @@ async def _persist_ai_negotiation_application_rejection(
                     rejected_action_id=rejected_row["id"],
                     validation_result=updated_validation,
                 )
+            )
+            await link_memory_entries_to_decision_evidence(
+                session,
+                decision_id=ai_decision["id"],
+                ai_decision_status="rejected",
+                rejected_action_id=rejected_row["id"],
+                evidence_metadata={
+                    "kind": "ai_negotiation_lifecycle_rejection",
+                    "reason_code": reason_code,
+                    "validation_errors": [dict(error) for error in validation_errors],
+                    "lifecycle_result": _ai_lifecycle_result_payload(
+                        application=application,
+                        reason_code=reason_code,
+                        validation_errors=validation_errors,
+                    ),
+                },
             )
 
             if mandatory:
@@ -4895,6 +4988,27 @@ def _ai_self_dialogue_response(row: Mapping[str, Any]) -> AISelfDialogueRecordRe
         content=content,
         payload=safe_payload,
         created_at=row["created_at"],
+    )
+
+
+def _ai_memory_response(row: Mapping[str, Any]) -> AIMemoryRecordResponse:
+    metadata_blob = row["metadata_blob"] if isinstance(row["metadata_blob"], Mapping) else {}
+    return AIMemoryRecordResponse(
+        memory_entry_id=row["memory_id"],
+        game_id=row["game_id"],
+        player_id=row["player_id"],
+        ai_profile_id=row["ai_profile_id"],
+        source_decision_id=row["source_decision_id"],
+        source_event_id=row["source_event_id"],
+        source_negotiation_message_id=row["source_negotiation_message_id"],
+        sequence=int(row["sequence"]),
+        category=str(row["category"]),
+        visibility=str(row["visibility"]),
+        content=str(row["content"]),
+        importance=int(row["importance"]),
+        metadata=_json_safe_mapping(metadata_blob),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 

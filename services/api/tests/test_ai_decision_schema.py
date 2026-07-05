@@ -7,6 +7,7 @@ import pytest
 
 from app.ai.decision_schema import (
     AI_OUTPUT_SCHEMA,
+    AI_MEMORY_CATEGORIES,
     AIDecisionValidationError,
     DECISION_TYPES,
     MALFORMED_AI_OUTPUT_REASON_CODE,
@@ -32,7 +33,7 @@ def _metadata() -> dict[str, Any]:
         "memory_updates": [
             {
                 "visibility": "private",
-                "category": "strategy",
+                "category": "strategic_belief",
                 "importance": 6,
                 "content": "Preserve liquidity until an orange property can be traded for.",
             }
@@ -142,7 +143,7 @@ def test_valid_ai_decision_shapes_parse_before_mutation() -> None:
                 "memory_updates": [
                     {
                         "visibility": "private",
-                        "category": "opponent_model",
+                        "category": "player_trust_model",
                         "importance": 8,
                         "content": "Grace rejected cash-heavy deals twice in this negotiation.",
                     }
@@ -277,7 +278,7 @@ def test_overlong_ai_negotiation_messages_are_rejected_by_schema_before_lifecycl
                 "memory_updates": [
                     {
                         "visibility": "private",
-                        "category": "strategy",
+                        "category": "strategic_belief",
                         "importance": 11,
                         "content": "Importance must stay within the schema range.",
                     }
@@ -323,3 +324,46 @@ def test_rejected_ai_output_audit_payload_keeps_raw_output_and_no_substitute_mov
     assert audit_payload.audit_payload["raw_output"] == audit_payload.raw_output
     assert audit_payload.audit_payload["validation_errors"][0]["code"] == "malformed_ai_output"
     assert audit_payload.audit_payload["no_substitute_move"] is True
+
+
+@pytest.mark.parametrize("category", AI_MEMORY_CATEGORIES)
+def test_stage_8_2_memory_canonical_categories_are_accepted(category: str) -> None:
+    raw_output = {
+        **_base("memory_update"),
+        "self_dialogue": {"status": "empty", "reason": "No private reasoning."},
+        "memory_updates": [
+            {
+                "visibility": "private",
+                "category": category,
+                "importance": 5,
+                "content": f"Persist canonical memory category {category}.",
+                "metadata": {"stage": "8.2"},
+            }
+        ],
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert parsed.root.memory_updates[0].category == category
+
+
+def test_stage_8_2_memory_invalid_category_is_rejected_before_persistence() -> None:
+    raw_output = {
+        **_base("memory_update"),
+        "self_dialogue": {"status": "empty", "reason": "No private reasoning."},
+        "memory_updates": [
+            {
+                "visibility": "private",
+                "category": "opponent_model",
+                "importance": 5,
+                "content": "Legacy non-canonical category must be rejected.",
+                "metadata": {"stage": "8.2"},
+            }
+        ],
+    }
+
+    with pytest.raises(AIDecisionValidationError) as exc_info:
+        validate_ai_decision_output(raw_output)
+
+    assert exc_info.value.reason_code == MALFORMED_AI_OUTPUT_REASON_CODE
+    assert any(issue.field == "memory_updates.0.category" for issue in exc_info.value.errors)

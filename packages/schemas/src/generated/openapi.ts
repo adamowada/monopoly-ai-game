@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/ai/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Memory */
+        get: operations["get_ai_memory_games__game_id__ai_memory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/ai/profiles": {
         parameters: {
             query?: never;
@@ -486,6 +503,58 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIMemoryRecordResponse */
+        AIMemoryRecordResponse: {
+            /** Ai Profile Id */
+            ai_profile_id: string | null;
+            /** Category */
+            category: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: unknown;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Importance */
+            importance: number;
+            /**
+             * Memory Entry Id
+             * Format: uuid
+             */
+            memory_entry_id: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * Source Decision Id
+             * Format: uuid
+             */
+            source_decision_id: string;
+            /** Source Event Id */
+            source_event_id: string | null;
+            /** Source Negotiation Message Id */
+            source_negotiation_message_id: string | null;
+            /** Updated At */
+            updated_at: unknown;
+            /** Visibility */
+            visibility: string;
+        };
+        /** AIMemoryResponse */
+        AIMemoryResponse: {
+            /** Memory Entries */
+            memory_entries: components["schemas"]["AIMemoryRecordResponse"][];
+        };
         /** AIProfileResponse */
         AIProfileResponse: {
             /** Aggressiveness */
@@ -1498,6 +1567,37 @@ export interface operations {
                     "application/json": components["schemas"]["ActionAcceptedResponse"] | {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_memory_games__game_id__ai_memory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIMemoryResponse"];
                 };
             };
             /** @description Validation Error */

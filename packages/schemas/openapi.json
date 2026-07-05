@@ -1,6 +1,132 @@
 {
   "components": {
     "schemas": {
+      "AIMemoryRecordResponse": {
+        "properties": {
+          "ai_profile_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Profile Id"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "importance": {
+            "title": "Importance",
+            "type": "integer"
+          },
+          "memory_entry_id": {
+            "format": "uuid",
+            "title": "Memory Entry Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "source_decision_id": {
+            "format": "uuid",
+            "title": "Source Decision Id",
+            "type": "string"
+          },
+          "source_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Event Id"
+          },
+          "source_negotiation_message_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Negotiation Message Id"
+          },
+          "updated_at": {
+            "title": "Updated At"
+          },
+          "visibility": {
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "memory_entry_id",
+          "game_id",
+          "player_id",
+          "ai_profile_id",
+          "source_decision_id",
+          "source_event_id",
+          "source_negotiation_message_id",
+          "sequence",
+          "category",
+          "visibility",
+          "content",
+          "importance",
+          "metadata",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AIMemoryRecordResponse",
+        "type": "object"
+      },
+      "AIMemoryResponse": {
+        "properties": {
+          "memory_entries": {
+            "items": {
+              "$ref": "#/components/schemas/AIMemoryRecordResponse"
+            },
+            "title": "Memory Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "memory_entries"
+        ],
+        "title": "AIMemoryResponse",
+        "type": "object"
+      },
       "AIProfileResponse": {
         "properties": {
           "aggressiveness": {
@@ -2582,6 +2708,49 @@
           }
         },
         "summary": "Submit Action",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/ai/memory": {
+      "get": {
+        "operationId": "get_ai_memory_games__game_id__ai_memory_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIMemoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Memory",
         "tags": [
           "games"
         ]

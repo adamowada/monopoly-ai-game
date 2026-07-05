@@ -39,6 +39,7 @@ from app.core.config import Settings
 from app.db.metadata import (
     action_idempotency_keys,
     ai_decisions,
+    ai_memory_entries,
     ai_self_dialogue,
     deals,
     game_events,
@@ -261,6 +262,126 @@ async def test_ai_turn_stepping_endpoint_progresses_mixed_human_ai_game(
         assert await table_count(session_factory, game_events, game_id) >= 1
         assert await table_count(session_factory, ai_decisions, game_id) == 1
         assert await table_count(session_factory, rejected_actions, game_id) == 0
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_2_memory_endpoint_returns_persisted_entries_with_event_linkage(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    state = await get_state(client, game_id)
+    ai_output = valid_action_output(game_id, ai_player_id, state)
+    ai_output["memory_updates"] = [
+        {
+            "visibility": "private",
+            "category": "long_term_plan",
+            "importance": 8,
+            "content": "Build liquidity before pursuing orange properties.",
+            "metadata": {"stage": "8.2", "plan": "orange-set"},
+        }
+    ]
+    runner = QueueFakeCodexRunner([ai_output])
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        step_response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={"player_id": ai_player_id, "decision_type": "action_decision", "mandatory": True},
+        )
+        step_body = step_response.json()
+        memory_response = await client.get(f"/games/{game_id}/ai/memory")
+        memory_body = memory_response.json()
+        memory_rows = await fetch_rows(session_factory, ai_memory_entries, game_id)
+
+        assert step_response.status_code == 200, step_response.text
+        assert step_body["status"] == "accepted"
+        assert memory_response.status_code == 200, memory_response.text
+        assert len(memory_rows) == 1
+        assert len(memory_body["memory_entries"]) == 1
+        row = memory_rows[0]
+        entry = memory_body["memory_entries"][0]
+        assert row["source_decision_id"] == UUID(step_body["ai_decision_id"])
+        assert row["source_event_id"] == UUID(step_body["accepted_event_id"])
+        assert row["source_negotiation_message_id"] is None
+        assert entry["memory_entry_id"] == str(row["id"])
+        assert entry["game_id"] == game_id
+        assert entry["player_id"] == ai_player_id
+        assert entry["ai_profile_id"]
+        assert entry["source_decision_id"] == step_body["ai_decision_id"]
+        assert entry["source_event_id"] == step_body["accepted_event_id"]
+        assert entry["source_negotiation_message_id"] is None
+        assert entry["category"] == "long_term_plan"
+        assert entry["visibility"] == "private"
+        assert entry["content"] == "Build liquidity before pursuing orange properties."
+        assert entry["importance"] == 8
+        assert entry["metadata"]["memory_update"] == {"stage": "8.2", "plan": "orange-set"}
+        assert entry["sequence"] == 1
+        assert entry["created_at"]
+        assert entry["updated_at"]
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_2_memory_ai_negotiation_message_links_created_message(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    ai_player_id = created["players"][1]["id"]
+    negotiation = await create_negotiation(client, game_id, human_player_id, ai_player_id)
+    ai_output = negotiation_message_output(
+        game_id,
+        ai_player_id,
+        human_player_id,
+        negotiation["id"],
+    )
+    ai_output["memory_updates"] = [
+        {
+            "visibility": "table",
+            "category": "promise_made",
+            "importance": 6,
+            "content": "Offered cash now and a future rent share in negotiation.",
+            "metadata": {"stage": "8.2", "negotiation": negotiation["id"]},
+        }
+    ]
+    runner = QueueFakeCodexRunner([ai_output])
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "negotiation_message",
+                "negotiation_id": negotiation["id"],
+                "mandatory": False,
+            },
+        )
+        body = response.json()
+        memory_rows = await fetch_rows(session_factory, ai_memory_entries, game_id)
+
+        assert response.status_code == 200, response.text
+        assert body["status"] == "done"
+        assert len(memory_rows) == 1
+        row = memory_rows[0]
+        assert row["source_decision_id"] == UUID(body["ai_decision_id"])
+        assert row["source_event_id"] is None
+        assert row["source_negotiation_message_id"] == UUID(body["message"]["id"])
+        assert row["category"] == "promise_made"
+        assert row["visibility"] == "table"
+        assert row["metadata_blob"]["source_negotiation_message_id"] == body["message"]["id"]
     finally:
         await delete_game(session_factory, game_id)
 

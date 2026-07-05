@@ -210,6 +210,9 @@ function LinkedMemory({
             <li key={entry.memory_entry_id} className="text-sm text-neutral-700">
               <span className="font-medium text-neutral-950">memory_entry_id {entry.memory_entry_id}</span>
               <span className="block">Used by decision {decision.ai_decision_id}</span>
+              <span className="block">
+                {entry.category} - {entry.visibility} - importance {entry.importance}
+              </span>
               <span className="block">{entry.content}</span>
             </li>
           ))}
@@ -571,7 +574,12 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
               <li key={entry.memory_entry_id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <span className="font-medium text-neutral-950">memory_entry_id {entry.memory_entry_id}</span>
                 <span className="block">
-                  {playerName(game, entry.player_id)} · {entry.kind} · ai_profile_id {entry.ai_profile_id}
+                  {playerName(game, entry.player_id)} · {entry.category} · {entry.visibility} · ai_profile_id{" "}
+                  {entry.ai_profile_id ?? "n/a"}
+                </span>
+                <span className="block">
+                  decision {entry.source_decision_id} · event {entry.source_event_id ?? "n/a"} · message{" "}
+                  {entry.source_negotiation_message_id ?? "n/a"}
                 </span>
                 <span className="block">{entry.content}</span>
               </li>

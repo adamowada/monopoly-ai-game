@@ -71,6 +71,9 @@ DEAL_ID = UUID("00000000-0000-0000-0000-000000007406")
 CONTRACT_ID = UUID("00000000-0000-0000-0000-000000007407")
 OBLIGATION_ID = UUID("00000000-0000-0000-0000-000000007408")
 THIRD_PLAYER_ID = UUID("00000000-0000-0000-0000-000000007409")
+OWN_MEMORY_DECISION_ID = UUID("00000000-0000-0000-0000-000000007410")
+OTHER_PRIVATE_MEMORY_DECISION_ID = UUID("00000000-0000-0000-0000-000000007411")
+TABLE_MEMORY_DECISION_ID = UUID("00000000-0000-0000-0000-000000007412")
 
 
 class FakeCodexRunner(CodexExecRunner):
@@ -148,7 +151,7 @@ def _state() -> GameState:
         players=(
             PlayerSetup(id=str(AI_PLAYER_ID), name="Grace", kind="ai"),
             PlayerSetup(id=str(OTHER_PLAYER_ID), name="Ada", kind="human"),
-            PlayerSetup(id=str(THIRD_PLAYER_ID), name="Lin", kind="human"),
+            PlayerSetup(id=str(THIRD_PLAYER_ID), name="Lin", kind="ai"),
         ),
     )
 
@@ -169,7 +172,7 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
                 "id": "own-private",
                 "player_id": str(AI_PLAYER_ID),
                 "visibility": "private",
-                "category": "strategy",
+                "category": "strategic_belief",
                 "content": "Keep cash available for early auctions.",
                 "importance": 8,
             },
@@ -177,7 +180,7 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
                 "id": "other-private",
                 "player_id": str(OTHER_PLAYER_ID),
                 "visibility": "private",
-                "category": "strategy",
+                "category": "player_trust_model",
                 "content": "Ada secretly wants the orange group.",
                 "importance": 9,
             },
@@ -393,9 +396,41 @@ async def test_context_pack_persists_as_orchestrator_prompt_context_without_muta
         memory_text = json.dumps(stored_context["memory"]["snippets"], sort_keys=True)
         assert "Own private valuation memory." in memory_text
         assert "Table-visible memory from another player." in memory_text
-        assert "Other private memory leak." not in memory_text
+        assert "Other AI private memory leak." not in memory_text
         assert await _count_events(session_factory) == 0
-        assert "Other private memory leak." not in runner.calls[0]["stdin"]
+        assert "Other AI private memory leak." not in runner.calls[0]["stdin"]
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_2_memory_later_context_pack_includes_prior_memory_without_other_ai_private_memory(
+    session_factory: async_sessionmaker,
+) -> None:
+    state = _state()
+    await _insert_context_fixture(session_factory, state)
+    try:
+        async with session_factory() as session:
+            pack = await build_ai_context_pack_from_db(
+                session,
+                state=state,
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                decision_type="action_decision",
+            )
+
+        snippets = pack["memory"]["snippets"]
+        memory_text = json.dumps(snippets, sort_keys=True)
+
+        assert "Own private valuation memory." in memory_text
+        assert "Table-visible memory from another player." in memory_text
+        assert "Other AI private memory leak." not in memory_text
+        assert {snippet["category"] for snippet in snippets} >= {
+            "strategic_belief",
+            "deal_history",
+        }
+        own_memory = next(snippet for snippet in snippets if snippet["content"] == "Own private valuation memory.")
+        assert own_memory["source_decision_id"] == str(OWN_MEMORY_DECISION_ID)
     finally:
         await _delete_game(session_factory)
 
@@ -445,12 +480,35 @@ async def _insert_context_fixture(
 
 
 async def _insert_memory_rows(session: AsyncSession) -> None:
+    for decision_id, player_id in (
+        (OWN_MEMORY_DECISION_ID, AI_PLAYER_ID),
+        (OTHER_PRIVATE_MEMORY_DECISION_ID, THIRD_PLAYER_ID),
+        (TABLE_MEMORY_DECISION_ID, OTHER_PLAYER_ID),
+    ):
+        await session.execute(
+            ai_decisions.insert().values(
+                id=decision_id,
+                game_id=GAME_ID,
+                player_id=player_id,
+                ai_profile_id=AI_PROFILE_ID if player_id == AI_PLAYER_ID else None,
+                decision_type="memory_update",
+                status="validated",
+                phase="START_TURN",
+                state_hash="stage-8-2-context-memory-state",
+                prompt_context_hash=f"stage-8-2-memory-{decision_id}",
+                prompt_context={"stage": "8.2", "fixture": "context-pack-memory"},
+                raw_output="{}",
+                parsed_output={"memory_updates": []},
+                validation_result={"status": "valid"},
+            )
+        )
     rows = [
         {
             "game_id": GAME_ID,
             "player_id": AI_PLAYER_ID,
             "ai_profile_id": AI_PROFILE_ID,
-            "category": "strategy",
+            "source_decision_id": OWN_MEMORY_DECISION_ID,
+            "category": "strategic_belief",
             "visibility": "private",
             "content": "Own private valuation memory.",
             "importance": 9,
@@ -458,11 +516,12 @@ async def _insert_memory_rows(session: AsyncSession) -> None:
         },
         {
             "game_id": GAME_ID,
-            "player_id": OTHER_PLAYER_ID,
+            "player_id": THIRD_PLAYER_ID,
             "ai_profile_id": None,
-            "category": "strategy",
+            "source_decision_id": OTHER_PRIVATE_MEMORY_DECISION_ID,
+            "category": "player_trust_model",
             "visibility": "private",
-            "content": "Other private memory leak.",
+            "content": "Other AI private memory leak.",
             "importance": 10,
             "metadata_blob": {"source": "test"},
         },
@@ -470,6 +529,7 @@ async def _insert_memory_rows(session: AsyncSession) -> None:
             "game_id": GAME_ID,
             "player_id": OTHER_PLAYER_ID,
             "ai_profile_id": None,
+            "source_decision_id": TABLE_MEMORY_DECISION_ID,
             "category": "deal_history",
             "visibility": "table",
             "content": "Table-visible memory from another player.",
@@ -622,7 +682,10 @@ async def _fetch_ai_decision_rows(session_factory: async_sessionmaker) -> list[d
     async with session_factory() as session:
         result = await session.execute(
             sa.select(ai_decisions)
-            .where(ai_decisions.c.game_id == GAME_ID)
+            .where(
+                ai_decisions.c.game_id == GAME_ID,
+                ai_decisions.c.decision_type == "action_decision",
+            )
             .order_by(ai_decisions.c.created_at.desc(), ai_decisions.c.id.desc())
         )
         return [dict(row) for row in result.mappings().all()]
