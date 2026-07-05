@@ -759,6 +759,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       ]),
     [auctionLegalActionsQueries, legalActions],
   );
+  const playersById = useMemo(() => new Map(game.players.map((player) => [player.id, player])), [game.players]);
   const actionsByGroup = useMemo(() => {
     const grouped: Record<ActionGroup, LegalAction[]> = {
       turn: [],
@@ -786,12 +787,33 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const aiStepBlocked = !activeAiPlayer || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
-  const auctionControlsDisabled =
-    directActionControlsDisabled ||
-    (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
+  const auctionActionsLoading =
+    Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching);
+  const auctionControlsDisabled = controlsDisabled || auctionActionsLoading;
+
+  function isAiControlledActor(action: LegalAction): boolean {
+    return playersById.get(action.actor_id)?.controller_type === "ai";
+  }
+
+  function isAuctionActionDisabled(action: LegalAction): boolean {
+    if (action.type === "START_AUCTION") {
+      return Boolean(activeAiPlayer) || isAiControlledActor(action);
+    }
+    return isAiControlledActor(action);
+  }
+
+  function canSubmitDirectAction(action: LegalAction): boolean {
+    if (controlsDisabled || isAiControlledActor(action)) {
+      return false;
+    }
+    if (isAuctionAction(action) && action.type !== "START_AUCTION") {
+      return true;
+    }
+    return !activeAiPlayer;
+  }
 
   function handleSubmit(action: LegalAction) {
-    if (activeAiPlayer) {
+    if (!canSubmitDirectAction(action)) {
       return;
     }
     submitAction.mutate(action);
@@ -847,6 +869,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           controlsDisabled={auctionControlsDisabled}
           events={visibleEvents}
           game={game}
+          isActionDisabled={isAuctionActionDisabled}
           legalActions={auctionLegalActions}
           onSubmit={handleSubmit}
           pendingActionType={pendingActionType}

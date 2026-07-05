@@ -24,6 +24,7 @@ type AuctionPanelProps = {
   legalActions: LegalAction[];
   events: AcceptedEvent[];
   controlsDisabled: boolean;
+  isActionDisabled?: (action: LegalAction) => boolean;
   pendingActionType: string | null;
   onSubmit: (action: LegalAction) => void;
 };
@@ -215,6 +216,7 @@ export function AuctionPanel({
   legalActions,
   events,
   controlsDisabled,
+  isActionDisabled = () => false,
   pendingActionType,
   onSubmit,
 }: AuctionPanelProps) {
@@ -284,7 +286,7 @@ export function AuctionPanel({
             <div className="mt-3">
               <AuctionActionButton
                 action={startAuctionAction}
-                disabled={controlsDisabled}
+                disabled={controlsDisabled || isActionDisabled(startAuctionAction)}
                 icon={Gavel}
                 label="Start auction"
                 onSubmit={onSubmit}
@@ -304,7 +306,8 @@ export function AuctionPanel({
               {game.players.map((player) => {
                 const bidAction = legalActionFor(legalActions, "BID_AUCTION", auction.property_id, player.id);
                 const passAction = legalActionFor(legalActions, "PASS_AUCTION", auction.property_id, player.id);
-                const hasControls = Boolean(bidAction ?? passAction);
+                const concreteBid = bidAction ? concreteBidAction(bidAction, auction) : null;
+                const hasControls = Boolean(concreteBid ?? passAction);
                 return (
                   <li
                     key={player.id}
@@ -318,10 +321,10 @@ export function AuctionPanel({
                     </div>
                     {hasControls ? (
                       <div className="flex flex-wrap gap-2">
-                        {bidAction ? (
+                        {concreteBid ? (
                           <AuctionActionButton
-                            action={concreteBidAction(bidAction, auction)}
-                            disabled={controlsDisabled}
+                            action={concreteBid}
+                            disabled={controlsDisabled || isActionDisabled(concreteBid)}
                             icon={HandCoins}
                             label="Bid"
                             onSubmit={onSubmit}
@@ -331,7 +334,7 @@ export function AuctionPanel({
                         {passAction ? (
                           <AuctionActionButton
                             action={passAction}
-                            disabled={controlsDisabled}
+                            disabled={controlsDisabled || isActionDisabled(passAction)}
                             icon={LogOut}
                             label="Pass"
                             onSubmit={onSubmit}

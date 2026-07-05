@@ -242,6 +242,43 @@ function auctionPurchaseStateFixture() {
   };
 }
 
+function mixedAuctionAiTurnStateFixture(eventSequence = 8) {
+  return {
+    game_id: gameId,
+    state: {
+      game_id: gameId,
+      seed: "turn-controls-mixed-auction",
+      players: [
+        { id: adaId, cash: 1500, position: 1 },
+        { id: graceId, cash: 1500, position: 0 },
+      ],
+      property_ownership: [
+        {
+          property_id: "property_mediterranean_avenue",
+          owner_id: null,
+          mortgaged: false,
+          houses: 0,
+          hotels: 0,
+          hotel: false,
+        },
+      ],
+      active_auction: {
+        property_id: "property_mediterranean_avenue",
+        high_bidder_id: null,
+        high_bid_amount: null,
+        passed_player_ids: [],
+      },
+      turn: {
+        phase: "AUCTION",
+        current_player_index: 1,
+        current_player_id: graceId,
+      },
+    },
+    state_hash: `auction-ai-state-${eventSequence}`,
+    event_sequence: eventSequence,
+  };
+}
+
 function acceptedAuctionRollResponse() {
   return {
     ...acceptedRollResponse(),
@@ -892,6 +929,133 @@ describe("GamePlaySurface turn controls", () => {
         ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
       ),
     ).toBe(false);
+  });
+
+  it("preserves human auction controls during mixed AI turns", async () => {
+    const auctionState = mixedAuctionAiTurnStateFixture();
+    const humanBid = legalAction(
+      "BID_AUCTION",
+      { property_id: "property_mediterranean_avenue", amount: 26 },
+      auctionState.state_hash,
+      auctionState.event_sequence,
+    );
+    const humanPass = legalAction(
+      "PASS_AUCTION",
+      { property_id: "property_mediterranean_avenue" },
+      auctionState.state_hash,
+      auctionState.event_sequence,
+    );
+    const aiBid = aiLegalAction(
+      "BID_AUCTION",
+      { property_id: "property_mediterranean_avenue", amount: 27 },
+      auctionState.state_hash,
+      auctionState.event_sequence,
+    );
+    const aiPass = aiLegalAction(
+      "PASS_AUCTION",
+      { property_id: "property_mediterranean_avenue" },
+      auctionState.state_hash,
+      auctionState.event_sequence,
+    );
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture(1));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(auctionState);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [humanBid, humanPass],
+          state_hash: auctionState.state_hash,
+          event_sequence: auctionState.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [aiBid, aiPass],
+          state_hash: auctionState.state_hash,
+          event_sequence: auctionState.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        return Response.json({
+          status: "accepted",
+          game_id: gameId,
+          accepted_events: [
+            {
+              id: "event-auction-bid",
+              game_id: gameId,
+              sequence: auctionState.event_sequence + 1,
+              actor_player_id: adaId,
+              event_type: "AUCTION_BID_PLACED",
+              payload: { property_id: "property_mediterranean_avenue", bidder_id: adaId, amount: 26 },
+              state_hash: "auction-ai-state-after-human-bid",
+              created_at: "2026-07-04T00:02:00.000Z",
+            },
+          ],
+          state: {
+            ...auctionState.state,
+            active_auction: {
+              property_id: "property_mediterranean_avenue",
+              high_bidder_id: adaId,
+              high_bid_amount: 26,
+              passed_player_ids: [],
+            },
+          },
+          state_hash: "auction-ai-state-after-human-bid",
+          event_sequence: auctionState.event_sequence + 1,
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    const auction = await screen.findByRole("region", { name: "Auction" });
+    const adaControls = await within(auction).findByRole("group", { name: "Ada auction controls" });
+    const graceControls = await within(auction).findByRole("group", { name: "Grace auction controls" });
+    const adaBidButton = within(adaControls).getByRole("button", { name: "Bid" });
+    const graceBidButton = within(graceControls).getByRole("button", { name: "Bid" });
+    const gracePassButton = within(graceControls).getByRole("button", { name: "Pass" });
+
+    await waitFor(() => expect(adaBidButton).toBeEnabled());
+    expect(graceBidButton).toBeDisabled();
+    expect(gracePassButton).toBeDisabled();
+
+    fireEvent.click(adaBidButton);
+
+    await waitFor(() => {
+      const actionCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+      );
+      expect(actionCalls).toHaveLength(1);
+      expect(JSON.parse(String(actionCalls[0]?.[1]?.body))).toMatchObject({
+        actor_id: adaId,
+        type: "BID_AUCTION",
+        payload: { property_id: "property_mediterranean_avenue", amount: 26 },
+      });
+    });
+
+    fireEvent.click(graceBidButton);
+    fireEvent.click(gracePassButton);
+
+    const actionBodies = fetchMock.mock.calls
+      .filter(([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)));
+    expect(actionBodies.some((body) => body.actor_id === graceId)).toBe(false);
   });
 
   it("runs the Automatic AI step control while an active AI player is idle", async () => {
