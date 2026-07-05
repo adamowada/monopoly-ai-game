@@ -21,6 +21,8 @@ from app.db.metadata import (
     ai_profiles,
     games,
     metadata,
+    negotiation_messages,
+    negotiations,
     players,
     rag_index_entries,
     retrieval_records,
@@ -43,6 +45,9 @@ OTHER_MEMORY_DECISION_ID = UUID("00000000-0000-0000-0000-000000009206")
 OWN_PRIVATE_MEMORY_ID = UUID("00000000-0000-0000-0000-000000009207")
 OTHER_PRIVATE_MEMORY_ID = UUID("00000000-0000-0000-0000-000000009208")
 TABLE_MEMORY_ID = UUID("00000000-0000-0000-0000-000000009209")
+NEGOTIATION_ID = UUID("00000000-0000-0000-0000-00000000920a")
+NEGOTIATION_MESSAGE_ID = UUID("00000000-0000-0000-0000-00000000920b")
+SECOND_GAME_ID = UUID("00000000-0000-0000-0000-00000000920c")
 
 
 @pytest_asyncio.fixture
@@ -241,6 +246,113 @@ async def test_stage_9_2_retrieval_filters_private_memory_and_persists_audit_rec
         await _delete_game(session_factory)
 
 
+@pytest.mark.asyncio
+async def test_stage_9_2_retrieval_requires_player_for_negotiation_history_visibility(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    state = _state()
+    await _insert_retrieval_fixture(session_factory, state)
+    await _insert_negotiation_visibility_fixture(session_factory)
+    try:
+        async with session_factory() as session:
+            await refresh_rag_index_entries(session, game_id=GAME_ID)
+            await session.commit()
+
+            player_scoped_results = await search_retrieval(
+                session,
+                query_text="stage92 visibility marker rent share",
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                source_types=("negotiation_history",),
+                phase=state.turn.phase.value,
+                limit=5,
+                audit=True,
+            )
+            playerless_results = await search_retrieval(
+                session,
+                query_text="stage92 visibility marker rent share",
+                game_id=GAME_ID,
+                player_id=None,
+                source_types=("negotiation_history",),
+                phase=state.turn.phase.value,
+                limit=5,
+                audit=True,
+            )
+            await session.commit()
+
+        assert str(NEGOTIATION_MESSAGE_ID) in {
+            result.source_id for result in player_scoped_results
+        }
+        assert playerless_results == []
+
+        records = await _fetch_retrieval_records(session_factory)
+        negotiation_records = [
+            record for record in records if record["source_type"] == "negotiation_history"
+        ]
+        assert len(negotiation_records) == len(player_scoped_results)
+        assert all(record["player_id"] == AI_PLAYER_ID for record in negotiation_records)
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_9_2_refresh_does_not_duplicate_global_static_documents(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    state = _state()
+    await _insert_retrieval_fixture(session_factory, state)
+    try:
+        async with session_factory() as session:
+            await session.execute(rag_index_entries.delete())
+            await refresh_rag_index_entries(session, game_id=GAME_ID)
+            await refresh_rag_index_entries(session, game_id=SECOND_GAME_ID)
+            await refresh_rag_index_entries(session, game_id=GAME_ID)
+            await session.commit()
+
+            duplicate_rows_result = await session.execute(
+                sa.select(
+                    rag_index_entries.c.document_id,
+                    sa.func.count(rag_index_entries.c.id).label("row_count"),
+                )
+                .where(
+                    rag_index_entries.c.game_id.is_(None),
+                    rag_index_entries.c.source_type.in_(
+                        ("rules", "house_rules", "contract_examples")
+                    ),
+                )
+                .group_by(rag_index_entries.c.document_id)
+                .having(sa.func.count(rag_index_entries.c.id) > 1)
+            )
+            boardwalk_result = await session.execute(
+                sa.select(rag_index_entries.c.index_key, rag_index_entries.c.game_id)
+                .where(
+                    rag_index_entries.c.source_type == "rules",
+                    rag_index_entries.c.source_id == "property_boardwalk",
+                )
+                .order_by(rag_index_entries.c.index_key)
+            )
+            search_results = await search_retrieval(
+                session,
+                query_text="Boardwalk hotel rent",
+                game_id=SECOND_GAME_ID,
+                player_id=AI_PLAYER_ID,
+                source_types=("rules",),
+                phase=state.turn.phase.value,
+                limit=5,
+                audit=False,
+            )
+
+        assert duplicate_rows_result.all() == []
+        boardwalk_rows = boardwalk_result.all()
+        assert len(boardwalk_rows) == 1
+        assert boardwalk_rows[0].index_key.startswith("static:")
+        assert boardwalk_rows[0].game_id is None
+        assert search_results
+        assert search_results[0].source_id == "property_boardwalk"
+    finally:
+        await _delete_game(session_factory)
+
+
 async def _insert_retrieval_fixture(
     session_factory: async_sessionmaker[AsyncSession],
     state: GameState,
@@ -354,6 +466,40 @@ async def _insert_memory_rows(session: AsyncSession) -> None:
     )
     for row in rows:
         await session.execute(ai_memory_entries.insert().values(**row))
+
+
+async def _insert_negotiation_visibility_fixture(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime(2026, 7, 5, 14, 5, tzinfo=UTC)
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                negotiations.insert().values(
+                    id=NEGOTIATION_ID,
+                    game_id=GAME_ID,
+                    opened_by_player_id=AI_PLAYER_ID,
+                    status="active",
+                    phase="START_TURN",
+                    round_number=1,
+                    context={"topic": "stage 9.2 visibility marker"},
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await session.execute(
+                negotiation_messages.insert().values(
+                    id=NEGOTIATION_MESSAGE_ID,
+                    game_id=GAME_ID,
+                    negotiation_id=NEGOTIATION_ID,
+                    sender_player_id=AI_PLAYER_ID,
+                    recipient_player_id=OTHER_PLAYER_ID,
+                    message_type="freeform_message",
+                    body="stage92 visibility marker rent share private negotiation",
+                    payload={"fixture": "stage-9-2-negotiation-visibility"},
+                    created_at=now,
+                )
+            )
 
 
 async def _fetch_index_row(

@@ -43,6 +43,7 @@ FTS_WEIGHT = 0.65
 VECTOR_WEIGHT = 0.35
 DEFAULT_LIMIT = 6
 MAX_LIMIT = 20
+STATIC_SOURCE_TYPES = frozenset(("rules", "house_rules", "contract_examples"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +110,7 @@ async def refresh_rag_index_entries(
 
     documents = build_static_local_corpus()
     game_uuid = None if game_id is None else _coerce_uuid(game_id)
+    await _delete_legacy_game_scoped_static_entries(session)
 
     if game_uuid is not None:
         await session.execute(
@@ -283,9 +285,11 @@ async def _upsert_index_document(
 ) -> None:
     metadata_blob = _index_metadata(document)
     scope_game_id = _uuid_or_none(metadata_blob.get("game_id"))
+    if scope_game_id is None and document.source_type not in STATIC_SOURCE_TYPES:
+        scope_game_id = game_id
     scope_player_id = _uuid_or_none(metadata_blob.get("player_id"))
     phase = _string_or_none(metadata_blob.get("phase"))
-    index_key = _index_key(document, game_id=scope_game_id or game_id)
+    index_key = _index_key(document, game_id=scope_game_id)
     searchable_text = f"{document.title} {document.text}"
     values = {
         "index_key": index_key,
@@ -344,6 +348,7 @@ def _visibility_filter(
     if player_uuid is None:
         return sa.and_(
             rag_index_entries.c.source_type != "ai_memory",
+            rag_index_entries.c.source_type != "negotiation_history",
             rag_index_entries.c.source_type != "past_decision",
         )
 
@@ -454,6 +459,16 @@ def _negotiation_history_visible(
         ),
     )
     return sa.or_(negotiation_row_visible, message_row_visible, deal_row_visible)
+
+
+async def _delete_legacy_game_scoped_static_entries(session: AsyncSession) -> None:
+    await session.execute(
+        rag_index_entries.delete().where(
+            rag_index_entries.c.game_id.is_(None),
+            rag_index_entries.c.source_type.in_(tuple(sorted(STATIC_SOURCE_TYPES))),
+            rag_index_entries.c.index_key.like("game:%"),
+        )
+    )
 
 
 def _game_id_filter(column: sa.ColumnElement[Any], game_uuid: UUID | None) -> sa.ColumnElement[bool]:
