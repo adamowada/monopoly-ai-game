@@ -1,0 +1,95 @@
+{
+  "version": "contract-examples-v1",
+  "examples": [
+    {
+      "id": "rent_share_boardwalk_example",
+      "title": "Boardwalk Rent-Share Contract Example",
+      "summary": "A player receives immediate cash in exchange for sharing future Boardwalk rent.",
+      "text": "Rent-share example: player-alpha pays player-beta 200 now, and player-beta owes player-alpha 25 percent of actual rent paid on Boardwalk for the next 4 turns. If Boardwalk rent is waived or unpaid, the rent-share follows the deterministic contract interaction rules.",
+      "parties": [
+        "player-alpha",
+        "player-beta"
+      ],
+      "instruments": [
+        {
+          "kind": "immediate_cash_transfer",
+          "from_player_id": "player-alpha",
+          "to_player_id": "player-beta",
+          "amount": 200
+        },
+        {
+          "kind": "rent_share",
+          "from_player_id": "player-beta",
+          "to_player_id": "player-alpha",
+          "property_id": "property_boardwalk",
+          "share_percent": 25,
+          "duration_turns": 4
+        }
+      ],
+      "validation_notes": [
+        "The property_id must reference a valid property.",
+        "share_percent must be greater than 0 and no more than 100.",
+        "duration_turns must be a positive integer."
+      ]
+    },
+    {
+      "id": "collateralized_loan_railroad_example",
+      "title": "Collateralized Railroad Loan Example",
+      "summary": "A short-term cash loan is secured by railroad collateral.",
+      "text": "Collateralized loan example: player-alpha lends player-beta 300 until turn 8. Reading Railroad and Pennsylvania Railroad are pledged as collateral, and a default penalty can seize collateral through backend contract enforcement.",
+      "parties": [
+        "player-alpha",
+        "player-beta"
+      ],
+      "instruments": [
+        {
+          "kind": "collateralized_loan",
+          "lender_player_id": "player-alpha",
+          "borrower_player_id": "player-beta",
+          "principal_amount": 300,
+          "due_turn": 8,
+          "collateral_property_ids": [
+            "property_reading_railroad",
+            "property_pennsylvania_railroad"
+          ]
+        },
+        {
+          "kind": "default_penalty",
+          "liable_player_id": "player-beta",
+          "beneficiary_player_id": "player-alpha",
+          "amount": 75,
+          "instrument_id": "railroad-loan"
+        }
+      ],
+      "validation_notes": [
+        "Collateral property ids must be valid properties.",
+        "The default penalty must reference an existing instrument id when one is supplied."
+      ]
+    },
+    {
+      "id": "purchase_option_orange_group_example",
+      "title": "Orange Group Purchase Option Example",
+      "summary": "A player buys the right to purchase an orange property later.",
+      "text": "Purchase option example: player-alpha pays for an option to buy Tennessee Avenue from player-beta for 260 before turn 12. The backend validates the strike price, expiration turn, property state, and transfer legality when the option is exercised.",
+      "parties": [
+        "player-alpha",
+        "player-beta"
+      ],
+      "instruments": [
+        {
+          "kind": "property_purchase_option",
+          "grantor_player_id": "player-beta",
+          "holder_player_id": "player-alpha",
+          "property_id": "property_tennessee_avenue",
+          "strike_price": 260,
+          "expiration_turn": 12
+        }
+      ],
+      "validation_notes": [
+        "The option property must be valid.",
+        "The holder and grantor must be distinct players.",
+        "Exercise still routes through backend validation."
+      ]
+    }
+  ]
+}

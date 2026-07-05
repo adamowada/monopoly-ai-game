@@ -1,0 +1,46 @@
+{
+  "version": "house-rules-and-deviations-v1",
+  "entries": [
+    {
+      "id": "no_fallback_ai_decisions",
+      "title": "No Fallback AI Decisions",
+      "category": "ai_runtime_deviation",
+      "text": "No fallback, default, random, coerced, or substitute move is allowed for an AI player. Invalid, malformed, process-error, or timeout output is rejected and audited. Mandatory AI action decisions can block the game rather than auto-choosing a move.",
+      "metadata": {
+        "applies_to": [
+          "codex_exec",
+          "ai_validation",
+          "game_progression"
+        ],
+        "authority": "backend_validation"
+      }
+    },
+    {
+      "id": "custom_financial_instruments",
+      "title": "Custom Financial Instruments Extend Classic Trading",
+      "category": "contract_deviation",
+      "text": "Players may negotiate structured instruments that do not exist in classic Monopoly, including installment loans, collateralized debt, purchase options, insurance payouts, guarantees, conditional obligations, default penalties, and rent-share obligations. These agreements are only executable after backend validation creates a contract.",
+      "metadata": {
+        "applies_to": [
+          "negotiations",
+          "contracts",
+          "obligations"
+        ],
+        "authority": "contract_validation"
+      }
+    },
+    {
+      "id": "deterministic_negotiation_cutoffs",
+      "title": "Deterministic Negotiation Cutoffs",
+      "category": "timing_deviation",
+      "text": "Negotiations can expire through deterministic cutoff rules for rounds, proposals, pending offers, wall-clock waits, or AI response opportunities. Expiration closes the negotiation without creating a fallback action or changing ownership by implication.",
+      "metadata": {
+        "applies_to": [
+          "negotiations",
+          "timing"
+        ],
+        "authority": "rules_engine"
+      }
+    }
+  ]
+}
