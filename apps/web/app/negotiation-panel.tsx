@@ -57,6 +57,10 @@ type TermDraft = {
   summary: string;
 };
 
+type NegotiationWithCurrentDealId = Negotiation & {
+  current_deal_id?: string | null;
+};
+
 const termKinds: DealTermKind[] = [
   "cash_transfer",
   "property_transfer",
@@ -563,6 +567,12 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
     rejectDealMutation.isPending ||
     expireNegotiationMutation.isPending ||
     requestAiNegotiationStep.isPending;
+  const selectedNegotiationCurrentDealId =
+    (selectedNegotiation as NegotiationWithCurrentDealId | null)?.current_deal_id ?? null;
+  const hasSelectedOrCurrentDeal = Boolean(selectedDeal || selectedNegotiationCurrentDealId);
+  const canAskAiMessage = isNegotiationOpen && Boolean(selectedAiPlayerId);
+  const canAskAiOffer = canAskAiMessage && !hasSelectedOrCurrentDeal;
+  const canAskAiDealResponse = canAskAiMessage && Boolean(selectedDeal);
 
   return (
     <section aria-label="Negotiation inbox" className="rounded-md border border-neutral-200 bg-white p-4 shadow-sm">
@@ -763,7 +773,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                       <div className="flex flex-wrap gap-2">
                         <Button
                           onClick={() => requestAiNegotiationStep.mutate("negotiation_message")}
-                          disabled={busy || !isNegotiationOpen || !selectedAiPlayerId}
+                          disabled={busy || !canAskAiMessage}
                         >
                           {requestAiNegotiationStep.isPending ? (
                             <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -773,8 +783,12 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                           Ask AI message
                         </Button>
                         <Button
-                          onClick={() => requestAiNegotiationStep.mutate("deal_proposal")}
-                          disabled={busy || !isNegotiationOpen || !selectedAiPlayerId}
+                          onClick={() => {
+                            if (canAskAiOffer) {
+                              requestAiNegotiationStep.mutate("deal_proposal");
+                            }
+                          }}
+                          disabled={busy || !canAskAiOffer}
                           className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
                         >
                           <BadgeDollarSign aria-hidden="true" className="size-4" />
@@ -782,7 +796,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         </Button>
                         <Button
                           onClick={() => requestAiNegotiationStep.mutate("counteroffer")}
-                          disabled={busy || !isNegotiationOpen || !selectedAiPlayerId || !selectedDeal}
+                          disabled={busy || !canAskAiDealResponse}
                           className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
                         >
                           <RefreshCw aria-hidden="true" className="size-4" />
@@ -790,7 +804,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         </Button>
                         <Button
                           onClick={() => requestAiNegotiationStep.mutate("accept_reject")}
-                          disabled={busy || !isNegotiationOpen || !selectedAiPlayerId || !selectedDeal}
+                          disabled={busy || !canAskAiDealResponse}
                           className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
                         >
                           <CheckCircle2 aria-hidden="true" className="size-4" />

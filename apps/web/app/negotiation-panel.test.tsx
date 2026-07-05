@@ -482,17 +482,23 @@ describe("NegotiationPanel", () => {
 
       const proposalControls = await screen.findByRole("region", { name: "AI negotiation controls" });
       expect(within(proposalControls).getByRole("button", { name: "Ask AI message" })).toBeEnabled();
-      expect(within(proposalControls).getByRole("button", { name: "Ask AI offer" })).toBeEnabled();
+      expect(within(proposalControls).getByRole("button", { name: "Ask AI offer" })).toBeDisabled();
       expect(within(proposalControls).getByRole("button", { name: "Ask AI counteroffer" })).toBeEnabled();
       expect(within(proposalControls).getByRole("button", { name: "Ask AI accept/reject" })).toBeEnabled();
 
+      fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI message" }));
+      fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI offer" }));
       fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI counteroffer" }));
       fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI accept/reject" }));
-      await waitFor(() => expect(proposalMock.state.aiSteps.length).toBe(2));
+      await waitFor(() => expect(proposalMock.state.aiSteps.length).toBe(3));
       expect(proposalMock.state.aiSteps).toEqual([
+        expect.objectContaining({ decision_type: "negotiation_message", negotiation_id: proposalNegotiation.id }),
         expect.objectContaining({ decision_type: "counteroffer", negotiation_id: proposalNegotiation.id }),
         expect.objectContaining({ decision_type: "accept_reject", negotiation_id: proposalNegotiation.id }),
       ]);
+      expect(proposalMock.state.aiSteps).not.toContainEqual(
+        expect.objectContaining({ decision_type: "deal_proposal", negotiation_id: proposalNegotiation.id }),
+      );
 
       proposalRender.unmount();
       vi.unstubAllGlobals();
