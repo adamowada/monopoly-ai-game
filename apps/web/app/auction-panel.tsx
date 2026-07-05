@@ -1,6 +1,6 @@
 "use client";
 
-import { Gavel, HandCoins, Loader2, LogOut, Trophy } from "lucide-react";
+import { Bot, Gavel, HandCoins, Loader2, LogOut, Trophy } from "lucide-react";
 import { useMemo } from "react";
 import { PROPERTIES, PROPERTIES_BY_ID, type StaticDataProperty } from "@monopoly-ai-game/schemas";
 
@@ -25,6 +25,10 @@ type AuctionPanelProps = {
   events: AcceptedEvent[];
   controlsDisabled: boolean;
   isActionDisabled?: (action: LegalAction) => boolean;
+  activeAiPlayerId?: string | null;
+  aiStepDisabled?: boolean;
+  aiStepPending?: boolean;
+  onStepAiBidder?: (playerId: string) => void;
   pendingActionType: string | null;
   onSubmit: (action: LegalAction) => void;
 };
@@ -210,6 +214,31 @@ function AuctionActionButton({
   );
 }
 
+function AuctionAiStepButton({
+  disabled,
+  isPending,
+  onStep,
+}: Readonly<{
+  disabled: boolean;
+  isPending: boolean;
+  onStep: () => void;
+}>) {
+  return (
+    <Button
+      onClick={onStep}
+      disabled={disabled}
+      className="min-h-9 justify-start bg-purple-700 px-2.5 py-1.5 text-xs hover:bg-purple-800 focus-visible:outline-purple-700"
+    >
+      {isPending ? (
+        <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+      ) : (
+        <Bot aria-hidden="true" className="size-3.5" />
+      )}
+      Step AI
+    </Button>
+  );
+}
+
 export function AuctionPanel({
   game,
   snapshot,
@@ -217,6 +246,10 @@ export function AuctionPanel({
   events,
   controlsDisabled,
   isActionDisabled = () => false,
+  activeAiPlayerId = null,
+  aiStepDisabled = false,
+  aiStepPending = false,
+  onStepAiBidder,
   pendingActionType,
   onSubmit,
 }: AuctionPanelProps) {
@@ -308,6 +341,11 @@ export function AuctionPanel({
                 const passAction = legalActionFor(legalActions, "PASS_AUCTION", auction.property_id, player.id);
                 const concreteBid = bidAction ? concreteBidAction(bidAction, auction) : null;
                 const hasControls = Boolean(concreteBid ?? passAction);
+                const canStepAiBidder =
+                  player.controller_type === "ai" &&
+                  player.id !== activeAiPlayerId &&
+                  hasControls &&
+                  Boolean(onStepAiBidder);
                 return (
                   <li
                     key={player.id}
@@ -339,6 +377,13 @@ export function AuctionPanel({
                             label="Pass"
                             onSubmit={onSubmit}
                             pendingActionType={pendingActionType}
+                          />
+                        ) : null}
+                        {canStepAiBidder ? (
+                          <AuctionAiStepButton
+                            disabled={controlsDisabled || aiStepDisabled}
+                            isPending={aiStepPending}
+                            onStep={() => onStepAiBidder?.(player.id)}
                           />
                         ) : null}
                       </div>

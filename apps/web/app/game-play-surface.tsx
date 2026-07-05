@@ -50,8 +50,10 @@ type GamePlaySurfaceProps = {
   apiBaseUrl?: string;
 };
 
+type AiStepMode = "manual" | "auto" | "auction_ai_bidder";
+
 type AiStepRequest = {
-  mode: "manual" | "auto";
+  mode: AiStepMode;
   playerId: string;
 };
 
@@ -784,7 +786,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const controlsDisabled = legalActionsLoading || submitAction.isPending || aiStep.isPending;
   const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
   const directActionControlsDisabled = controlsDisabled || Boolean(activeAiPlayer);
-  const aiStepBlocked = !activeAiPlayer || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
+  const aiStepStateBlocked = !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
+  const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
   const auctionActionsLoading =
@@ -819,11 +822,11 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     submitAction.mutate(action);
   }
 
-  function handleAiStep(mode: "manual" | "auto") {
-    if (aiStepBlocked) {
+  function handleAiStep(mode: AiStepMode, playerId = activeAiPlayer?.id) {
+    if (!playerId || aiStepStateBlocked) {
       return;
     }
-    aiStep.mutate({ mode, playerId: activeAiPlayer.id });
+    aiStep.mutate({ mode, playerId });
   }
 
   useEffect(() => {
@@ -869,8 +872,12 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           controlsDisabled={auctionControlsDisabled}
           events={visibleEvents}
           game={game}
+          activeAiPlayerId={activeAiPlayer?.id ?? null}
+          aiStepDisabled={aiStepStateBlocked}
+          aiStepPending={aiStep.isPending}
           isActionDisabled={isAuctionActionDisabled}
           legalActions={auctionLegalActions}
+          onStepAiBidder={(playerId) => handleAiStep("auction_ai_bidder", playerId)}
           onSubmit={handleSubmit}
           pendingActionType={pendingActionType}
           snapshot={stateQuery.data}
