@@ -50,6 +50,11 @@ type GamePlaySurfaceProps = {
   apiBaseUrl?: string;
 };
 
+type AiStepRequest = {
+  mode: "manual" | "auto";
+  playerId: string;
+};
+
 type NegotiationCutoffs = {
   max_rounds?: number;
   max_proposals_per_player?: number;
@@ -118,9 +123,16 @@ function activePhase(game: GameMetadata, snapshot: GameStateResponse | undefined
   return typeof phase === "string" && phase ? phase : (game.current_phase ?? "Unassigned");
 }
 
-function activePlayer(game: GameMetadata, snapshot: GameStateResponse | undefined): GameMetadata["players"][number] | null {
+function activePlayerFromState(
+  game: GameMetadata,
+  snapshot: GameStateResponse | undefined,
+): GameMetadata["players"][number] | null {
   const turn = turnRecord(snapshot);
-  const playerId = typeof turn?.current_player_id === "string" ? turn.current_player_id : null;
+  if (!turn) {
+    return null;
+  }
+
+  const playerId = typeof turn.current_player_id === "string" ? turn.current_player_id : null;
   if (playerId) {
     const byId = game.players.find((player) => player.id === playerId);
     if (byId) {
@@ -128,6 +140,21 @@ function activePlayer(game: GameMetadata, snapshot: GameStateResponse | undefine
     }
   }
 
+  const playerIndex = typeof turn.current_player_index === "number" ? turn.current_player_index : null;
+  if (playerIndex !== null) {
+    return game.players.find((player) => player.seat_order === playerIndex) ?? null;
+  }
+
+  return null;
+}
+
+function activePlayer(game: GameMetadata, snapshot: GameStateResponse | undefined): GameMetadata["players"][number] | null {
+  const statePlayer = activePlayerFromState(game, snapshot);
+  if (statePlayer) {
+    return statePlayer;
+  }
+
+  const turn = turnRecord(snapshot);
   const playerIndex = typeof turn?.current_player_index === "number" ? turn.current_player_index : 0;
   return game.players.find((player) => player.seat_order === playerIndex) ?? game.players[0] ?? null;
 }
@@ -559,7 +586,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   });
 
   const game = gameQuery.data;
-  const currentPlayer = activePlayer(game, stateQuery.data);
+  const stateActivePlayer = activePlayerFromState(game, stateQuery.data);
+  const currentPlayer = stateActivePlayer ?? activePlayer(game, stateQuery.data);
   const phase = activePhase(game, stateQuery.data);
   const stateHash = stateQuery.data?.state_hash ?? "pending-state";
   const eventSequence = stateQuery.data?.event_sequence ?? "pending-sequence";
@@ -689,12 +717,12 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     ]);
 
   const aiStep = useMutation({
-    mutationFn: (mode: "manual" | "auto") =>
+    mutationFn: ({ mode, playerId }: AiStepRequest) =>
       submitAiStep({
         gameId,
         baseUrl,
         input: {
-          player_id: currentPlayer?.id ?? "",
+          player_id: playerId,
           decision_type: "action_decision",
           mandatory: true,
           request_context: { mode },
@@ -743,7 +771,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading || legalActionsQuery.isFetching;
   const controlsDisabled = legalActionsLoading || submitAction.isPending || aiStep.isPending;
-  const activeAiPlayer = currentPlayer?.controller_type === "ai" ? currentPlayer : null;
+  const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
+  const aiStepBlocked = !activeAiPlayer || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
+  const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
   const auctionControlsDisabled =
     controlsDisabled || (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
@@ -753,10 +783,10 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   }
 
   function handleAiStep(mode: "manual" | "auto") {
-    if (!activeAiPlayer || aiStep.isPending) {
+    if (aiStepBlocked) {
       return;
     }
-    aiStep.mutate(mode);
+    aiStep.mutate({ mode, playerId: activeAiPlayer.id });
   }
 
   useEffect(() => {
@@ -831,7 +861,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           {activeAiPlayer ? (
             <div className="mt-4 grid gap-3 rounded-md border border-purple-200 bg-purple-50 p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={() => handleAiStep("manual")} disabled={aiStep.isPending}>
+                <Button onClick={() => handleAiStep("manual")} disabled={manualAiStepDisabled}>
                   {aiStep.isPending ? (
                     <Loader2 aria-hidden="true" className="size-4 animate-spin" />
                   ) : (

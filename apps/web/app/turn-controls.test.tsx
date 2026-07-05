@@ -104,6 +104,25 @@ function aiStateFixture(eventSequence = 0) {
   };
 }
 
+function metadataFallbackAiGame(): GameMetadata {
+  const game = gameFixture();
+  return {
+    ...game,
+    players: [
+      {
+        ...game.players[0],
+        name: "Ada AI",
+        controller_type: "ai",
+      },
+      {
+        ...game.players[1],
+        name: "Grace AI",
+        controller_type: "ai",
+      },
+    ],
+  };
+}
+
 function legalAction(
   type: string,
   payload: Record<string, unknown> = {},
@@ -567,7 +586,80 @@ describe("GamePlaySurface turn controls", () => {
 
     renderSurface(fetchMock);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Step AI" }));
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
+
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done"));
+    const aiStepCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(aiStepCall?.[1]?.body))).toMatchObject({
+      player_id: graceId,
+      decision_type: "action_decision",
+      mandatory: true,
+      request_context: { mode: "manual" },
+    });
+  });
+
+  it("Manual AI step waits for loaded turn state", async () => {
+    let resolveState: (response: Response) => void = () => {};
+    const statePromise = new Promise<Response>((resolve) => {
+      resolveState = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return jsonResponse(metadataFallbackAiGame());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return statePromise;
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return jsonResponse({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [],
+          state_hash: "metadata-fallback-state",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return jsonResponse({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return jsonResponse(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return jsonResponse(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return jsonResponse(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock, metadataFallbackAiGame());
+
+    expect(await screen.findByRole("region", { name: "Turn controls" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Step AI" })).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+      ),
+    ).toBe(false);
+
+    resolveState(Response.json(aiStateFixture()));
+
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
 
     await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done"));
     const aiStepCall = fetchMock.mock.calls.find(
@@ -667,19 +759,23 @@ describe("GamePlaySurface turn controls", () => {
 
     renderSurface(fetchMock);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Step AI" }));
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
     expect(await screen.findByRole("status", { name: "AI step status" })).toHaveTextContent("AI thinking");
     resolveAiStep(Response.json(aiStepPayload));
     await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI rejected"));
 
     aiStepPayload = aiStepResponse("blocked");
-    fireEvent.click(screen.getByRole("button", { name: "Step AI" }));
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
     await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI thinking"));
     resolveAiStep(Response.json(aiStepPayload));
     await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI blocked"));
 
     aiStepPayload = aiStepResponse("done");
-    fireEvent.click(screen.getByRole("button", { name: "Step AI" }));
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
     await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI thinking"));
     resolveAiStep(Response.json(aiStepPayload));
     await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done"));
