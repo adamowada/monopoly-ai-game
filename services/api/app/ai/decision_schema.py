@@ -46,7 +46,7 @@ class NegotiationMessagePayload(_SchemaModel):
         default=None,
         description="Optional specific recipient for a negotiation message.",
     )
-    body: str = Field(min_length=1, description="Negotiation text to send.")
+    body: str = Field(min_length=1, max_length=4000, description="Negotiation text to send.")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

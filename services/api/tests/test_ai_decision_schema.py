@@ -171,6 +171,29 @@ def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
     assert "rationale" in serialized
 
 
+def test_overlong_ai_negotiation_messages_are_rejected_by_schema_before_lifecycle_application() -> None:
+    # Overlong AI negotiation messages are rejected by schema before lifecycle application
+    body_schema = AI_OUTPUT_SCHEMA["$defs"]["NegotiationMessagePayload"]["properties"]["body"]
+    assert body_schema["maxLength"] == 4000
+
+    raw_output = {
+        **_base("negotiation_message"),
+        "negotiation_id": NEGOTIATION_ID,
+        "message": {
+            "recipient_player_id": RECIPIENT_ID,
+            "body": "x" * 4001,
+            "metadata": {"tone": "firm"},
+        },
+    }
+
+    with pytest.raises(AIDecisionValidationError) as exc_info:
+        validate_ai_decision_output(raw_output)
+
+    assert exc_info.value.reason_code == MALFORMED_AI_OUTPUT_REASON_CODE
+    assert {issue.code for issue in exc_info.value.errors} == {"malformed_ai_output"}
+    assert any(issue.field == "message.body" for issue in exc_info.value.errors)
+
+
 @pytest.mark.parametrize(
     "raw_output, expected_field",
     [

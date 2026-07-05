@@ -552,6 +552,7 @@
       "properties": {
         "body": {
           "description": "Negotiation text to send.",
+          "maxLength": 4000,
           "minLength": 1,
           "title": "Body",
           "type": "string"
