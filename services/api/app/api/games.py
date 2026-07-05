@@ -88,6 +88,7 @@ AI_NEGOTIATION_DECISION_TYPES = frozenset(
 AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE = "ai_response_opportunity_consumed"
 AI_BLOCKED_STATUS = "AI_BLOCKED"
 GAME_AI_BLOCKED_REASON_CODE = "game_ai_blocked"
+AI_PLAYER_REQUIRES_CODEX_REASON_CODE = "ai_player_requires_codex"
 
 DEAL_STATUS_PROPOSED = "proposed"
 DEAL_STATUS_ACCEPTED = "accepted"
@@ -721,6 +722,44 @@ async def submit_action(
                     validation_errors=[_game_ai_blocked_validation_error()],
                 )
 
+            if (
+                submission.expected_event_sequence != state.event_sequence
+                or submission.expected_state_hash != state.state_hash()
+            ):
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[_stale_action_validation_error()],
+                )
+
+            if (
+                await _resolve_actor_controller_type_in_session(
+                    session=session,
+                    game_id=game_id,
+                    actor_id=submission.actor_id,
+                )
+                == "ai"
+            ):
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[_ai_player_requires_codex_validation_error()],
+                )
+
             action = GameAction(
                 actor_id=submission.actor_id,
                 type=submission.type,
@@ -769,13 +808,7 @@ async def submit_action(
                     actor_id=submission.actor_id,
                     action_type=submission.type,
                     submitted_payload=submission.payload,
-                    validation_errors=[
-                        {
-                            "code": "stale_action",
-                            "message": "action expected state no longer matches current state",
-                            "field": "expected_state_hash",
-                        }
-                    ],
+                    validation_errors=[_stale_action_validation_error()],
                 )
 
             response_payload = ActionAcceptedResponse(
@@ -3683,6 +3716,22 @@ def _game_ai_blocked_validation_error() -> dict[str, str]:
     }
 
 
+def _ai_player_requires_codex_validation_error() -> dict[str, str]:
+    return {
+        "code": AI_PLAYER_REQUIRES_CODEX_REASON_CODE,
+        "message": "AI-controlled players must submit actions through the Codex AI step endpoint",
+        "field": "actor_id",
+    }
+
+
+def _stale_action_validation_error() -> dict[str, str]:
+    return {
+        "code": "stale_action",
+        "message": "action expected state no longer matches current state",
+        "field": "expected_state_hash",
+    }
+
+
 def _game_ai_blocked_lifecycle_response() -> JSONResponse:
     validation_error = _game_ai_blocked_validation_error()
     return JSONResponse(
@@ -4328,6 +4377,29 @@ async def _resolve_actor_player_id_in_session(
     return result.scalar_one_or_none()
 
 
+async def _resolve_actor_controller_type_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    actor_id: str | None,
+) -> str | None:
+    if actor_id is None:
+        return None
+    try:
+        normalized_actor_id = UUID(str(actor_id))
+    except ValueError:
+        return None
+
+    result = await session.execute(
+        sa.select(players.c.controller_type).where(
+            players.c.game_id == game_id,
+            players.c.id == normalized_actor_id,
+        )
+    )
+    controller_type = result.scalar_one_or_none()
+    return controller_type if isinstance(controller_type, str) else None
+
+
 def _request_payload_from_body(raw_body: bytes) -> tuple[object, list[dict[str, str]]]:
     try:
         payload: object = json.loads(raw_body)
@@ -4722,6 +4794,7 @@ def _status_code_for_reason(reason_code: str) -> int:
         "mistimed_action",
         "idempotency_key_conflict",
         GAME_AI_BLOCKED_REASON_CODE,
+        AI_PLAYER_REQUIRES_CODEX_REASON_CODE,
     }:
         return status.HTTP_409_CONFLICT
     if reason_code == "missing_idempotency_key":

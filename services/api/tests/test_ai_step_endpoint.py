@@ -32,6 +32,7 @@ from app.ai.orchestrator import (
 )
 from app.core.config import Settings
 from app.db.metadata import (
+    action_idempotency_keys,
     ai_decisions,
     deals,
     game_events,
@@ -191,6 +192,84 @@ async def test_ai_turn_stepping_endpoint_progresses_mixed_human_ai_game(
         assert await table_count(session_factory, game_events, game_id) >= 1
         assert await table_count(session_factory, ai_decisions, game_id) == 1
         assert await table_count(session_factory, rejected_actions, game_id) == 0
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_ai_controlled_player_direct_actions_reject_before_events_and_ai_step_still_accepts(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    state = await get_state(client, game_id)
+    direct_action = {
+        "actor_id": ai_player_id,
+        "type": "ROLL_DICE",
+        "payload": {},
+        "expected_state_hash": state["state_hash"],
+        "expected_event_sequence": state["event_sequence"],
+    }
+    runner = QueueFakeCodexRunner([valid_action_output(game_id, ai_player_id, state)])
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        direct_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-7-6-direct-ai-action"},
+            json=direct_action,
+        )
+        direct_body = direct_response.json()
+        rejection_rows = await fetch_rows(session_factory, rejected_actions, game_id)
+        idempotency_rows = await fetch_rows(session_factory, action_idempotency_keys, game_id)
+        event_count_after_direct_action = await table_count(session_factory, game_events, game_id)
+        ai_decision_count_after_direct_action = await table_count(session_factory, ai_decisions, game_id)
+
+        ai_step_response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={"player_id": ai_player_id, "decision_type": "action_decision", "mandatory": True},
+        )
+        ai_step_body = ai_step_response.json()
+
+        assert direct_response.status_code == 409, direct_response.text
+        assert direct_body["status"] == "rejected"
+        assert direct_body["reason_code"] == "ai_player_requires_codex"
+        assert direct_body["validation_errors"][0]["code"] == "ai_player_requires_codex"
+        assert direct_body["validation_errors"][0]["field"] == "actor_id"
+        assert direct_body["rejected_action_id"] == str(rejection_rows[0]["id"])
+        assert direct_body["submitted_action"] == direct_action
+        assert "accepted_events" not in direct_body
+        assert "fallback_action" not in direct_body
+        assert "substitute_action" not in direct_body
+        assert "substitute_move" not in direct_body
+        assert event_count_after_direct_action == 0
+        assert ai_decision_count_after_direct_action == 0
+        assert len(rejection_rows) == 1
+        assert rejection_rows[0]["actor_player_id"] == UUID(ai_player_id)
+        assert rejection_rows[0]["action_type"] == "ROLL_DICE"
+        assert rejection_rows[0]["payload"] == {}
+        assert rejection_rows[0]["reason_code"] == "ai_player_requires_codex"
+        assert rejection_rows[0]["validation_errors"][0]["code"] == "ai_player_requires_codex"
+        assert len(idempotency_rows) == 1
+        assert idempotency_rows[0]["status"] == "rejected"
+        assert idempotency_rows[0]["rejected_action_id"] == rejection_rows[0]["id"]
+        assert idempotency_rows[0]["response_payload"]["reason_code"] == "ai_player_requires_codex"
+        assert idempotency_rows[0]["response_payload"].get("fallback_action") is None
+        assert idempotency_rows[0]["response_payload"].get("substitute_action") is None
+        assert idempotency_rows[0]["response_payload"].get("substitute_move") is None
+
+        assert ai_step_response.status_code == 200, ai_step_response.text
+        assert ai_step_body["status"] == "accepted"
+        assert ai_step_body["rejected_action_id"] is None
+        assert ai_step_body["accepted_event_id"] == ai_step_body["accepted_events"][0]["id"]
+        assert len(runner.calls) == 1
+        assert await table_count(session_factory, game_events, game_id) >= 1
+        assert await table_count(session_factory, ai_decisions, game_id) == 1
+        assert await table_count(session_factory, rejected_actions, game_id) == 1
     finally:
         await delete_game(session_factory, game_id)
 
@@ -1208,6 +1287,18 @@ async def fetch_rejected_action(
         )
         row = result.mappings().one()
         return dict(row)
+
+
+async def fetch_rows(
+    session_factory: async_sessionmaker,
+    table: sa.Table,
+    game_id: str | UUID,
+) -> list[dict[str, Any]]:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(table).where(table.c.game_id == UUID(str(game_id))).order_by(table.c.created_at)
+        )
+        return [dict(row) for row in result.mappings().all()]
 
 
 async def fetch_negotiation_context(
