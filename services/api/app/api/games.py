@@ -609,9 +609,10 @@ class AIMemoryRecordResponse(BaseModel):
     game_id: UUID
     player_id: UUID
     ai_profile_id: UUID | None
-    source_decision_id: UUID
+    source_decision_id: UUID | None
     source_event_id: UUID | None
     source_negotiation_message_id: UUID | None
+    superseded_by_memory_id: UUID | None
     sequence: int
     category: str
     visibility: str
@@ -1999,6 +2000,7 @@ async def get_ai_memory(game_id: UUID, request: Request) -> AIMemoryResponse:
                 ai_memory_entries.c.source_decision_id,
                 ai_memory_entries.c.source_event_id,
                 ai_memory_entries.c.source_negotiation_message_id,
+                ai_memory_entries.c.superseded_by_memory_id,
                 sequence,
                 ai_memory_entries.c.category,
                 ai_memory_entries.c.visibility,
@@ -5001,6 +5003,7 @@ def _ai_memory_response(row: Mapping[str, Any]) -> AIMemoryRecordResponse:
         source_decision_id=row["source_decision_id"],
         source_event_id=row["source_event_id"],
         source_negotiation_message_id=row["source_negotiation_message_id"],
+        superseded_by_memory_id=row["superseded_by_memory_id"],
         sequence=int(row["sequence"]),
         category=str(row["category"]),
         visibility=str(row["visibility"]),

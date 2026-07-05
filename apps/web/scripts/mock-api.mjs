@@ -428,6 +428,7 @@ function configureAiAuditSeed(game) {
       source_decision_id: decisionId,
       source_event_id: "mock-event-ai-audit-1",
       source_negotiation_message_id: null,
+      superseded_by_memory_id: null,
       sequence: 1,
       category: "player_trust_model",
       visibility: "private",

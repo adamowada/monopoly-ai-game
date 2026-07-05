@@ -179,6 +179,7 @@ function memoryFixture(): AiMemoryEntry[] {
       source_decision_id: decisionId,
       source_event_id: "event-grace-1",
       source_negotiation_message_id: null,
+      superseded_by_memory_id: null,
       sequence: 1,
       category: "player_trust_model",
       visibility: "private",
@@ -326,6 +327,7 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("player_trust_model");
     expect(panel).toHaveTextContent("decision decision-grace-1");
     expect(panel).toHaveTextContent("event event-grace-1");
+    expect(panel).toHaveTextContent("superseded_by_memory_id n/a");
     expect(panel).toHaveTextContent("Grace remembers Ada prefers keeping $200 cash after trades.");
 
     expect(panel).toHaveTextContent("Retrieved context records");

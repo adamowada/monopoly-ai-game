@@ -27,7 +27,10 @@ from app.ai.decision_schema import (
     rejected_ai_output,
     validate_ai_decision_output,
 )
-from app.ai.memory import persist_memory_updates_for_trusted_output
+from app.ai.memory import (
+    compact_memory_after_scheduled_decision_if_due,
+    persist_memory_updates_for_trusted_output,
+)
 from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue
 
 
@@ -469,6 +472,11 @@ async def _persist_attempt_result(
                     state_hash=request.state_hash,
                     ai_decision_status=status,
                 )
+            await compact_memory_after_scheduled_decision_if_due(
+                session,
+                game_id=game_id,
+                player_id=player_id,
+            )
 
     return CodexExecAIDecisionResult(
         ai_decision_id=decision_id,

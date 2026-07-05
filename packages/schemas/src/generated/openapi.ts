@@ -536,15 +536,14 @@ export interface components {
             player_id: string;
             /** Sequence */
             sequence: number;
-            /**
-             * Source Decision Id
-             * Format: uuid
-             */
-            source_decision_id: string;
+            /** Source Decision Id */
+            source_decision_id: string | null;
             /** Source Event Id */
             source_event_id: string | null;
             /** Source Negotiation Message Id */
             source_negotiation_message_id: string | null;
+            /** Superseded By Memory Id */
+            superseded_by_memory_id: string | null;
             /** Updated At */
             updated_at: unknown;
             /** Visibility */

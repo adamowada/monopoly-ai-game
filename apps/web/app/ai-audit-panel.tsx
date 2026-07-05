@@ -84,6 +84,25 @@ function validationText(errors: AiValidationError[]): string {
     .join(" ");
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function compactionMetadata(entry: AiMemoryEntry): Record<string, unknown> | null {
+  return metadataRecord(metadataRecord(entry.metadata)?.compaction);
+}
+
+function isCompactedSummary(entry: AiMemoryEntry): boolean {
+  return compactionMetadata(entry)?.is_summary === true;
+}
+
+function compactionSourceIds(entry: AiMemoryEntry): string[] {
+  const sourceIds = compactionMetadata(entry)?.source_memory_ids;
+  return Array.isArray(sourceIds) ? sourceIds.filter((item): item is string => typeof item === "string") : [];
+}
+
 function EmptyState({ text }: Readonly<{ text: string }>) {
   return <p className="rounded-md border border-dashed border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-600">{text}</p>;
 }
@@ -212,6 +231,11 @@ function LinkedMemory({
               <span className="block">Used by decision {decision.ai_decision_id}</span>
               <span className="block">
                 {entry.category} - {entry.visibility} - importance {entry.importance}
+              </span>
+              <span className="block">
+                {isCompactedSummary(entry)
+                  ? `compacted summary of ${compactionSourceIds(entry).length} source memories`
+                  : `superseded by ${entry.superseded_by_memory_id ?? "n/a"}`}
               </span>
               <span className="block">{entry.content}</span>
             </li>
@@ -580,6 +604,10 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
                 <span className="block">
                   decision {entry.source_decision_id} · event {entry.source_event_id ?? "n/a"} · message{" "}
                   {entry.source_negotiation_message_id ?? "n/a"}
+                </span>
+                <span className="block">
+                  superseded_by_memory_id {entry.superseded_by_memory_id ?? "n/a"}
+                  {isCompactedSummary(entry) ? ` - source_memory_ids ${compactionSourceIds(entry).join(", ")}` : ""}
                 </span>
                 <span className="block">{entry.content}</span>
               </li>

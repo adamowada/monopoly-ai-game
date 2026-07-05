@@ -55,9 +55,16 @@
             "type": "integer"
           },
           "source_decision_id": {
-            "format": "uuid",
-            "title": "Source Decision Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Decision Id"
           },
           "source_event_id": {
             "anyOf": [
@@ -83,6 +90,18 @@
             ],
             "title": "Source Negotiation Message Id"
           },
+          "superseded_by_memory_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By Memory Id"
+          },
           "updated_at": {
             "title": "Updated At"
           },
@@ -99,6 +118,7 @@
           "source_decision_id",
           "source_event_id",
           "source_negotiation_message_id",
+          "superseded_by_memory_id",
           "sequence",
           "category",
           "visibility",
