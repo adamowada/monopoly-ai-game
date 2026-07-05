@@ -229,6 +229,77 @@ async def test_ai_step_blocks_and_surfaces_auditable_stalls(
 
 
 @pytest.mark.asyncio
+async def test_ai_blocked_games_reject_later_actions_and_ai_steps_before_mutation(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    # AI_BLOCKED games reject later actions and AI steps before mutation
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    state = await get_state(client, game_id)
+    runner = QueueFakeCodexRunner(timeout=True)
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        blocked_response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={"player_id": ai_player_id, "decision_type": "action_decision", "mandatory": True},
+        )
+        blocked_body = blocked_response.json()
+        event_count_after_block = await table_count(session_factory, game_events, game_id)
+        ai_decision_count_after_block = await table_count(session_factory, ai_decisions, game_id)
+        rejected_action_count_after_block = await table_count(session_factory, rejected_actions, game_id)
+
+        action_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "phase-7-ai-blocked-action"},
+            json={
+                "actor_id": ai_player_id,
+                "type": "ROLL_DICE",
+                "payload": {},
+                "expected_state_hash": state["state_hash"],
+                "expected_event_sequence": state["event_sequence"],
+            },
+        )
+        action_body = action_response.json()
+        event_count_after_action = await table_count(session_factory, game_events, game_id)
+
+        runner.timeout = False
+        runner.outputs.append(valid_action_output(game_id, ai_player_id, state))
+        runner_call_count_before_second_step = len(runner.calls)
+        ai_step_response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={"player_id": ai_player_id, "decision_type": "action_decision", "mandatory": True},
+        )
+        ai_step_body = ai_step_response.json()
+
+        assert blocked_response.status_code == 200, blocked_response.text
+        assert blocked_body["status"] == "blocked"
+        assert blocked_body["game_status"] == "AI_BLOCKED"
+        assert action_body["status"] == "rejected"
+        assert action_body["reason_code"] == "game_ai_blocked"
+        assert action_body["validation_errors"][0]["code"] == "game_ai_blocked"
+        assert action_body["rejected_action_id"] is not None
+        assert ai_step_body["status"] == "rejected"
+        assert ai_step_body["reason_code"] == "game_ai_blocked"
+        assert ai_step_body["validation_errors"][0]["code"] == "game_ai_blocked"
+        assert event_count_after_action == event_count_after_block
+        assert await table_count(session_factory, game_events, game_id) == event_count_after_block
+        assert await table_count(session_factory, ai_decisions, game_id) == ai_decision_count_after_block
+        assert await table_count(session_factory, rejected_actions, game_id) == (
+            rejected_action_count_after_block + 1
+        )
+        assert len(runner.calls) == runner_call_count_before_second_step
+        assert runner_call_count_before_second_step == 1
+        assert await game_status(session_factory, game_id) == "AI_BLOCKED"
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_ai_negotiation_message_and_complex_deal_outputs_create_lifecycle_records(
     api_app: FastAPI,
     client: httpx.AsyncClient,

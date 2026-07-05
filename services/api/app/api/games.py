@@ -86,6 +86,8 @@ AI_NEGOTIATION_DECISION_TYPES = frozenset(
     {"negotiation_message", "deal_proposal", "counteroffer", "accept_reject"}
 )
 AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE = "ai_response_opportunity_consumed"
+AI_BLOCKED_STATUS = "AI_BLOCKED"
+GAME_AI_BLOCKED_REASON_CODE = "game_ai_blocked"
 
 DEAL_STATUS_PROPOSED = "proposed"
 DEAL_STATUS_ACCEPTED = "accepted"
@@ -702,6 +704,20 @@ async def submit_action(
                     action_type=_raw_action_type(raw_payload),
                     submitted_payload=_raw_action_payload(raw_payload),
                     validation_errors=_pydantic_errors(exc),
+                )
+
+            if await _game_status_in_session(session, game_id) == AI_BLOCKED_STATUS:
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[_game_ai_blocked_validation_error()],
                 )
 
             action = GameAction(
@@ -1804,6 +1820,9 @@ async def ai_step(
 ) -> AiStepResponse | JSONResponse:
     session_factory = _session_factory(request)
     await _ensure_game_exists(session_factory, game_id)
+    if await _game_status(session_factory, game_id) == AI_BLOCKED_STATUS:
+        return _game_ai_blocked_lifecycle_response()
+
     ai_profile_id_or_response = await _ai_step_profile_id_or_rejection(
         session_factory,
         game_id=game_id,
@@ -3609,6 +3628,26 @@ def _lifecycle_rejection_response(
     )
 
 
+def _game_ai_blocked_validation_error() -> dict[str, str]:
+    return {
+        "code": GAME_AI_BLOCKED_REASON_CODE,
+        "message": "AI_BLOCKED games reject mutating actions and AI step requests",
+        "field": "game_status",
+    }
+
+
+def _game_ai_blocked_lifecycle_response() -> JSONResponse:
+    validation_error = _game_ai_blocked_validation_error()
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "status": "rejected",
+            "reason_code": GAME_AI_BLOCKED_REASON_CODE,
+            "validation_errors": [validation_error],
+        },
+    )
+
+
 def _lifecycle_rejection_response_from_errors(
     reason_code: str,
     validation_errors: Sequence[Mapping[str, Any]],
@@ -4631,7 +4670,12 @@ def _reason_code(validation_errors: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _status_code_for_reason(reason_code: str) -> int:
-    if reason_code in {"stale_action", "mistimed_action", "idempotency_key_conflict"}:
+    if reason_code in {
+        "stale_action",
+        "mistimed_action",
+        "idempotency_key_conflict",
+        GAME_AI_BLOCKED_REASON_CODE,
+    }:
         return status.HTTP_409_CONFLICT
     if reason_code == "missing_idempotency_key":
         return status.HTTP_400_BAD_REQUEST
