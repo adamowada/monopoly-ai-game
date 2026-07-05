@@ -1909,12 +1909,7 @@ async def ai_step(
     if payload.mode is not None:
         request_context["mode"] = payload.mode
 
-    guard_state = await _load_replayed_state(session_factory, game_id)
-    guard_key = _ai_step_in_flight_guard_key(
-        game_id=game_id,
-        state_hash=guard_state.state_hash(),
-        event_sequence=guard_state.event_sequence,
-    )
+    guard_key = _ai_step_in_flight_guard_key(game_id=game_id)
 
     guard_session = session_factory()
     guard_acquired = False
@@ -2055,14 +2050,10 @@ def _ai_enforcement_kwargs(request: Request) -> dict[str, Any]:
 def _ai_step_in_flight_guard_key(
     *,
     game_id: UUID,
-    state_hash: str,
-    event_sequence: int,
 ) -> int:
     guard_payload = {
         "scope": "ai_step",
         "game_id": str(game_id),
-        "state_hash": state_hash,
-        "event_sequence": int(event_sequence),
     }
     serialized = json.dumps(guard_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return int.from_bytes(hashlib.blake2b(serialized, digest_size=8).digest(), "big", signed=True)
@@ -2410,7 +2401,12 @@ async def _apply_ai_negotiation_output(
             "status": "done",
             "negotiation_id": str(result.id),
         }
-        await _mark_ai_decision_lifecycle_done(session_factory, ai_decision_id, outcome)
+        await _mark_ai_decision_lifecycle_done(
+            session_factory,
+            ai_decision_id,
+            outcome,
+            negotiation_id=result.id,
+        )
         return AiNegotiationApplication(
             status="done",
             outcome=outcome,
@@ -2555,6 +2551,7 @@ async def _mark_ai_decision_lifecycle_done(
     session_factory: async_sessionmaker[AsyncSession],
     ai_decision_id: UUID,
     outcome: Mapping[str, Any],
+    negotiation_id: UUID | None = None,
 ) -> None:
     async with session_factory() as session:
         async with session.begin():
@@ -2566,10 +2563,16 @@ async def _mark_ai_decision_lifecycle_done(
                 validation_result = {}
             updated_validation = dict(validation_result)
             updated_validation["lifecycle_result"] = _json_safe_mapping(outcome)
+            update_values: dict[str, Any] = {
+                "status": "accepted",
+                "validation_result": updated_validation,
+            }
+            if negotiation_id is not None:
+                update_values["negotiation_id"] = negotiation_id
             await session.execute(
                 ai_decisions.update()
                 .where(ai_decisions.c.id == ai_decision_id)
-                .values(status="accepted", validation_result=updated_validation)
+                .values(**update_values)
             )
 
 

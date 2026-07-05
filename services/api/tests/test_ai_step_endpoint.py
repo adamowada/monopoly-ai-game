@@ -32,6 +32,7 @@ from app.ai.orchestrator import (
     CodexExecRunner,
     CodexExecTimeoutError,
 )
+from app.api.games import _ai_step_in_flight_guard_key
 from app.core.config import Settings
 from app.db.metadata import (
     action_idempotency_keys,
@@ -181,6 +182,18 @@ async def client(api_app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
         base_url="http://testserver",
     ) as client:
         yield client
+
+
+def test_ai_step_guard_key_is_game_scoped_to_avoid_prelock_state_races() -> None:
+    game_id = UUID("00000000-0000-0000-0000-000000007601")
+    other_game_id = UUID("00000000-0000-0000-0000-000000007602")
+
+    assert _ai_step_in_flight_guard_key(game_id=game_id) == _ai_step_in_flight_guard_key(
+        game_id=game_id
+    )
+    assert _ai_step_in_flight_guard_key(game_id=game_id) != _ai_step_in_flight_guard_key(
+        game_id=other_game_id
+    )
 
 
 @pytest.mark.asyncio
@@ -861,6 +874,8 @@ async def test_ai_open_negotiation_step_creates_ai_opened_negotiation(
         assert body["accepted_event_id"] is None
         assert body["rejected_action_id"] is None
         assert ai_decision["status"] == "accepted"
+        ai_decision_negotiation_id = ai_decision["negotiation_id"]
+        assert ai_decision_negotiation_id == UUID(created_negotiation_id)
         assert ai_decision["validation_result"]["lifecycle_result"]["negotiation_id"] == created_negotiation_id
         assert len(runner.calls) == 1
         assert await table_count(session_factory, negotiations, game_id) == negotiation_count_before + 1
