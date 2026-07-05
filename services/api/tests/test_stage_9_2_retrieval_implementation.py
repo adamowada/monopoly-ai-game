@@ -6,6 +6,8 @@ import json
 import math
 import os
 import shutil
+import subprocess
+import sys
 import tomllib
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -44,6 +46,7 @@ from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+API_ROOT = REPO_ROOT / "services" / "api"
 CONTENT_RULES = REPO_ROOT / "content" / "rules"
 API_PYPROJECT = REPO_ROOT / "services" / "api" / "pyproject.toml"
 TEST_DATABASE_URL = os.getenv(
@@ -210,6 +213,98 @@ def test_stage_9_2_rag_index_metadata_matches_migration_uniqueness() -> None:
     assert [constraint.name for constraint in index_key_unique_constraints] == [
         "uq_rag_index_entries_index_key"
     ]
+
+
+@pytest.mark.asyncio
+async def test_stage_9_2_refresh_rag_index_cli_populates_database_index(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    script = API_ROOT / "scripts" / "refresh_rag_index.py"
+    static_source_types = ("rules", "house_rules", "contract_examples")
+
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                rag_index_entries.delete().where(
+                    rag_index_entries.c.source_type.in_(static_source_types)
+                )
+            )
+
+    completed = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=API_ROOT,
+        env={**os.environ, "API_ENV": "test", "DATABASE_URL": TEST_DATABASE_URL},
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=90,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout
+    assert "refreshed" in completed.stdout.lower()
+
+    async with session_factory() as session:
+        index_result = await session.execute(
+            sa.select(
+                rag_index_entries.c.source_type,
+                rag_index_entries.c.source_id,
+                rag_index_entries.c.game_id,
+                rag_index_entries.c.search_vector,
+                rag_index_entries.c.embedding,
+            )
+            .where(rag_index_entries.c.source_type.in_(static_source_types))
+            .order_by(rag_index_entries.c.source_type, rag_index_entries.c.source_id)
+        )
+        rows = [dict(row) for row in index_result.mappings().all()]
+
+        rules_results = await search_retrieval(
+            session,
+            query_text="Boardwalk hotel rent",
+            game_id=GAME_ID,
+            player_id=AI_PLAYER_ID,
+            source_types=("rules",),
+            limit=5,
+            audit=False,
+        )
+        house_rule_results = await search_retrieval(
+            session,
+            query_text="fallback AI decisions",
+            game_id=GAME_ID,
+            player_id=AI_PLAYER_ID,
+            source_types=("house_rules",),
+            limit=5,
+            audit=False,
+        )
+        contract_results = await search_retrieval(
+            session,
+            query_text="Boardwalk rent share",
+            game_id=GAME_ID,
+            player_id=AI_PLAYER_ID,
+            source_types=("contract_examples",),
+            limit=5,
+            audit=False,
+        )
+
+    source_ids_by_type = {
+        source_type: {
+            row["source_id"] for row in rows if row["source_type"] == source_type
+        }
+        for source_type in static_source_types
+    }
+    assert source_ids_by_type["rules"] >= {"property_boardwalk"}
+    assert source_ids_by_type["house_rules"] >= {"no_fallback_ai_decisions"}
+    assert source_ids_by_type["contract_examples"] >= {"rent_share_boardwalk_example"}
+    assert all(row["game_id"] is None for row in rows)
+    assert all(row["search_vector"] is not None for row in rows)
+    assert all(row["embedding"] is not None for row in rows)
+
+    assert rules_results
+    assert rules_results[0].source_id == "property_boardwalk"
+    assert {result.source_id for result in house_rule_results} >= {"no_fallback_ai_decisions"}
+    assert {result.source_id for result in contract_results} >= {
+        "rent_share_boardwalk_example"
+    }
 
 
 @pytest.mark.asyncio
