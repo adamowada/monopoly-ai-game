@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from collections.abc import AsyncIterator, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from pathlib import PureWindowsPath
 from typing import Any, cast
@@ -340,6 +340,150 @@ async def test_stage_9_1_rag_visibility_filters_db_memory_corpus_preserves_conte
         global_text = _corpus_text(global_documents)
         assert "actor-owned private memory" not in global_text
         assert "other-player private memory leak" not in global_text
+    finally:
+        await _delete_rag_visibility_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_stage_9_1_db_memory_corpus_applies_limit_after_validity_filtering(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    game_id = UUID("00000000-0000-0000-0000-000000009161")
+    actor_id = UUID("00000000-0000-0000-0000-000000009162")
+    other_id = UUID("00000000-0000-0000-0000-000000009163")
+    profile_id = UUID("00000000-0000-0000-0000-000000009164")
+    rejected_decision_id = UUID("00000000-0000-0000-0000-000000009165")
+    invalid_decision_id = UUID("00000000-0000-0000-0000-000000009166")
+    accepted_decision_id = UUID("00000000-0000-0000-0000-000000009167")
+    validated_decision_id = UUID("00000000-0000-0000-0000-000000009168")
+    later_validated_decision_id = UUID("00000000-0000-0000-0000-000000009169")
+    rejected_memory_id = UUID("00000000-0000-0000-0000-00000000916a")
+    invalid_memory_id = UUID("00000000-0000-0000-0000-00000000916b")
+    actor_valid_memory_id = UUID("00000000-0000-0000-0000-00000000916c")
+    public_valid_memory_id = UUID("00000000-0000-0000-0000-00000000916d")
+    later_public_valid_memory_id = UUID("00000000-0000-0000-0000-00000000916e")
+
+    await _insert_rag_visibility_game(
+        session_factory,
+        game_id=game_id,
+        player_ids=(actor_id, other_id),
+        ai_profile_id=profile_id,
+        ai_profile_player_id=actor_id,
+    )
+    try:
+        async with session_factory() as session:
+            now = datetime(2026, 7, 5, 13, 0, tzinfo=UTC)
+            for decision_id, status in (
+                (rejected_decision_id, "rejected"),
+                (invalid_decision_id, "invalid"),
+                (accepted_decision_id, "accepted"),
+                (validated_decision_id, "validated"),
+                (later_validated_decision_id, "validated"),
+            ):
+                await session.execute(
+                    ai_decisions.insert().values(
+                        id=decision_id,
+                        game_id=game_id,
+                        player_id=actor_id,
+                        ai_profile_id=profile_id,
+                        decision_type="memory_update",
+                        status=status,
+                        phase="START_TURN",
+                        state_hash=f"stage-9-1-limit-{status}",
+                        prompt_context_hash=f"stage-9-1-limit-{status}-prompt",
+                        prompt_context={"fixture": "stage-9-1-limit-after-validity"},
+                        raw_output="{}",
+                        parsed_output={"memory_updates": []},
+                        validation_result={"status": status},
+                        created_at=now,
+                    )
+                )
+
+            rows = [
+                (
+                    rejected_memory_id,
+                    other_id,
+                    None,
+                    rejected_decision_id,
+                    "public",
+                    "rejected public memory must not consume limit",
+                ),
+                (
+                    invalid_memory_id,
+                    other_id,
+                    None,
+                    invalid_decision_id,
+                    "public",
+                    "invalid public memory must not consume limit",
+                ),
+                (
+                    actor_valid_memory_id,
+                    actor_id,
+                    profile_id,
+                    accepted_decision_id,
+                    "private",
+                    "first valid actor private memory",
+                ),
+                (
+                    public_valid_memory_id,
+                    other_id,
+                    None,
+                    validated_decision_id,
+                    "public",
+                    "second valid public memory",
+                ),
+                (
+                    later_public_valid_memory_id,
+                    other_id,
+                    None,
+                    later_validated_decision_id,
+                    "table",
+                    "third valid visible memory outside requested limit",
+                ),
+            ]
+            for offset, (
+                memory_id,
+                player_id,
+                ai_profile_id,
+                source_decision_id,
+                visibility,
+                content,
+            ) in enumerate(rows):
+                await session.execute(
+                    ai_memory_entries.insert().values(
+                        id=memory_id,
+                        game_id=game_id,
+                        player_id=player_id,
+                        ai_profile_id=ai_profile_id,
+                        source_decision_id=source_decision_id,
+                        category="strategic_belief",
+                        visibility=visibility,
+                        content=content,
+                        importance=8,
+                        metadata_blob={"fixture": "stage-9-1-limit-after-validity"},
+                        created_at=now + timedelta(seconds=offset),
+                        updated_at=now + timedelta(seconds=offset),
+                    )
+                )
+            await session.commit()
+
+            documents = await load_ai_memory_corpus_from_db(
+                session,
+                game_id=game_id,
+                player_id=actor_id,
+                limit=2,
+            )
+
+        assert _source_ids(documents) == {
+            str(actor_valid_memory_id),
+            str(public_valid_memory_id),
+        }
+        text = _corpus_text(documents)
+        assert "first valid actor private memory" in text
+        assert "second valid public memory" in text
+        assert "rejected public memory must not consume limit" not in text
+        assert "invalid public memory must not consume limit" not in text
+        assert "third valid visible memory outside requested limit" not in text
     finally:
         await _delete_rag_visibility_game(session_factory, game_id)
 

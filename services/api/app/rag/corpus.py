@@ -423,14 +423,14 @@ async def load_ai_memory_corpus_from_db(
     else:
         statement = statement.where(ai_memory_entries.c.visibility.in_(visible_scopes))
     statement = statement.order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
-    if limit is not None:
-        statement = statement.limit(limit)
     result = await session.execute(statement)
     rows = [
         row
         for row in _string_key_rows(result.mappings())
         if memory_row_is_usable_for_context(row)
     ]
+    if limit is not None:
+        rows = rows[:limit]
     return build_ai_memory_corpus(rows)
 
 
