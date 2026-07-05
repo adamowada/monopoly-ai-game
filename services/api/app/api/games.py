@@ -505,6 +505,7 @@ class AiStepRequest(BaseModel):
     player_id: UUID
     decision_type: Literal[
         "action_decision",
+        "open_negotiation",
         "negotiation_message",
         "deal_proposal",
         "counteroffer",
@@ -1830,10 +1831,16 @@ async def ai_step(
     )
     if isinstance(ai_profile_id_or_response, JSONResponse):
         return ai_profile_id_or_response
-    if payload.decision_type != "action_decision" and payload.negotiation_id is None:
+    if payload.decision_type in AI_NEGOTIATION_DECISION_TYPES and payload.negotiation_id is None:
         return _lifecycle_rejection_response(
             "negotiation_id_required",
             "negotiation_id is required for AI negotiation decisions",
+            field="negotiation_id",
+        )
+    if payload.decision_type == "open_negotiation" and payload.negotiation_id is not None:
+        return _lifecycle_rejection_response(
+            "negotiation_id_forbidden",
+            "open_negotiation creates a new negotiation and cannot target an existing negotiation_id",
             field="negotiation_id",
         )
     mandatory = payload.mandatory if payload.mandatory is not None else payload.decision_type == "action_decision"
@@ -2140,7 +2147,13 @@ async def _ai_step_response_from_enforcement(
             validation_errors=validation_errors,
         )
 
-    if payload.decision_type in {"negotiation_message", "deal_proposal", "counteroffer", "accept_reject"}:
+    if payload.decision_type in {
+        "open_negotiation",
+        "negotiation_message",
+        "deal_proposal",
+        "counteroffer",
+        "accept_reject",
+    }:
         application = await _apply_ai_negotiation_output(
             request=request,
             session_factory=session_factory,
@@ -2183,12 +2196,17 @@ async def _ai_step_response_from_enforcement(
             )
 
         game_status = await _game_status(session_factory, game_id)
+        response_negotiation_id = (
+            application.negotiation.id
+            if payload.decision_type == "open_negotiation" and application.negotiation is not None
+            else payload.negotiation_id
+        )
         return AiStepResponse(
             status="done",
             game_id=game_id,
             player_id=payload.player_id,
             decision_type=payload.decision_type,
-            negotiation_id=payload.negotiation_id,
+            negotiation_id=response_negotiation_id,
             ai_decision_id=enforcement_result.ai_decision_id,
             accepted_events=[],
             accepted_event_id=None,
@@ -2252,6 +2270,34 @@ async def _apply_ai_negotiation_output(
         )
 
     decision_type = str(parsed_output["decision_type"])
+    if decision_type == "open_negotiation":
+        negotiation_payload = parsed_output["negotiation"]
+        result = await create_negotiation(
+            game_id,
+            request,
+            CreateNegotiationRequest(
+                opened_by_player_id=player_id,
+                participant_player_ids=[
+                    UUID(str(participant_id))
+                    for participant_id in negotiation_payload["participant_player_ids"]
+                ],
+                context=dict(negotiation_payload.get("context") or {}),
+            ),
+        )
+        if isinstance(result, JSONResponse):
+            return _ai_negotiation_application_rejection(result)
+        outcome = {
+            "kind": "open_negotiation",
+            "status": "done",
+            "negotiation_id": str(result.id),
+        }
+        await _mark_ai_decision_lifecycle_done(session_factory, ai_decision_id, outcome)
+        return AiNegotiationApplication(
+            status="done",
+            outcome=outcome,
+            negotiation=result,
+        )
+
     negotiation_id = UUID(str(parsed_output["negotiation_id"]))
     if decision_type == "negotiation_message":
         message_payload = parsed_output["message"]

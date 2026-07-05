@@ -258,6 +258,7 @@
             "default": "action_decision",
             "enum": [
               "action_decision",
+              "open_negotiation",
               "negotiation_message",
               "deal_proposal",
               "counteroffer",

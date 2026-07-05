@@ -1333,6 +1333,63 @@ function sampleAiDealTerms(game, negotiation, proposerPlayerId) {
 }
 
 function applyMockAiNegotiationStep(game, payload, decision) {
+  if (payload.decision_type === "open_negotiation") {
+    const recipient = game.players.find((player) => player.id !== payload.player_id && player.status === "active");
+    if (!recipient) {
+      const errors = [aiValidationError("participant_not_in_game", "open_negotiation requires another active player", "participant_player_ids")];
+      const rejection = createRejectedAction(
+        game,
+        { actor_id: payload.player_id, type: "AI_OPEN_NEGOTIATION", payload },
+        "participant_not_in_game",
+        errors,
+      );
+      decision.status = "rejected";
+      return aiStepPayload({
+        game,
+        payload,
+        decision,
+        status: "rejected",
+        rejectedActionId: rejection.id,
+        outcome: { kind: "open_negotiation", status: "rejected" },
+        reasonCode: "participant_not_in_game",
+        validationErrors: errors,
+      });
+    }
+
+    const negotiation = createNegotiationRecord(game, {
+      opened_by_player_id: payload.player_id,
+      participant_player_ids: [payload.player_id, recipient.id],
+      topic: "AI opened negotiation",
+      context: "Mock AI open_negotiation decision.",
+    });
+    decision.status = "accepted";
+    decision.negotiation_id = negotiation.id;
+    decision.parsed_output = {
+      mock: true,
+      decision_type: "open_negotiation",
+      negotiation: {
+        participant_player_ids: negotiation.participant_player_ids,
+        context: { topic: negotiation.topic, description: negotiation.context },
+      },
+    };
+    decision.validation_result = {
+      ...decision.validation_result,
+      lifecycle_result: {
+        kind: "open_negotiation",
+        status: "done",
+        negotiation_id: negotiation.id,
+      },
+    };
+    return aiStepPayload({
+      game,
+      payload: { ...payload, negotiation_id: negotiation.id },
+      decision,
+      status: "done",
+      outcome: { kind: "open_negotiation", status: "done", negotiation_id: negotiation.id },
+      negotiation,
+    });
+  }
+
   const negotiation = negotiationById(game, payload.negotiation_id);
   const validation = validateOpenNegotiation(negotiation);
   if (validation) {
@@ -1512,6 +1569,22 @@ function applyMockAiStep(game, payload) {
   }
 
   const decisionType = payload.decision_type ?? "action_decision";
+  const existingNegotiationDecisionTypes = ["negotiation_message", "deal_proposal", "counteroffer", "accept_reject"];
+  if (existingNegotiationDecisionTypes.includes(decisionType) && !payload.negotiation_id) {
+    const errors = [aiValidationError("negotiation_id_required", "negotiation_id is required for AI negotiation decisions", "negotiation_id")];
+    return {
+      statusCode: 422,
+      body: { status: "rejected", reason_code: "negotiation_id_required", validation_errors: errors },
+    };
+  }
+  if (decisionType === "open_negotiation" && payload.negotiation_id) {
+    const errors = [aiValidationError("negotiation_id_forbidden", "open_negotiation creates a new negotiation and cannot target an existing negotiation_id", "negotiation_id")];
+    return {
+      statusCode: 422,
+      body: { status: "rejected", reason_code: "negotiation_id_forbidden", validation_errors: errors },
+    };
+  }
+
   const decision = createAiDecisionRecord(game, { ...payload, decision_type: decisionType }, "requested");
   if (typeof game.seed === "string" && game.seed.includes("stage-7-6-ai-blocked")) {
     const errors = [aiValidationError("codex_exec_timeout", "mock Codex AI step timed out", null)];

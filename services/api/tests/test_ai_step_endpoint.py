@@ -473,6 +473,219 @@ async def test_ai_counteroffer_and_accept_reject_step_responds_to_offers(
 
 
 @pytest.mark.asyncio
+async def test_ai_open_negotiation_step_creates_ai_opened_negotiation(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    ai_player_id = created["players"][1]["id"]
+    participant_player_ids = [ai_player_id, human_player_id]
+    runner = QueueFakeCodexRunner(
+        [
+            open_negotiation_output(
+                game_id,
+                ai_player_id,
+                participant_player_ids,
+                context={"topic": "AI opens the negotiation"},
+            )
+        ]
+    )
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        negotiation_count_before = await table_count(session_factory, negotiations, game_id)
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "open_negotiation",
+                "mandatory": False,
+                "request_context": {"mode": "ai-initiate-negotiation"},
+            },
+        )
+
+        body = response.json()
+        created_negotiation_id = body["negotiation"]["id"]
+        ai_decision = await fetch_ai_decision(session_factory, UUID(body["ai_decision_id"]))
+
+        assert response.status_code == 200, response.text
+        assert body["status"] == "done"
+        assert body["decision_type"] == "open_negotiation"
+        assert body["negotiation_id"] == created_negotiation_id
+        assert body["outcome"]["kind"] == "open_negotiation"
+        assert body["outcome"]["status"] == "done"
+        assert body["outcome"]["negotiation_id"] == created_negotiation_id
+        assert body["negotiation"]["opened_by_player_id"] == ai_player_id
+        assert body["negotiation"]["participant_player_ids"] == participant_player_ids
+        assert body["negotiation"]["context"] == {"topic": "AI opens the negotiation"}
+        assert body["accepted_events"] == []
+        assert body["accepted_event_id"] is None
+        assert body["rejected_action_id"] is None
+        assert ai_decision["status"] == "accepted"
+        assert ai_decision["validation_result"]["lifecycle_result"]["negotiation_id"] == created_negotiation_id
+        assert len(runner.calls) == 1
+        assert await table_count(session_factory, negotiations, game_id) == negotiation_count_before + 1
+        assert await table_count(session_factory, rejected_actions, game_id) == 0
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("participant_case", "reason_code"),
+    [
+        ("unknown_participant", "participant_not_in_game"),
+        ("missing_acting_ai", "player_not_participant"),
+    ],
+)
+async def test_ai_open_negotiation_invalid_participants_reject_and_audit_without_mutation(
+    participant_case: str,
+    reason_code: str,
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_three_player_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    acting_ai_player_id = created["players"][1]["id"]
+    other_ai_player_id = created["players"][2]["id"]
+    participant_player_ids = (
+        [acting_ai_player_id, "00000000-0000-0000-0000-00000000d00d"]
+        if participant_case == "unknown_participant"
+        else [human_player_id, other_ai_player_id]
+    )
+    runner = QueueFakeCodexRunner(
+        [open_negotiation_output(game_id, acting_ai_player_id, participant_player_ids)]
+    )
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        negotiation_count_before = await table_count(session_factory, negotiations, game_id)
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": acting_ai_player_id,
+                "decision_type": "open_negotiation",
+                "mandatory": False,
+            },
+        )
+
+        body = response.json()
+        ai_decision = await fetch_ai_decision(session_factory, UUID(body["ai_decision_id"]))
+        rejected_action = await fetch_rejected_action(session_factory, UUID(body["rejected_action_id"]))
+
+        assert response.status_code == 200, response.text
+        assert body["status"] == "rejected"
+        assert body["reason_code"] == reason_code
+        assert body["validation_errors"][0]["code"] == reason_code
+        assert body["negotiation_id"] is None
+        assert body["negotiation"] is None
+        assert body["accepted_events"] == []
+        assert body["accepted_event_id"] is None
+        assert len(runner.calls) == 1
+        assert await table_count(session_factory, negotiations, game_id) == negotiation_count_before
+        assert await table_count(session_factory, rejected_actions, game_id) == 1
+        assert ai_decision["status"] == "rejected"
+        assert ai_decision["rejected_action_id"] == UUID(body["rejected_action_id"])
+        assert rejected_action["reason_code"] == reason_code
+        assert rejected_action["action_type"] == "AI_OPEN_NEGOTIATION"
+        assert rejected_action["actor_player_id"] == UUID(acting_ai_player_id)
+        assert rejected_action["payload"]["ai_output"]["negotiation"]["participant_player_ids"] == participant_player_ids
+        assert rejected_action["payload"]["no_substitute_move"] is True
+        assert rejected_action["payload"]["substitute_move"] is None
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "decision_type",
+    ["negotiation_message", "deal_proposal", "counteroffer", "accept_reject"],
+)
+async def test_existing_ai_negotiation_decisions_still_require_negotiation_id_before_codex(
+    decision_type: str,
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    ai_player_id = created["players"][1]["id"]
+    runner = QueueFakeCodexRunner([base_output(game_id, ai_player_id, decision_type)])
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        ai_decision_count_before = await table_count(session_factory, ai_decisions, game_id)
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": decision_type,
+                "mandatory": False,
+            },
+        )
+
+        body = response.json()
+        assert response.status_code == 422, response.text
+        assert body["status"] == "rejected"
+        assert body["reason_code"] == "negotiation_id_required"
+        assert body["validation_errors"][0]["field"] == "negotiation_id"
+        assert runner.calls == []
+        assert await table_count(session_factory, ai_decisions, game_id) == ai_decision_count_before
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_ai_open_negotiation_rejects_negotiation_id_before_codex(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    ai_player_id = created["players"][1]["id"]
+    existing_negotiation = await create_negotiation(client, game_id, human_player_id, ai_player_id)
+    runner = QueueFakeCodexRunner(
+        [open_negotiation_output(game_id, ai_player_id, [ai_player_id, human_player_id])]
+    )
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        ai_decision_count_before = await table_count(session_factory, ai_decisions, game_id)
+        negotiation_count_before = await table_count(session_factory, negotiations, game_id)
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "open_negotiation",
+                "negotiation_id": existing_negotiation["id"],
+                "mandatory": False,
+            },
+        )
+
+        body = response.json()
+        assert response.status_code == 422, response.text
+        assert body["status"] == "rejected"
+        assert body["reason_code"] == "negotiation_id_forbidden"
+        assert body["validation_errors"][0]["field"] == "negotiation_id"
+        assert runner.calls == []
+        assert await table_count(session_factory, ai_decisions, game_id) == ai_decision_count_before
+        assert await table_count(session_factory, negotiations, game_id) == negotiation_count_before
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_rejected_ai_lifecycle_applications_persist_rejected_action_id_and_consume_response_opportunity(
     api_app: FastAPI,
     client: httpx.AsyncClient,
@@ -855,6 +1068,22 @@ def deal_proposal_output(
             "recipient_player_ids": [human_player_id],
             "terms": structured_terms(ai_player_id, human_player_id, cash_from=ai_player_id),
             "message": "Here is a complex proposal with future rent participation.",
+        },
+    }
+
+
+def open_negotiation_output(
+    game_id: str,
+    ai_player_id: str,
+    participant_player_ids: Sequence[str],
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        **base_output(game_id, ai_player_id, "open_negotiation"),
+        "negotiation": {
+            "participant_player_ids": list(participant_player_ids),
+            "context": dict(context or {"topic": "stage 7.6 AI open negotiation"}),
         },
     }
 

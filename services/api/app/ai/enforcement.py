@@ -37,7 +37,7 @@ from app.api.games import (
     _prepare_deal_terms,
     _terms_hash_for_response,
 )
-from app.db.metadata import ai_decisions, deals, games, negotiations
+from app.db.metadata import ai_decisions, deals, games, negotiations, players
 from app.db.persistence import (
     AcceptedEventRecord,
     AcceptedEventTemplate,
@@ -169,6 +169,15 @@ async def enforce_ai_output(
             request=normalized,
             decision=decision,
             parsed_output=parsed_output,
+        )
+
+    if normalized.decision_type == "open_negotiation":
+        return await _enforce_open_negotiation_output_validation(
+            session_factory,
+            request=normalized,
+            decision=decision,
+            parsed_output=parsed_output,
+            state=prompt_context.state,
         )
 
     if normalized.decision_type in DEAL_DECISION_TYPES:
@@ -391,6 +400,73 @@ async def _enforce_negotiation_message_validation(
             validation_errors=errors,
         )
     return await _mark_decision_validated(session_factory, request, decision)
+
+
+async def _enforce_open_negotiation_output_validation(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    request: AIOutputEnforcementRequest,
+    decision: CodexExecAIDecisionResult,
+    parsed_output: Mapping[str, Any],
+    state: GameState,
+) -> AIOutputEnforcementResult:
+    errors = await _open_negotiation_output_errors(session_factory, request, parsed_output)
+    if errors:
+        return await _reject_ai_output(
+            session_factory,
+            request=request,
+            decision=decision,
+            state=state,
+            action_type="AI_OPEN_NEGOTIATION",
+            payload=_rejection_payload(decision, parsed_output=parsed_output),
+            validation_errors=errors,
+        )
+    return await _mark_decision_validated(session_factory, request, decision)
+
+
+async def _open_negotiation_output_errors(
+    session_factory: async_sessionmaker[AsyncSession],
+    request: AIOutputEnforcementRequest,
+    parsed_output: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    negotiation_payload = parsed_output.get("negotiation")
+    if not isinstance(negotiation_payload, Mapping):
+        return [_issue("negotiation_required", "open_negotiation output requires negotiation", "negotiation")]
+
+    participant_ids = [
+        _coerce_uuid(participant_id)
+        for participant_id in negotiation_payload["participant_player_ids"]
+    ]
+    participant_id_strings = {str(participant_id) for participant_id in participant_ids}
+    if str(_coerce_uuid(request.player_id)) not in participant_id_strings:
+        return [
+            _issue(
+                "player_not_participant",
+                "AI player must be a participant in an opened negotiation",
+                "negotiation.participant_player_ids",
+            )
+        ]
+
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(players.c.id).where(
+                players.c.game_id == _coerce_uuid(request.game_id),
+                players.c.id.in_(participant_ids),
+            )
+        )
+        found_ids = {str(player_id) for player_id in result.scalars().all()}
+
+    missing_ids = participant_id_strings - found_ids
+    if missing_ids:
+        return [
+            _issue(
+                "participant_not_in_game",
+                "open_negotiation participant_player_ids must all belong to the game",
+                "negotiation.participant_player_ids",
+            )
+        ]
+
+    return []
 
 
 async def _deal_output_errors(

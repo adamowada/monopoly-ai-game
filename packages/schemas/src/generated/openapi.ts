@@ -590,7 +590,7 @@ export interface components {
              * @default action_decision
              * @enum {string}
              */
-            decision_type: "action_decision" | "negotiation_message" | "deal_proposal" | "counteroffer" | "accept_reject";
+            decision_type: "action_decision" | "open_negotiation" | "negotiation_message" | "deal_proposal" | "counteroffer" | "accept_reject";
             /** Mandatory */
             mandatory?: boolean | null;
             /** Mode */

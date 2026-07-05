@@ -71,6 +71,7 @@ export const ActionSubmissionResultSchema = z.discriminatedUnion("status", [
 
 export const AiDecisionTypeSchema = z.enum([
   "action_decision",
+  "open_negotiation",
   "negotiation_message",
   "deal_proposal",
   "counteroffer",
