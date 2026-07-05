@@ -36,7 +36,7 @@
       "id": "collateralized_loan_railroad_example",
       "title": "Collateralized Railroad Loan Example",
       "summary": "A short-term cash loan is secured by railroad collateral.",
-      "text": "Collateralized loan example: player-alpha lends player-beta 300 until turn 8. Reading Railroad and Pennsylvania Railroad are pledged as collateral, and a default penalty can seize collateral through backend contract enforcement.",
+      "text": "Collateralized loan example: player-alpha lends player-beta 300 until turn 8. Reading Railroad and Pennsylvania Railroad are pledged as collateral for railroad-loan, and a default penalty references that loan for backend contract enforcement.",
       "parties": [
         "player-alpha",
         "player-beta"
@@ -44,6 +44,7 @@
       "instruments": [
         {
           "kind": "collateralized_loan",
+          "instrument_id": "railroad-loan",
           "lender_player_id": "player-alpha",
           "borrower_player_id": "player-beta",
           "principal_amount": 300,
@@ -55,15 +56,17 @@
         },
         {
           "kind": "default_penalty",
+          "instrument_id": "railroad-default-penalty",
           "liable_player_id": "player-beta",
           "beneficiary_player_id": "player-alpha",
           "amount": 75,
-          "instrument_id": "railroad-loan"
+          "target_instrument_id": "railroad-loan"
         }
       ],
       "validation_notes": [
         "Collateral property ids must be valid properties.",
-        "The default penalty must reference an existing instrument id when one is supplied."
+        "The collateralized loan declares instrument_id railroad-loan.",
+        "The default penalty uses target_instrument_id to reference railroad-loan and must not reuse the loan instrument_id."
       ]
     },
     {

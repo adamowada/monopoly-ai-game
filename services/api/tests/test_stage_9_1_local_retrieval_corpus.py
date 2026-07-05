@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 from app.rag.corpus import (
@@ -17,6 +19,8 @@ from app.rag.corpus import (
     build_static_local_corpus,
 )
 from app.rag.lexical import search_corpus
+from app.rules.financial_instruments import combination_deal
+from app.rules.static_data import load_classic_monopoly_data
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -72,6 +76,47 @@ def test_stage_9_1_local_retrieval_corpus_finds_rent_share_contract_example() ->
     assert top.source_id == "rent_share_boardwalk_example"
     assert "rent-share" in top.text
     assert "Boardwalk" in top.text
+
+
+def test_stage_9_1_contract_examples_validate_with_backend_financial_instrument_validator() -> None:
+    data = json.loads((CONTENT_RULES / "contract_examples.json").read_text(encoding="utf-8"))
+    property_ids = {property_data.id for property_data in load_classic_monopoly_data().properties}
+    failures: list[str] = []
+
+    for example in data["examples"]:
+        example_id = str(example.get("id", "<missing-id>"))
+        party_aliases = example.get("parties")
+        instruments = example.get("instruments")
+        assert isinstance(party_aliases, list), f"{example_id} must define a party list"
+        assert isinstance(instruments, list), f"{example_id} must define an instrument list"
+
+        party_id_by_alias = {
+            str(alias): f"00000000-0000-4000-8000-{index + 1:012d}"
+            for index, alias in enumerate(party_aliases)
+        }
+        validator_payloads: list[Mapping[str, Any]] = []
+        for index, instrument in enumerate(instruments):
+            assert isinstance(instrument, dict), (
+                f"{example_id} instrument {index} must be an object"
+            )
+            validator_payloads.append(
+                cast(
+                    Mapping[str, Any],
+                    _resolve_contract_example_party_aliases(instrument, party_id_by_alias),
+                )
+            )
+        _, errors = combination_deal(
+            validator_payloads,
+            player_ids=list(party_id_by_alias.values()),
+            property_ids=property_ids,
+            field=f"examples.{example_id}.instruments",
+        )
+        failures.extend(
+            f"{example_id}: {error.field}: {error.message}"
+            for error in errors
+        )
+
+    assert failures == []
 
 
 def test_stage_9_1_local_retrieval_corpus_builds_game_derived_documents_from_rows() -> None:
@@ -210,3 +255,22 @@ def test_stage_9_1_local_retrieval_corpus_jsonl_index_command_is_deterministic(
 def _only(documents: list[CorpusDocument]) -> CorpusDocument:
     assert len(documents) == 1
     return documents[0]
+
+
+def _resolve_contract_example_party_aliases(
+    value: object,
+    party_id_by_alias: Mapping[str, str],
+) -> object:
+    if isinstance(value, str):
+        return party_id_by_alias.get(value, value)
+    if isinstance(value, list):
+        return [
+            _resolve_contract_example_party_aliases(item, party_id_by_alias)
+            for item in value
+        ]
+    if isinstance(value, dict):
+        return {
+            key: _resolve_contract_example_party_aliases(item, party_id_by_alias)
+            for key, item in value.items()
+        }
+    return value
