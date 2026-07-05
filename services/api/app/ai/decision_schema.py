@@ -16,13 +16,14 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError, field_validator, model_validator
 
 
 MALFORMED_AI_OUTPUT_REASON_CODE = "malformed_ai_output"
 
 DECISION_TYPES: tuple[str, ...] = (
     "action_decision",
+    "open_negotiation",
     "negotiation_message",
     "deal_proposal",
     "counteroffer",
@@ -48,6 +49,22 @@ class NegotiationMessagePayload(_SchemaModel):
     )
     body: str = Field(min_length=1, max_length=4000, description="Negotiation text to send.")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OpenNegotiationPayload(_SchemaModel):
+    participant_player_ids: list[UUID] = Field(
+        min_length=2,
+        max_length=5,
+        json_schema_extra={"uniqueItems": True},
+    )
+    context: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("participant_player_ids")
+    @classmethod
+    def validate_unique_participants(cls, participant_player_ids: list[UUID]) -> list[UUID]:
+        if len(set(participant_player_ids)) != len(participant_player_ids):
+            raise ValueError("participant_player_ids must be unique")
+        return participant_player_ids
 
 
 class DealProposalPayload(_SchemaModel):
@@ -111,6 +128,11 @@ class ActionDecisionOutput(_DecisionBase):
     action: AIActionPayload
 
 
+class OpenNegotiationOutput(_DecisionBase):
+    decision_type: Literal["open_negotiation"]
+    negotiation: OpenNegotiationPayload
+
+
 class NegotiationMessageOutput(_DecisionBase):
     decision_type: Literal["negotiation_message"]
     negotiation_id: UUID
@@ -146,6 +168,7 @@ class MemoryUpdateOutput(_DecisionBase):
 
 AIDecisionVariant = Annotated[
     ActionDecisionOutput
+    | OpenNegotiationOutput
     | NegotiationMessageOutput
     | DealProposalOutput
     | CounterofferOutput
@@ -415,6 +438,7 @@ __all__ = [
     "MALFORMED_AI_OUTPUT_REASON_CODE",
     "MemoryUpdateOutput",
     "NegotiationMessageOutput",
+    "OpenNegotiationOutput",
     "RejectedAIOutput",
     "SelfDialogueOutput",
     "output_schema",

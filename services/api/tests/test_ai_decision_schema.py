@@ -20,6 +20,7 @@ PLAYER_ID = "00000000-0000-0000-0000-000000000702"
 RECIPIENT_ID = "00000000-0000-0000-0000-000000000703"
 NEGOTIATION_ID = "00000000-0000-0000-0000-000000000704"
 DEAL_ID = "00000000-0000-0000-0000-000000000705"
+THIRD_PLAYER_ID = "00000000-0000-0000-0000-000000000706"
 
 
 def _metadata() -> dict[str, Any]:
@@ -169,6 +170,70 @@ def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
     assert "expected_state_hash" in serialized
     assert "confidence" in serialized
     assert "rationale" in serialized
+
+
+def test_open_negotiation_parses_without_negotiation_id() -> None:
+    raw_output = {
+        **_base("open_negotiation"),
+        "negotiation": {
+            "participant_player_ids": [PLAYER_ID, RECIPIENT_ID, THIRD_PLAYER_ID],
+        },
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert parsed.root.decision_type == "open_negotiation"
+    assert not hasattr(parsed.root, "negotiation_id")
+    assert [str(player_id) for player_id in parsed.root.negotiation.participant_player_ids] == [
+        PLAYER_ID,
+        RECIPIENT_ID,
+        THIRD_PLAYER_ID,
+    ]
+    assert parsed.root.negotiation.context == {}
+
+
+def test_open_negotiation_is_present_in_exported_schema_without_required_negotiation_id() -> None:
+    serialized = json.dumps(AI_OUTPUT_SCHEMA)
+
+    assert "open_negotiation" in DECISION_TYPES
+    assert "open_negotiation" in serialized
+    open_negotiation_schema = AI_OUTPUT_SCHEMA["$defs"]["OpenNegotiationOutput"]
+    open_negotiation_payload_schema = AI_OUTPUT_SCHEMA["$defs"]["OpenNegotiationPayload"]
+    participant_schema = open_negotiation_payload_schema["properties"]["participant_player_ids"]
+    assert participant_schema["minItems"] == 2
+    assert participant_schema["maxItems"] == 5
+    assert participant_schema["uniqueItems"] is True
+    assert "context" in open_negotiation_payload_schema["properties"]
+    assert "context" not in open_negotiation_payload_schema["required"]
+    assert "negotiation_id" not in open_negotiation_schema["properties"]
+    assert "negotiation_id" not in open_negotiation_schema["required"]
+
+
+@pytest.mark.parametrize(
+    "participant_player_ids",
+    [
+        [PLAYER_ID],
+        [PLAYER_ID, PLAYER_ID],
+        [PLAYER_ID, RECIPIENT_ID, THIRD_PLAYER_ID, NEGOTIATION_ID, DEAL_ID, PLAYER_ID],
+    ],
+)
+def test_malformed_open_negotiation_participant_payloads_are_rejected(
+    participant_player_ids: list[str],
+) -> None:
+    raw_output = {
+        **_base("open_negotiation"),
+        "negotiation": {
+            "participant_player_ids": participant_player_ids,
+            "context": {"topic": "invalid participant list"},
+        },
+    }
+
+    with pytest.raises(AIDecisionValidationError) as exc_info:
+        validate_ai_decision_output(raw_output)
+
+    assert exc_info.value.reason_code == MALFORMED_AI_OUTPUT_REASON_CODE
+    assert {issue.code for issue in exc_info.value.errors} == {"malformed_ai_output"}
+    assert any("participant_player_ids" in (issue.field or issue.message) for issue in exc_info.value.errors)
 
 
 def test_overlong_ai_negotiation_messages_are_rejected_by_schema_before_lifecycle_application() -> None:

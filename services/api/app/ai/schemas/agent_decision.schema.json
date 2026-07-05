@@ -583,6 +583,88 @@
       "title": "NegotiationMessagePayload",
       "type": "object"
     },
+    "OpenNegotiationOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "decision_type": {
+          "const": "open_negotiation",
+          "title": "Decision Type",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "uuid",
+          "title": "Game Id",
+          "type": "string"
+        },
+        "memory_updates": {
+          "items": {
+            "$ref": "#/$defs/MemoryUpdatePayload"
+          },
+          "title": "Memory Updates",
+          "type": "array"
+        },
+        "negotiation": {
+          "$ref": "#/$defs/OpenNegotiationPayload"
+        },
+        "player_id": {
+          "format": "uuid",
+          "title": "Player Id",
+          "type": "string"
+        },
+        "rationale": {
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "self_dialogue": {
+          "$ref": "#/$defs/SelfDialoguePayload"
+        }
+      },
+      "required": [
+        "game_id",
+        "player_id",
+        "self_dialogue",
+        "memory_updates",
+        "confidence",
+        "rationale",
+        "decision_type",
+        "negotiation"
+      ],
+      "title": "OpenNegotiationOutput",
+      "type": "object"
+    },
+    "OpenNegotiationPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "additionalProperties": true,
+          "title": "Context",
+          "type": "object"
+        },
+        "participant_player_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "title": "Participant Player Ids",
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "participant_player_ids"
+      ],
+      "title": "OpenNegotiationPayload",
+      "type": "object"
+    },
     "SelfDialogueOutput": {
       "additionalProperties": false,
       "properties": {
@@ -690,6 +772,7 @@
       "deal_proposal": "#/$defs/DealProposalOutput",
       "memory_update": "#/$defs/MemoryUpdateOutput",
       "negotiation_message": "#/$defs/NegotiationMessageOutput",
+      "open_negotiation": "#/$defs/OpenNegotiationOutput",
       "self_dialogue": "#/$defs/SelfDialogueOutput"
     },
     "propertyName": "decision_type"
@@ -697,6 +780,9 @@
   "oneOf": [
     {
       "$ref": "#/$defs/ActionDecisionOutput"
+    },
+    {
+      "$ref": "#/$defs/OpenNegotiationOutput"
     },
     {
       "$ref": "#/$defs/NegotiationMessageOutput"
