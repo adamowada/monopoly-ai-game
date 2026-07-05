@@ -78,7 +78,7 @@ async def create_game(client: httpx.AsyncClient) -> dict[str, Any]:
             "players": [
                 {"name": "Ada", "kind": "human"},
                 {"name": "Grace", "kind": "human"},
-                {"name": "Linus", "kind": "ai"},
+                {"name": "Linus", "kind": "human"},
             ],
         },
     )

@@ -78,7 +78,7 @@ async def create_game(
             "players": [
                 {"name": "Ada", "kind": "human"},
                 {"name": "Grace", "kind": "human"},
-                {"name": "Linus", "kind": "ai"},
+                {"name": "Linus", "kind": "human"},
             ],
             "settings": {"negotiation_cutoffs": dict(cutoffs)},
         },

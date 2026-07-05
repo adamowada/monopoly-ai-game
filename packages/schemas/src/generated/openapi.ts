@@ -1966,7 +1966,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NegotiationResponse"];
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
                 };
             };
             /** @description Validation Error */

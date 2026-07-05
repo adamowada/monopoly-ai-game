@@ -3345,7 +3345,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NegotiationResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/NegotiationResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Create Negotiation Games  Game Id  Negotiations Post"
                 }
               }
             },

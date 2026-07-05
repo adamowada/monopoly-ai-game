@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -124,6 +125,19 @@ CUTOFF_MAX_PROPOSALS_PER_PLAYER = "negotiation_cutoff_max_proposals_per_player"
 CUTOFF_MAX_ACTIVE_SECONDS = "negotiation_cutoff_max_active_seconds"
 CUTOFF_MAX_AI_DECISION_ATTEMPTS = "negotiation_cutoff_max_ai_decision_attempts"
 CUTOFF_MAX_PENDING_OFFERS_PER_PLAYER = "negotiation_cutoff_max_pending_offers_per_player"
+
+
+@dataclass(frozen=True)
+class AiNegotiationLifecycleContext:
+    game_id: UUID
+    player_id: UUID
+    ai_decision_id: UUID
+
+
+_AI_NEGOTIATION_LIFECYCLE_CONTEXT: ContextVar[AiNegotiationLifecycleContext | None] = ContextVar(
+    "ai_negotiation_lifecycle_context",
+    default=None,
+)
 
 
 class PlayerCreateRequest(BaseModel):
@@ -1080,6 +1094,14 @@ async def create_negotiation_message(
     await _ensure_game_exists(session_factory, game_id)
     sender_player_id = _message_sender_player_id(payload)
     await _ensure_player_in_game(session_factory, game_id, sender_player_id)
+    ai_actor_response = await _reject_direct_ai_negotiation_actor(
+        session_factory=session_factory,
+        game_id=game_id,
+        actor_player_id=sender_player_id,
+        actor_field="sender_player_id",
+    )
+    if ai_actor_response is not None:
+        return ai_actor_response
 
     async with session_factory() as session:
         async with session.begin():
@@ -1170,14 +1192,14 @@ async def create_negotiation_message(
 
 @router.post(
     "/{game_id}/negotiations",
-    response_model=NegotiationResponse,
+    response_model=NegotiationResponse | LifecycleRejectedResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_negotiation(
     game_id: UUID,
     request: Request,
     payload: CreateNegotiationRequest,
-) -> NegotiationResponse:
+) -> NegotiationResponse | JSONResponse:
     session_factory = _session_factory(request)
     game_settings = await _load_game_settings(session_factory, game_id)
     await _ensure_player_ids_in_game(
@@ -1185,6 +1207,14 @@ async def create_negotiation(
         game_id,
         [payload.opened_by_player_id, *payload.participant_player_ids],
     )
+    ai_actor_response = await _reject_direct_ai_negotiation_actor(
+        session_factory=session_factory,
+        game_id=game_id,
+        actor_player_id=payload.opened_by_player_id,
+        actor_field="opened_by_player_id",
+    )
+    if ai_actor_response is not None:
+        return ai_actor_response
     state = await _load_replayed_state(session_factory, game_id)
 
     stored_context = _initial_negotiation_context(
@@ -1224,6 +1254,14 @@ async def create_deal(
     proposed_by_player_id = _deal_proposed_by_player_id(payload)
     await _ensure_game_exists(session_factory, game_id)
     await _ensure_player_in_game(session_factory, game_id, proposed_by_player_id)
+    ai_actor_response = await _reject_direct_ai_negotiation_actor(
+        session_factory=session_factory,
+        game_id=game_id,
+        actor_player_id=proposed_by_player_id,
+        actor_field="proposed_by_player_id",
+    )
+    if ai_actor_response is not None:
+        return ai_actor_response
     if payload.participant_player_ids:
         await _ensure_player_ids_in_game(session_factory, game_id, payload.participant_player_ids)
 
@@ -2382,6 +2420,34 @@ async def _apply_ai_negotiation_output(
             ),
         )
 
+    lifecycle_context = AiNegotiationLifecycleContext(
+        game_id=game_id,
+        player_id=player_id,
+        ai_decision_id=ai_decision_id,
+    )
+    lifecycle_token = _AI_NEGOTIATION_LIFECYCLE_CONTEXT.set(lifecycle_context)
+    try:
+        return await _apply_ai_negotiation_output_with_lifecycle_context(
+            request=request,
+            session_factory=session_factory,
+            game_id=game_id,
+            player_id=player_id,
+            ai_decision_id=ai_decision_id,
+            parsed_output=parsed_output,
+        )
+    finally:
+        _AI_NEGOTIATION_LIFECYCLE_CONTEXT.reset(lifecycle_token)
+
+
+async def _apply_ai_negotiation_output_with_lifecycle_context(
+    *,
+    request: Request,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    player_id: UUID,
+    ai_decision_id: UUID,
+    parsed_output: Mapping[str, Any],
+) -> AiNegotiationApplication:
     decision_type = str(parsed_output["decision_type"])
     if decision_type == "open_negotiation":
         negotiation_payload = parsed_output["negotiation"]
@@ -3830,12 +3896,76 @@ def _game_ai_blocked_validation_error() -> dict[str, str]:
     }
 
 
-def _ai_player_requires_codex_validation_error() -> dict[str, str]:
+def _ai_player_requires_codex_validation_error(*, field: str = "actor_id") -> dict[str, str]:
     return {
         "code": AI_PLAYER_REQUIRES_CODEX_REASON_CODE,
         "message": "AI-controlled players must submit actions through the Codex AI step endpoint",
-        "field": "actor_id",
+        "field": field,
     }
+
+
+def _ai_player_requires_codex_lifecycle_response(*, field: str) -> JSONResponse:
+    validation_error = _ai_player_requires_codex_validation_error(field=field)
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "status": "rejected",
+            "reason_code": AI_PLAYER_REQUIRES_CODEX_REASON_CODE,
+            "validation_errors": [validation_error],
+        },
+    )
+
+
+def _ai_negotiation_lifecycle_context_allows(
+    *,
+    game_id: UUID,
+    actor_player_id: UUID | str,
+) -> bool:
+    lifecycle_context = _AI_NEGOTIATION_LIFECYCLE_CONTEXT.get()
+    return (
+        lifecycle_context is not None
+        and lifecycle_context.game_id == game_id
+        and str(lifecycle_context.player_id) == str(actor_player_id)
+        and lifecycle_context.ai_decision_id is not None
+    )
+
+
+async def _reject_direct_ai_negotiation_actor(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    actor_player_id: UUID | str,
+    actor_field: str,
+) -> JSONResponse | None:
+    async with session_factory() as session:
+        return await _reject_direct_ai_negotiation_actor_in_session(
+            session=session,
+            game_id=game_id,
+            actor_player_id=actor_player_id,
+            actor_field=actor_field,
+        )
+
+
+async def _reject_direct_ai_negotiation_actor_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    actor_player_id: UUID | str,
+    actor_field: str,
+) -> JSONResponse | None:
+    if _ai_negotiation_lifecycle_context_allows(
+        game_id=game_id,
+        actor_player_id=actor_player_id,
+    ):
+        return None
+    controller_type = await _resolve_actor_controller_type_in_session(
+        session=session,
+        game_id=game_id,
+        actor_id=str(actor_player_id),
+    )
+    if controller_type == "ai":
+        return _ai_player_requires_codex_lifecycle_response(field=actor_field)
+    return None
 
 
 def _stale_action_validation_error() -> dict[str, str]:
@@ -3956,6 +4086,28 @@ async def _record_deal_acceptance_or_rejection(
                 )
 
             context = _normalized_negotiation_context(negotiation_row)
+            actor_player_id = _decision_player_id(payload, context, deal_row)
+            if actor_player_id is None:
+                return _lifecycle_rejection_response(
+                    "player_id_required",
+                    "player_id is required when more than one participant could respond",
+                    field="player_id",
+                )
+            if actor_player_id not in context["participant_player_ids"]:
+                return _lifecycle_rejection_response(
+                    "player_not_participant",
+                    "player_id must be a negotiation participant",
+                    field="player_id",
+                )
+            ai_actor_response = await _reject_direct_ai_negotiation_actor_in_session(
+                session=session,
+                game_id=game_id,
+                actor_player_id=actor_player_id,
+                actor_field="player_id",
+            )
+            if ai_actor_response is not None:
+                return ai_actor_response
+
             cutoff_response = await _expire_if_active_time_cutoff(
                 session=session,
                 game_id=game_id,
@@ -3987,20 +4139,6 @@ async def _record_deal_acceptance_or_rejection(
                     f"deal_{deal_row['status']}",
                     "only proposed current deals can be accepted or rejected",
                     field="status",
-                )
-
-            actor_player_id = _decision_player_id(payload, context, deal_row)
-            if actor_player_id is None:
-                return _lifecycle_rejection_response(
-                    "player_id_required",
-                    "player_id is required when more than one participant could respond",
-                    field="player_id",
-                )
-            if actor_player_id not in context["participant_player_ids"]:
-                return _lifecycle_rejection_response(
-                    "player_not_participant",
-                    "player_id must be a negotiation participant",
-                    field="player_id",
                 )
 
             if decision == "reject":
