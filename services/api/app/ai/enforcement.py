@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -77,6 +77,7 @@ class AIOutputEnforcementRequest:
     ai_profile_id: UUID | str | None = None
     negotiation_id: UUID | str | None = None
     mandatory: bool = True
+    request_context: Mapping[str, Any] = field(default_factory=dict)
     timeout_seconds: float = 120
 
 
@@ -211,6 +212,7 @@ async def _build_prompt_context(
                 session_factory=session_factory,
                 decision_type=request.decision_type,
                 negotiation_id=negotiation_id,
+                caller_request_context=request.request_context,
             )
     return _PromptContext(state=state, context_pack=context_pack)
 
@@ -816,6 +818,7 @@ def _normalize_request(request: AIOutputEnforcementRequest) -> AIOutputEnforceme
         ai_profile_id=None if request.ai_profile_id is None else _coerce_uuid(request.ai_profile_id),
         negotiation_id=None if request.negotiation_id is None else _coerce_uuid(request.negotiation_id),
         mandatory=request.mandatory,
+        request_context=request.request_context,
         timeout_seconds=request.timeout_seconds,
     )
 
@@ -1015,4 +1018,3 @@ __all__ = [
     "AIOutputEnforcementResult",
     "enforce_ai_output",
 ]
-

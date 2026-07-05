@@ -196,6 +196,52 @@ async def test_ai_turn_stepping_endpoint_progresses_mixed_human_ai_game(
 
 
 @pytest.mark.asyncio
+async def test_ai_step_persists_caller_request_context_in_prompt_context(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    # Caller request context reaches AI prompt context
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    state = await get_state(client, game_id)
+    request_context = {
+        "mode": "manual",
+        "selected_deal_id": "00000000-0000-0000-0000-000000000077",
+        "ui_state": {
+            "panel": "deal-review",
+            "filters": ["cash", "rent-share"],
+            "draft": {"priority": 2, "needs_attention": True},
+        },
+    }
+    runner = QueueFakeCodexRunner([valid_action_output(game_id, ai_player_id, state)])
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "action_decision",
+                "mandatory": True,
+                "request_context": request_context,
+            },
+        )
+
+        body = response.json()
+        assert response.status_code == 200, response.text
+        assert body["status"] == "accepted"
+        assert len(runner.calls) == 1
+        assert '"caller_request_context":' in runner.calls[0]["stdin"]
+        ai_decision = await fetch_ai_decision(session_factory, UUID(body["ai_decision_id"]))
+        assert ai_decision["prompt_context"]["caller_request_context"] == request_context
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_ai_step_blocks_and_surfaces_auditable_stalls(
     api_app: FastAPI,
     client: httpx.AsyncClient,

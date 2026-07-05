@@ -1870,6 +1870,7 @@ async def ai_step(
             decision_type=payload.decision_type,
             negotiation_id=payload.negotiation_id,
             mandatory=mandatory,
+            request_context=payload.request_context,
         ),
         **enforcement_kwargs,
     )
