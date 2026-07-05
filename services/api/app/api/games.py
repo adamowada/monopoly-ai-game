@@ -1906,6 +1906,10 @@ async def ai_step(
 
     from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
 
+    request_context = dict(payload.request_context)
+    if payload.mode is not None:
+        request_context["mode"] = payload.mode
+
     enforcement_kwargs = _ai_enforcement_kwargs(request)
     enforcement_result = await enforce_ai_output(
         session_factory,
@@ -1916,7 +1920,7 @@ async def ai_step(
             decision_type=payload.decision_type,
             negotiation_id=payload.negotiation_id,
             mandatory=mandatory,
-            request_context=payload.request_context,
+            request_context=request_context,
         ),
         **enforcement_kwargs,
     )

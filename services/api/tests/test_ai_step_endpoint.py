@@ -321,6 +321,43 @@ async def test_ai_step_persists_caller_request_context_in_prompt_context(
 
 
 @pytest.mark.asyncio
+async def test_ai_step_merges_top_level_mode_into_caller_request_context(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    state = await get_state(client, game_id)
+    runner = QueueFakeCodexRunner([valid_action_output(game_id, ai_player_id, state)])
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "action_decision",
+                "mandatory": True,
+                "mode": "manual-step",
+                "request_context": {"source": "top-level-mode-regression"},
+            },
+        )
+
+        body = response.json()
+        assert response.status_code == 200, response.text
+        assert body["status"] == "accepted"
+        ai_decision = await fetch_ai_decision(session_factory, UUID(body["ai_decision_id"]))
+        caller_request_context = ai_decision["prompt_context"]["caller_request_context"]
+        assert caller_request_context["source"] == "top-level-mode-regression"
+        assert caller_request_context["mode"] == "manual-step"
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_ai_step_blocks_and_surfaces_auditable_stalls(
     api_app: FastAPI,
     client: httpx.AsyncClient,
