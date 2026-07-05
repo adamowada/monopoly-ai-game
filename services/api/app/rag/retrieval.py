@@ -224,13 +224,19 @@ def embed_text(text: str) -> list[float]:
     """Return a deterministic local embedding suitable for pgvector storage."""
 
     vector = [0.0 for _ in range(RAG_EMBEDDING_DIMENSIONS)]
-    for token in TOKEN_PATTERN.findall(text.lower()):
+    tokens = TOKEN_PATTERN.findall(text.lower())
+    for token in tokens:
         digest = hashlib.sha256(token.encode("utf-8")).digest()
         index = int.from_bytes(digest[:4], "big") % RAG_EMBEDDING_DIMENSIONS
         sign = 1.0 if digest[4] % 2 == 0 else -1.0
         vector[index] += sign
 
     norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0 and tokens:
+        digest = hashlib.sha256(" ".join(tokens).encode("utf-8")).digest()
+        index = int.from_bytes(digest[:4], "big") % RAG_EMBEDDING_DIMENSIONS
+        vector[index] = 1.0 if digest[4] % 2 == 0 else -1.0
+        norm = 1.0
     if norm == 0:
         return vector
     return [round(value / norm, 8) for value in vector]
@@ -624,14 +630,21 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def _json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, str | int | float | bool):
+    if value is None or isinstance(value, str | int | bool):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("retrieval audit JSON must not contain NaN or Infinity")
         return value
     if isinstance(value, UUID):
         return str(value)
     if isinstance(value, datetime | date):
         return value.isoformat()
     if isinstance(value, Decimal):
-        return float(value)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("retrieval audit JSON must not contain NaN or Infinity")
+        return number
     if isinstance(value, Mapping):
         return {
             str(key): _json_safe(item)
@@ -644,9 +657,15 @@ def _json_safe(value: Any) -> Any:
 
 def _float_value(value: Any) -> float:
     if isinstance(value, Decimal):
-        return float(value)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("retrieval scores must be finite")
+        return number
     if isinstance(value, int | float):
-        return float(value)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("retrieval scores must be finite")
+        return number
     return 0.0
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 from collections.abc import AsyncIterator, Sequence
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.ai.context_pack import build_ai_context_pack_from_db
 from app.db.metadata import (
+    RAG_EMBEDDING_DIMENSIONS,
     ai_decisions,
     ai_memory_entries,
     ai_profiles,
@@ -30,7 +32,7 @@ from app.db.metadata import (
     retrieval_records,
 )
 from app.rag import corpus as rag_corpus
-from app.rag.retrieval import refresh_rag_index_entries, search_retrieval
+from app.rag.retrieval import embed_text, refresh_rag_index_entries, search_retrieval
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
@@ -135,6 +137,29 @@ def test_stage_9_2_corpus_rules_path_missing_required_files_fails_explicitly(
         rag_corpus.resolve_content_rules_dir(packaged_corpus_file)
 
 
+def test_stage_9_2_retrieval_embedding_never_returns_zero_for_nonempty_query() -> None:
+    embedding = embed_text("jail cash")
+
+    assert len(embedding) == RAG_EMBEDDING_DIMENSIONS
+    assert any(value != 0.0 for value in embedding)
+    assert all(math.isfinite(value) for value in embedding)
+    assert math.sqrt(sum(value * value for value in embedding)) == pytest.approx(1.0)
+
+
+def test_stage_9_2_rag_index_metadata_matches_migration_uniqueness() -> None:
+    index_key_unique_constraints = [
+        constraint
+        for constraint in rag_index_entries.constraints
+        if isinstance(constraint, sa.UniqueConstraint)
+        and tuple(str(column.name) for column in constraint.columns) == ("index_key",)
+    ]
+
+    assert rag_index_entries.c.index_key.unique is not True
+    assert [constraint.name for constraint in index_key_unique_constraints] == [
+        "uq_rag_index_entries_index_key"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_stage_9_2_retrieval_search_combines_postgres_fts_and_pgvector(
     session_factory: async_sessionmaker[AsyncSession],
@@ -173,6 +198,70 @@ async def test_stage_9_2_retrieval_search_combines_postgres_fts_and_pgvector(
         assert "hotel rent 2000" in top.text
         assert indexed["search_vector"] is not None
         assert indexed["embedding"] is not None
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_9_2_retrieval_audit_records_only_finite_scores_for_cancelling_query(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    state = _state()
+    await _insert_retrieval_fixture(session_factory, state)
+    try:
+        async with session_factory() as session:
+            await session.execute(
+                rag_index_entries.insert().values(
+                    index_key="game:00000000-0000-0000-0000-000000009201:stage92-cancel",
+                    document_id="stage92-cancelling-hash-query",
+                    game_id=GAME_ID,
+                    player_id=None,
+                    phase=state.turn.phase.value,
+                    source_type="rules",
+                    source_id="stage92_cancelling_hash_query",
+                    title="jail cash",
+                    text="jail cash",
+                    metadata_blob={"fixture": "stage-9-2-cancelling-query"},
+                    search_vector=sa.func.to_tsvector(
+                        sa.literal_column("'english'"),
+                        "jail cash jail cash",
+                    ),
+                    embedding=embed_text("jail cash jail cash"),
+                )
+            )
+            results = await search_retrieval(
+                session,
+                query_text="jail cash",
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                source_types=("rules",),
+                phase=state.turn.phase.value,
+                limit=5,
+                query_context={"fixture": "stage-9-2-cancelling-query"},
+                audit=True,
+            )
+            await session.commit()
+
+        matching_results = [
+            result for result in results if result.source_id == "stage92_cancelling_hash_query"
+        ]
+        assert matching_results
+        assert all(math.isfinite(result.score) for result in matching_results)
+        assert all(math.isfinite(result.fts_rank) for result in matching_results)
+        assert all(math.isfinite(result.vector_similarity) for result in matching_results)
+        for result in matching_results:
+            json.dumps(result.ranking, allow_nan=False, sort_keys=True)
+            json.dumps(result.retrieved_context, allow_nan=False, sort_keys=True)
+
+        records = await _fetch_retrieval_records(session_factory)
+        matching_records = [
+            record for record in records if record["source_id"] == "stage92_cancelling_hash_query"
+        ]
+        assert matching_records
+        assert all(math.isfinite(float(record["score"])) for record in matching_records)
+        for record in matching_records:
+            json.dumps(record["query_context"], allow_nan=False, sort_keys=True)
+            json.dumps(record["retrieved_context"], allow_nan=False, sort_keys=True)
     finally:
         await _delete_game(session_factory)
 

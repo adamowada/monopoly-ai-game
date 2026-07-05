@@ -596,7 +596,7 @@ rag_index_entries = sa.Table(
     "rag_index_entries",
     metadata,
     uuid_pk(),
-    sa.Column("index_key", sa.String(length=260), nullable=False, unique=True),
+    sa.Column("index_key", sa.String(length=260), nullable=False),
     sa.Column("document_id", sa.String(length=260), nullable=False),
     sa.Column(
         "game_id",
