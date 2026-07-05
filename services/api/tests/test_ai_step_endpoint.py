@@ -851,6 +851,88 @@ async def test_rejected_ai_lifecycle_applications_persist_rejected_action_id_and
 
 
 @pytest.mark.asyncio
+async def test_mandatory_ai_lifecycle_rejection_marks_game_blocked(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    ai_player_id = created["players"][1]["id"]
+    negotiation = await create_negotiation(client, game_id, human_player_id, ai_player_id)
+    current_deal = await create_human_deal(
+        client,
+        game_id,
+        negotiation["id"],
+        human_player_id,
+        ai_player_id,
+    )
+    first_accept = await client.post(
+        f"/games/{game_id}/deals/{current_deal['id']}/accept",
+        json={"player_id": ai_player_id},
+    )
+    runner = QueueFakeCodexRunner(
+        [accept_reject_output(game_id, ai_player_id, negotiation["id"], current_deal["id"])]
+    )
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "accept_reject",
+                "negotiation_id": negotiation["id"],
+                "mandatory": True,
+            },
+        )
+
+        body = response.json()
+        ai_decision_id = UUID(body["ai_decision_id"])
+        rejected_action_id = UUID(body["rejected_action_id"])
+        ai_decision = await fetch_ai_decision(session_factory, ai_decision_id)
+        rejected_action = await fetch_rejected_action(session_factory, rejected_action_id)
+
+        assert first_accept.status_code == 200, first_accept.text
+        assert response.status_code == 200, response.text
+        assert body["status"] == "blocked"
+        assert body["game_status"] == "AI_BLOCKED"
+        assert body["rejected_action_id"] is not None
+        assert body["reason_code"] == "deal_already_accepted_by_player"
+        assert body["validation_errors"][0]["code"] == "deal_already_accepted_by_player"
+        assert body["outcome"]["kind"] == "ai_blocked"
+        assert body["outcome"]["status"] == "blocked"
+        assert body["outcome"]["reason_code"] == "deal_already_accepted_by_player"
+        assert body["consumed_response_opportunity"] is False
+        assert body["consumed_negotiation_opportunity"] is None
+        assert ai_decision["status"] == "rejected"
+        assert ai_decision["rejected_action_id"] == rejected_action_id
+        assert rejected_action["id"] == rejected_action_id
+        assert rejected_action["reason_code"] == "deal_already_accepted_by_player"
+        assert rejected_action["action_type"] == "AI_ACCEPT_REJECT"
+        assert rejected_action["actor_player_id"] == UUID(ai_player_id)
+        assert rejected_action["payload"]["ai_output"]["accept_reject"]["deal_id"] == current_deal["id"]
+        assert rejected_action["payload"]["no_substitute_move"] is True
+        assert rejected_action["payload"]["substitute_move"] is None
+        assert rejected_action["legal_action_context"]["actor_id"] == ai_player_id
+        assert rejected_action["phase"] is not None
+        assert rejected_action["state_hash"] is not None
+        validation_result = ai_decision["validation_result"]
+        assert validation_result["status"] == "rejected"
+        assert validation_result["reason_code"] == "deal_already_accepted_by_player"
+        assert validation_result["validation_errors"][0]["code"] == "deal_already_accepted_by_player"
+        assert validation_result["lifecycle_result"]["status"] == "rejected"
+        assert validation_result["lifecycle_result"]["reason_code"] == "deal_already_accepted_by_player"
+        assert validation_result["no_substitute_move"] is True
+        assert validation_result["substitute_move"] is None
+        assert await game_status(session_factory, game_id) == "AI_BLOCKED"
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_consumed_ai_negotiation_opportunities_reject_before_launching_codex(
     api_app: FastAPI,
     client: httpx.AsyncClient,

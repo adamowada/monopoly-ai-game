@@ -2207,8 +2207,14 @@ async def _ai_step_response_from_enforcement(
                 ai_decision=ai_decision,
                 application=application,
             )
+            application_response_status: Literal["rejected", "blocked"] = (
+                "blocked" if persisted_rejection.game_status == AI_BLOCKED_STATUS else "rejected"
+            )
+            application_reason_code = application.reason_code or _reason_code(
+                _application_validation_errors(application)
+            )
             return AiStepResponse(
-                status="rejected",
+                status=application_response_status,
                 game_id=game_id,
                 player_id=payload.player_id,
                 decision_type=payload.decision_type,
@@ -2223,8 +2229,12 @@ async def _ai_step_response_from_enforcement(
                     or persisted_rejection.consumed_response_opportunity
                 ),
                 consumed_negotiation_opportunity=persisted_rejection.consumed_negotiation_opportunity,
-                outcome=application.outcome,
-                reason_code=application.reason_code,
+                outcome=_ai_lifecycle_rejection_response_outcome(
+                    application=application,
+                    response_status=application_response_status,
+                    reason_code=application_reason_code,
+                ),
+                reason_code=application_reason_code,
                 validation_errors=application.validation_errors,
             )
 
@@ -2551,7 +2561,13 @@ async def _persist_ai_negotiation_application_rejection(
                 )
             )
 
-            if not mandatory and negotiation_id is not None:
+            if mandatory:
+                await session.execute(
+                    games.update()
+                    .where(games.c.id == game_id)
+                    .values(status=AI_BLOCKED_STATUS, updated_at=sa.func.now())
+                )
+            elif negotiation_id is not None:
                 consumed_response_opportunity = await _consume_ai_lifecycle_response_opportunity_in_session(
                     session=session,
                     game_id=game_id,
@@ -2574,6 +2590,22 @@ async def _persist_ai_negotiation_application_rejection(
         consumed_negotiation_opportunity=consumed_negotiation_opportunity,
         game_status=game_status,
     )
+
+
+def _ai_lifecycle_rejection_response_outcome(
+    *,
+    application: AiNegotiationApplication,
+    response_status: Literal["rejected", "blocked"],
+    reason_code: str,
+) -> Mapping[str, Any]:
+    if response_status != "blocked":
+        return application.outcome
+    return {
+        "kind": "ai_blocked",
+        "status": "blocked",
+        "reason_code": reason_code,
+        "lifecycle_outcome": _json_safe_mapping(application.outcome),
+    }
 
 
 def _application_validation_errors(
