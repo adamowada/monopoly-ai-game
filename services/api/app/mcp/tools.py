@@ -155,14 +155,24 @@ async def _search_rules(context: LocalMCPContext, arguments: JsonMapping) -> Jso
 
 
 async def _search_memory(context: LocalMCPContext, arguments: JsonMapping) -> JsonDict:
-    _required_uuid_text(arguments, "game_id")
-    _required_uuid_text(arguments, "player_id")
+    game_id = UUID(_required_uuid_text(arguments, "game_id"))
+    player_id = _required_uuid_text(arguments, "player_id")
     source_types = _source_types_argument(
         arguments.get("source_types"),
         default=MEMORY_SOURCE_TYPES,
         allowed=MEMORY_SOURCE_TYPES,
         field="source_types",
     )
+    session_factory = context.session_factory()
+    async with session_factory() as session:
+        await _ensure_game_exists(session, game_id)
+        player_errors = await _player_reference_errors(
+            session,
+            game_id=game_id,
+            player_ids=[player_id],
+        )
+    if player_errors:
+        raise LocalMCPToolError(player_errors[0]["message"])
     return await _search(
         context,
         arguments,

@@ -109,8 +109,12 @@ async def refresh_rag_index_entries(
     """Build or refresh durable local RAG index entries from Stage 9.1 corpus sources."""
 
     documents = build_static_local_corpus()
+    current_static_document_ids = frozenset(
+        document.document_id for document in documents if document.source_type in STATIC_SOURCE_TYPES
+    )
     game_uuid = None if game_id is None else _coerce_uuid(game_id)
     await _delete_legacy_game_scoped_static_entries(session)
+    await _delete_stale_global_static_entries(session, current_static_document_ids)
 
     if game_uuid is not None:
         await session.execute(
@@ -483,6 +487,22 @@ async def _delete_legacy_game_scoped_static_entries(session: AsyncSession) -> No
             rag_index_entries.c.index_key.like("game:%"),
         )
     )
+
+
+async def _delete_stale_global_static_entries(
+    session: AsyncSession,
+    current_static_document_ids: frozenset[str],
+) -> None:
+    delete_filter = sa.and_(
+        rag_index_entries.c.game_id.is_(None),
+        rag_index_entries.c.source_type.in_(tuple(sorted(STATIC_SOURCE_TYPES))),
+    )
+    if current_static_document_ids:
+        delete_filter = sa.and_(
+            delete_filter,
+            rag_index_entries.c.document_id.notin_(tuple(sorted(current_static_document_ids))),
+        )
+    await session.execute(rag_index_entries.delete().where(delete_filter))
 
 
 def _game_id_filter(column: sa.ColumnElement[Any], game_uuid: UUID | None) -> sa.ColumnElement[bool]:

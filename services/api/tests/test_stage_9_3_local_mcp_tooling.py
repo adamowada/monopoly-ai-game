@@ -29,16 +29,18 @@ from app.db.metadata import (
     metadata,
     negotiations,
     obligations,
+    rag_index_entries,
     rejected_actions,
 )
 from app.main import create_app
 from app.mcp.tools import (
     REQUIRED_LOCAL_MCP_TOOL_NAMES,
     LocalMCPContext,
+    LocalMCPToolError,
     call_local_tool,
     list_local_tools,
 )
-from app.rag.retrieval import refresh_rag_index_entries
+from app.rag.retrieval import embed_text, refresh_rag_index_entries
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -220,6 +222,146 @@ async def test_stage_9_3_search_rules_defaults_cover_house_rules_and_contract_ex
     assert "rent_share_boardwalk_example" in {
         result["source_id"] for result in contract_examples_payload["results"]
     }
+
+
+@pytest.mark.asyncio
+async def test_stage_9_3_search_memory_rejects_player_outside_game(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_game = await create_game(client, player_kinds=("human", "ai"))
+    unrelated_game = await create_game(client, player_kinds=("human", "ai"))
+    game_id = requested_game["id"]
+    unrelated_player_id = unrelated_game["players"][0]["id"]
+    context = LocalMCPContext(api_app=api_app)
+
+    async def fail_retrieval(*_: Any, **__: Any) -> list[Any]:
+        raise AssertionError("search_memory must reject player membership before retrieval")
+
+    monkeypatch.setattr("app.mcp.tools.search_retrieval", fail_retrieval)
+    try:
+        with pytest.raises(LocalMCPToolError, match="player must belong to the game"):
+            await call_local_tool(
+                "search_memory",
+                {
+                    "query_text": "stage93 unrelated player table memory probe",
+                    "game_id": game_id,
+                    "player_id": unrelated_player_id,
+                    "limit": 3,
+                },
+                context=context,
+            )
+    finally:
+        await delete_game(session_factory, requested_game["id"])
+        await delete_game(session_factory, unrelated_game["id"])
+
+
+@pytest.mark.asyncio
+async def test_stage_9_3_refresh_removes_stale_static_rag_documents(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    created = await create_game(client, player_kinds=("human", "ai"))
+    game_id = created["id"]
+    stale_documents = (
+        ("stage93_obsolete_rules_document", "rules"),
+        ("stage93_obsolete_house_rules_document", "house_rules"),
+        ("stage93_obsolete_contract_examples_document", "contract_examples"),
+    )
+    stale_document_ids = [document_id for document_id, _ in stale_documents]
+    dynamic_document_id = "stage93_game_scoped_dynamic_memory_document"
+    dynamic_source_id = "00000000-0000-0000-0000-000000009934"
+    dynamic_title = "Stage 9.3 Game Scoped Dynamic Memory"
+    dynamic_text = "stage93 game scoped dynamic memory must survive static refresh cleanup."
+
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    rag_index_entries.delete().where(
+                        rag_index_entries.c.document_id.in_(stale_document_ids)
+                    )
+                )
+                for document_id, source_type in stale_documents:
+                    title = f"Stage 9.3 Obsolete {source_type}"
+                    text = f"stage93 obsolete {source_type} static document should be removed."
+                    await session.execute(
+                        rag_index_entries.insert().values(
+                            index_key=f"static:{document_id}",
+                            document_id=document_id,
+                            game_id=None,
+                            player_id=None,
+                            phase=None,
+                            source_type=source_type,
+                            source_id=document_id,
+                            title=title,
+                            text=text,
+                            metadata_blob={
+                                "document_id": document_id,
+                                "source_type": source_type,
+                                "source_id": document_id,
+                            },
+                            search_vector=sa.func.to_tsvector(
+                                sa.literal_column("'english'"),
+                                f"{title} {text}",
+                            ),
+                            embedding=embed_text(f"{title} {text}"),
+                        )
+                    )
+                await session.execute(
+                    rag_index_entries.insert().values(
+                        index_key=f"game:{game_id}:{dynamic_document_id}",
+                        document_id=dynamic_document_id,
+                        game_id=UUID(game_id),
+                        player_id=None,
+                        phase=None,
+                        source_type="ai_memory",
+                        source_id=dynamic_source_id,
+                        title=dynamic_title,
+                        text=dynamic_text,
+                        metadata_blob={
+                            "document_id": dynamic_document_id,
+                            "source_type": "ai_memory",
+                            "source_id": dynamic_source_id,
+                            "game_id": game_id,
+                        },
+                        search_vector=sa.func.to_tsvector(
+                            sa.literal_column("'english'"),
+                            f"{dynamic_title} {dynamic_text}",
+                        ),
+                        embedding=embed_text(f"{dynamic_title} {dynamic_text}"),
+                    )
+                )
+
+        async with session_factory() as session:
+            await refresh_rag_index_entries(session)
+            await session.commit()
+
+        async with session_factory() as session:
+            result = await session.execute(
+                sa.select(
+                    rag_index_entries.c.document_id,
+                    rag_index_entries.c.game_id,
+                    rag_index_entries.c.source_type,
+                ).where(
+                    rag_index_entries.c.document_id.in_(
+                        [*stale_document_ids, dynamic_document_id]
+                    )
+                )
+            )
+            rows = [dict(row) for row in result.mappings().all()]
+
+        remaining_document_ids = {row["document_id"] for row in rows}
+        assert remaining_document_ids.isdisjoint(stale_document_ids)
+        assert {
+            "document_id": dynamic_document_id,
+            "game_id": UUID(game_id),
+            "source_type": "ai_memory",
+        } in rows
+    finally:
+        await delete_game(session_factory, game_id)
 
 
 @pytest.mark.asyncio
