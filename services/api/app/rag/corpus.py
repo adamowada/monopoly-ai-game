@@ -12,6 +12,8 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.context_pack import VISIBLE_MEMORY_SCOPES
+from app.ai.memory import memory_row_is_usable_for_context
 from app.db.metadata import (
     ai_decisions,
     ai_memory_entries,
@@ -399,14 +401,37 @@ async def load_ai_memory_corpus_from_db(
     player_id: str | UUID | None = None,
     limit: int | None = None,
 ) -> list[CorpusDocument]:
-    statement = sa.select(ai_memory_entries).where(ai_memory_entries.c.game_id == _coerce_uuid(game_id))
+    visible_scopes = tuple(sorted(VISIBLE_MEMORY_SCOPES))
+    statement = (
+        sa.select(ai_memory_entries, ai_decisions.c.status.label("source_decision_status"))
+        .select_from(
+            ai_memory_entries.outerjoin(
+                ai_decisions,
+                ai_memory_entries.c.source_decision_id == ai_decisions.c.id,
+            )
+        )
+        .where(ai_memory_entries.c.game_id == _coerce_uuid(game_id))
+    )
     if player_id is not None:
-        statement = statement.where(ai_memory_entries.c.player_id == _coerce_uuid(player_id))
+        player_uuid = _coerce_uuid(player_id)
+        statement = statement.where(
+            sa.or_(
+                ai_memory_entries.c.player_id == player_uuid,
+                ai_memory_entries.c.visibility.in_(visible_scopes),
+            )
+        )
+    else:
+        statement = statement.where(ai_memory_entries.c.visibility.in_(visible_scopes))
     statement = statement.order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
     if limit is not None:
         statement = statement.limit(limit)
     result = await session.execute(statement)
-    return build_ai_memory_corpus(_string_key_rows(result.mappings()))
+    rows = [
+        row
+        for row in _string_key_rows(result.mappings())
+        if memory_row_is_usable_for_context(row)
+    ]
+    return build_ai_memory_corpus(rows)
 
 
 async def load_negotiation_history_corpus_from_db(
@@ -414,6 +439,7 @@ async def load_negotiation_history_corpus_from_db(
     *,
     game_id: str | UUID,
     negotiation_id: str | UUID | None = None,
+    player_id: str | UUID | None = None,
     limit_per_table: int | None = None,
 ) -> list[CorpusDocument]:
     game_uuid = _coerce_uuid(game_id)
@@ -428,6 +454,16 @@ async def load_negotiation_history_corpus_from_db(
             negotiation_messages.c.negotiation_id == negotiation_uuid
         )
         deal_statement = deal_statement.where(deals.c.negotiation_id == negotiation_uuid)
+
+    if player_id is not None:
+        player_uuid = _coerce_uuid(player_id)
+        message_statement = message_statement.where(
+            sa.or_(
+                negotiation_messages.c.recipient_player_id.is_(None),
+                negotiation_messages.c.sender_player_id == player_uuid,
+                negotiation_messages.c.recipient_player_id == player_uuid,
+            )
+        )
 
     negotiation_statement = negotiation_statement.order_by(negotiations.c.created_at, negotiations.c.id)
     message_statement = message_statement.order_by(negotiation_messages.c.created_at, negotiation_messages.c.id)
