@@ -28,8 +28,10 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from app.ai import enforcement as enforcement_module
 from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
 from app.ai.orchestrator import (
+    CodexExecAIDecisionResult,
     CodexExecProcessResult,
     CodexExecRunner,
     CodexExecTimeoutError,
@@ -226,6 +228,105 @@ async def test_legal_ai_action_commits_exactly_like_human_action_and_attempts_on
         assert decisions[0]["parsed_output"]["action"]["type"] == "ROLL_DICE"
         assert decisions[0]["prompt_context"]["context_pack_schema_version"] == "ai-context-pack-v1"
         assert await table_count(session_factory, rejected_actions) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_ai_blocked_after_codex_returns_rejects_valid_action_without_event_mutation(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    parsed_output = valid_action_output(fixture.state)
+    raw_output = json.dumps(parsed_output)
+    validation_result = {
+        "status": "valid",
+        "schema": "AI_OUTPUT_SCHEMA",
+        "no_substitute_move": True,
+        "substitute_move": None,
+    }
+
+    async def fake_request_once(*args: Any, **kwargs: Any) -> CodexExecAIDecisionResult:
+        del kwargs
+        patched_session_factory = args[0]
+        request = args[1]
+        prompt_context = args[2]
+        async with patched_session_factory() as session:
+            async with session.begin():
+                insert_result = await session.execute(
+                    ai_decisions.insert()
+                    .values(
+                        game_id=request.game_id,
+                        player_id=request.player_id,
+                        ai_profile_id=request.ai_profile_id,
+                        negotiation_id=request.negotiation_id,
+                        decision_type=request.decision_type,
+                        status="validated",
+                        phase=prompt_context.state.turn.phase.value,
+                        state_hash=prompt_context.state.state_hash(),
+                        prompt_context_hash="blocked-after-codex",
+                        prompt_context=dict(prompt_context.context_pack),
+                        raw_output=raw_output,
+                        parsed_output=parsed_output,
+                        validation_result=validation_result,
+                        accepted_event_id=None,
+                        rejected_action_id=None,
+                    )
+                    .returning(ai_decisions.c.id)
+                )
+                decision_id = insert_result.scalar_one()
+                await session.execute(
+                    games.update()
+                    .where(games.c.id == request.game_id)
+                    .values(status="AI_BLOCKED", updated_at=sa.func.now())
+                )
+        return CodexExecAIDecisionResult(
+            ai_decision_id=decision_id,
+            status="validated",
+            raw_output=raw_output,
+            parsed_output=parsed_output,
+            validation_result=validation_result,
+            prompt_context_hash="blocked-after-codex",
+        )
+
+    monkeypatch.setattr(enforcement_module, "_request_once", fake_request_once)
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="action_decision",
+                mandatory=True,
+                timeout_seconds=7,
+            ),
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        rejections = await fetch_rows(session_factory, rejected_actions)
+        decisions = await fetch_rows(session_factory, ai_decisions)
+        game = await fetch_game(session_factory)
+
+        assert result.status == "rejected"
+        assert result.accepted_event_id is None
+        assert result.rejected_action_id == rejections[0]["id"]
+        assert result.game_status == "AI_BLOCKED"
+        assert game["status"] == "AI_BLOCKED"
+        assert rejections[0]["reason_code"] == "game_ai_blocked"
+        assert rejections[0]["payload"]["no_substitute_move"] is True
+        assert rejections[0]["payload"]["substitute_move"] is None
+        assert decisions[0]["status"] == "rejected"
+        assert decisions[0]["accepted_event_id"] is None
+        assert decisions[0]["rejected_action_id"] == rejections[0]["id"]
+        assert decisions[0]["validation_result"]["reason_code"] == "game_ai_blocked"
+        assert decisions[0]["validation_result"]["no_substitute_move"] is True
+        assert decisions[0]["validation_result"]["substitute_move"] is None
+        assert await table_count(session_factory, game_events) == 0
     finally:
         await delete_game(session_factory)
 

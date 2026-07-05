@@ -37,7 +37,7 @@ from app.api.games import (
     _prepare_deal_terms,
     _terms_hash_for_response,
 )
-from app.db.metadata import ai_decisions, deals, games, negotiations, players
+from app.db.metadata import ai_decisions, deals, games, negotiations, players, rejected_actions
 from app.db.persistence import (
     AcceptedEventRecord,
     AcceptedEventTemplate,
@@ -55,6 +55,7 @@ from app.rules.state import GameState
 
 
 AI_BLOCKED_STATUS = "AI_BLOCKED"
+GAME_AI_BLOCKED_REASON_CODE = "game_ai_blocked"
 NON_MANDATORY_RESPONSE_KEY = "ai_response_opportunities_consumed"
 DEAL_DECISION_TYPES = frozenset({"deal_proposal", "counteroffer", "accept_reject"})
 NEGOTIATION_DECISION_TYPES = frozenset(
@@ -282,6 +283,20 @@ async def _enforce_action_decision(
                     session,
                     _coerce_uuid(request.game_id),
                 )
+                game_status = await _game_status_in_session(
+                    session,
+                    _coerce_uuid(request.game_id),
+                )
+                if game_status == AI_BLOCKED_STATUS:
+                    return await _reject_ai_output_in_session(
+                        session=session,
+                        request=request,
+                        decision=decision,
+                        state=state,
+                        action_type=action.type,
+                        payload=_rejection_payload(decision, parsed_output=parsed_output),
+                        validation_errors=[_game_ai_blocked_issue()],
+                    )
                 execution = execute_action(
                     state,
                     action,
@@ -765,6 +780,60 @@ async def _reject_ai_output(
     )
 
 
+async def _reject_ai_output_in_session(
+    *,
+    session: AsyncSession,
+    request: AIOutputEnforcementRequest,
+    decision: CodexExecAIDecisionResult,
+    state: GameState,
+    action_type: str,
+    payload: Mapping[str, Any],
+    validation_errors: Sequence[Mapping[str, Any]],
+) -> AIOutputEnforcementResult:
+    reason_code = _reason_code(validation_errors)
+    rejected_result = await session.execute(
+        rejected_actions.insert()
+        .values(
+            game_id=_coerce_uuid(request.game_id),
+            actor_player_id=_coerce_uuid(request.player_id),
+            action_type=action_type,
+            payload=dict(payload),
+            reason_code=reason_code,
+            validation_errors=[dict(error) for error in validation_errors],
+            legal_action_context=_legal_action_context(
+                state,
+                str(_coerce_uuid(request.player_id)),
+            ),
+            phase=state.turn.phase.value,
+            state_hash=state.state_hash(),
+        )
+        .returning(rejected_actions.c.id)
+    )
+    rejected_action_id = rejected_result.scalar_one()
+    await session.execute(
+        ai_decisions.update()
+        .where(ai_decisions.c.id == decision.ai_decision_id)
+        .values(
+            status="rejected",
+            accepted_event_id=None,
+            rejected_action_id=rejected_action_id,
+            validation_result=_rejected_validation_result(
+                decision.validation_result,
+                reason_code=reason_code,
+                validation_errors=validation_errors,
+            ),
+        )
+    )
+    game_status = await _game_status_in_session(session, _coerce_uuid(request.game_id))
+    return AIOutputEnforcementResult(
+        ai_decision_id=decision.ai_decision_id,
+        status="rejected",
+        accepted_event_id=None,
+        rejected_action_id=rejected_action_id,
+        game_status=game_status,
+    )
+
+
 async def _consume_non_mandatory_response_opportunity(
     *,
     session: AsyncSession,
@@ -817,8 +886,22 @@ async def _mark_decision_validated(
     request: AIOutputEnforcementRequest,
     decision: CodexExecAIDecisionResult,
 ) -> AIOutputEnforcementResult:
+    persistence = EventPersistence(session_factory)
     async with session_factory() as session:
         async with session.begin():
+            game_id = _coerce_uuid(request.game_id)
+            state = await persistence.replay_current_state_for_update(session, game_id)
+            game_status = await _game_status_in_session(session, game_id)
+            if game_status == AI_BLOCKED_STATUS:
+                return await _reject_ai_output_in_session(
+                    session=session,
+                    request=request,
+                    decision=decision,
+                    state=state,
+                    action_type=_audit_action_type(request.decision_type, decision.parsed_output),
+                    payload=_rejection_payload(decision, parsed_output=decision.parsed_output),
+                    validation_errors=[_game_ai_blocked_issue()],
+                )
             await session.execute(
                 ai_decisions.update()
                 .where(ai_decisions.c.id == decision.ai_decision_id)
@@ -830,7 +913,7 @@ async def _mark_decision_validated(
                     ),
                 )
             )
-            game_status = await _game_status_in_session(session, _coerce_uuid(request.game_id))
+            game_status = await _game_status_in_session(session, game_id)
     return AIOutputEnforcementResult(
         ai_decision_id=decision.ai_decision_id,
         status="validated",
@@ -971,6 +1054,14 @@ def _reason_code(validation_errors: Sequence[Mapping[str, Any]]) -> str:
         if isinstance(code, str) and code:
             return code
     return "invalid_ai_output"
+
+
+def _game_ai_blocked_issue() -> dict[str, Any]:
+    return _issue(
+        GAME_AI_BLOCKED_REASON_CODE,
+        "AI_BLOCKED games reject AI decisions after Codex returns",
+        "game_status",
+    )
 
 
 def _audit_action_type(decision_type: str, parsed_output: Mapping[str, Any] | None) -> str:
