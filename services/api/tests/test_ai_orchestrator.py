@@ -491,6 +491,42 @@ async def test_malformed_process_output_is_rejected_without_mutating_game_state(
 
 
 @pytest.mark.asyncio
+async def test_non_object_malformed_ai_output_preserves_decoded_value_without_events(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    decoded_value = "schema-invalid scalar output"
+    runner = FakeCodexRunner(final_output=json.dumps(decoded_value))
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        rows = await fetch_ai_decision_rows(session_factory)
+
+        assert result.status == "rejected"
+        assert result.validation_result["reason_code"] == "malformed_ai_output"
+        assert result.parsed_output == decoded_value
+        assert result.accepted_event_id is None
+        assert result.rejected_action_id is None
+        assert len(rows) == 1
+        assert rows[0]["status"] == "rejected"
+        assert rows[0]["raw_output"] == json.dumps(decoded_value)
+        assert rows[0]["parsed_output"] == decoded_value
+        assert rows[0]["validation_result"]["reason_code"] == "malformed_ai_output"
+        assert rows[0]["accepted_event_id"] is None
+        assert rows[0]["rejected_action_id"] is None
+        assert await count_events(session_factory) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_invalid_jsonl_output_is_rejected_without_substitute_move(
     session_factory: async_sessionmaker,
     tmp_path: Path,

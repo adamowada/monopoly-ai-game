@@ -66,7 +66,7 @@ class CodexExecAIDecisionResult:
     ai_decision_id: UUID
     status: str
     raw_output: str
-    parsed_output: Mapping[str, Any] | None
+    parsed_output: Any | None
     validation_result: Mapping[str, Any]
     prompt_context_hash: str
     accepted_event_id: None = None
@@ -384,7 +384,7 @@ async def _persist_attempt_result(
     request: CodexExecAIDecisionRequest,
     status: str,
     raw_output: str,
-    parsed_output: Mapping[str, Any] | None,
+    parsed_output: Any | None,
     validation_result: Mapping[str, Any],
     prompt_context: Mapping[str, Any],
     prompt_context_hash: str,
@@ -393,6 +393,9 @@ async def _persist_attempt_result(
     player_id = _coerce_uuid(request.player_id)
     requested_profile_id = None if request.ai_profile_id is None else _coerce_uuid(request.ai_profile_id)
     negotiation_id = None if request.negotiation_id is None else _coerce_uuid(request.negotiation_id)
+    persisted_parsed_output = None if parsed_output is None else _json_safe(parsed_output)
+    if isinstance(persisted_parsed_output, Mapping):
+        persisted_parsed_output = dict(persisted_parsed_output)
 
     async with session_factory() as session:
         async with session.begin():
@@ -415,7 +418,7 @@ async def _persist_attempt_result(
                     prompt_context_hash=prompt_context_hash,
                     prompt_context=dict(prompt_context),
                     raw_output=raw_output,
-                    parsed_output=None if parsed_output is None else dict(parsed_output),
+                    parsed_output=persisted_parsed_output,
                     validation_result=dict(validation_result),
                     accepted_event_id=None,
                     rejected_action_id=None,
@@ -428,7 +431,7 @@ async def _persist_attempt_result(
         ai_decision_id=decision_id,
         status=status,
         raw_output=raw_output,
-        parsed_output=parsed_output,
+        parsed_output=persisted_parsed_output,
         validation_result=validation_result,
         prompt_context_hash=prompt_context_hash,
     )
