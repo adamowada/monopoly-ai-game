@@ -782,13 +782,18 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading || legalActionsQuery.isFetching;
   const controlsDisabled = legalActionsLoading || submitAction.isPending || aiStep.isPending;
   const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
+  const directActionControlsDisabled = controlsDisabled || Boolean(activeAiPlayer);
   const aiStepBlocked = !activeAiPlayer || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
   const auctionControlsDisabled =
-    controlsDisabled || (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
+    directActionControlsDisabled ||
+    (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
 
   function handleSubmit(action: LegalAction) {
+    if (activeAiPlayer) {
+      return;
+    }
     submitAction.mutate(action);
   }
 
@@ -824,7 +829,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       <div className="grid content-start gap-4">
         <ClassicGameBoard game={game} />
         <PropertyManagementPanel
-          controlsDisabled={controlsDisabled}
+          controlsDisabled={directActionControlsDisabled}
           game={game}
           legalActions={legalActions}
           onSubmit={handleSubmit}
@@ -897,7 +902,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
             <ActionGroupPanel
               title={groupTitles.turn}
               actions={actionsByGroup.turn}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />
@@ -906,7 +911,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
               <div className="mt-2 flex flex-wrap gap-2">
                 <EndTurnControl
                   endTurnAction={endTurnAction}
-                  disabled={controlsDisabled}
+                  disabled={directActionControlsDisabled}
                   pendingActionType={pendingActionType}
                   onSubmit={handleSubmit}
                 />
@@ -916,21 +921,21 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
             <ActionGroupPanel
               title={groupTitles.purchase}
               actions={actionsByGroup.purchase}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />
             <ActionGroupPanel
               title={groupTitles.payment}
               actions={actionsByGroup.payment}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />
             <ActionGroupPanel
               title={groupTitles.jail}
               actions={actionsByGroup.jail}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />

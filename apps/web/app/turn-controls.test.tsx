@@ -140,6 +140,18 @@ function legalAction(
   };
 }
 
+function aiLegalAction(
+  type: string,
+  payload: Record<string, unknown> = {},
+  expectedStateHash = "ai-state-0",
+  expectedEventSequence = 0,
+) {
+  return {
+    ...legalAction(type, payload, expectedStateHash, expectedEventSequence),
+    actor_id: graceId,
+  };
+}
+
 function eventsFixture(events: Array<Record<string, unknown>> = []) {
   return { events };
 }
@@ -817,6 +829,69 @@ describe("GamePlaySurface turn controls", () => {
     const status = await screen.findByRole("status", { name: "AI step status" });
     await waitFor(() => expect(status).toHaveTextContent("AI rejected"));
     expect(status).toHaveTextContent("game_ai_blocked");
+  });
+
+  it("disables direct action controls for AI turns", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [aiLegalAction("ROLL_DICE")],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        throw new Error("AI direct actions must not be submitted from turn controls");
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    const controls = await screen.findByRole("region", { name: "Turn controls" });
+    const rollButton = await within(controls).findByRole("button", { name: "Roll dice" });
+    expect(rollButton).toBeDisabled();
+    fireEvent.click(rollButton);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+      ),
+    ).toBe(false);
+
+    const stepButton = within(controls).getByRole("button", { name: "Step AI" });
+    expect(stepButton).toBeEnabled();
+    fireEvent.click(stepButton);
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+      ),
+    ).toBe(false);
   });
 
   it("runs the Automatic AI step control while an active AI player is idle", async () => {
