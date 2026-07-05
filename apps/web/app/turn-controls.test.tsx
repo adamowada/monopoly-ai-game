@@ -1221,6 +1221,142 @@ describe("GamePlaySurface turn controls", () => {
     });
   });
 
+  it("disables gameplay controls when AI_BLOCKED", async () => {
+    const auctionState = mixedAuctionHumanTurnStateFixture();
+    const blockedGame = {
+      ...gameFixture(1),
+      status: "AI_BLOCKED",
+    };
+    const blockedLegalAction = (type: string, payload: Record<string, unknown> = {}) =>
+      legalAction(type, payload, auctionState.state_hash, auctionState.event_sequence);
+    const blockedAiLegalAction = (type: string, payload: Record<string, unknown> = {}) =>
+      aiLegalAction(type, payload, auctionState.state_hash, auctionState.event_sequence);
+    const humanBid = blockedLegalAction("BID_AUCTION", {
+      property_id: "property_mediterranean_avenue",
+      amount: 26,
+    });
+    const humanPass = blockedLegalAction("PASS_AUCTION", {
+      property_id: "property_mediterranean_avenue",
+    });
+    const aiBid = blockedAiLegalAction("BID_AUCTION", {
+      property_id: "property_mediterranean_avenue",
+      amount: 27,
+    });
+    const aiPass = blockedAiLegalAction("PASS_AUCTION", {
+      property_id: "property_mediterranean_avenue",
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(blockedGame);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(auctionState);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [
+            blockedLegalAction("ROLL_DICE"),
+            blockedLegalAction("END_TURN"),
+            blockedLegalAction("MORTGAGE_PROPERTY", { property_id: "property_mediterranean_avenue" }),
+            blockedLegalAction("UNMORTGAGE_PROPERTY", { property_id: "property_mediterranean_avenue" }),
+            blockedLegalAction("BUY_HOUSE", { property_id: "property_mediterranean_avenue" }),
+            blockedLegalAction("SELL_HOUSE", { property_id: "property_mediterranean_avenue" }),
+            humanBid,
+            humanPass,
+          ],
+          state_hash: auctionState.state_hash,
+          event_sequence: auctionState.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [aiBid, aiPass],
+          state_hash: auctionState.state_hash,
+          event_sequence: auctionState.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        return Response.json(acceptedRollResponse());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock, blockedGame);
+
+    const controls = await screen.findByRole("region", { name: "Turn controls" });
+    const rollButton = await within(controls).findByRole("button", { name: "Roll dice" });
+    const endTurnButton = within(controls).getByRole("button", { name: "End turn" });
+    expect(rollButton).toBeDisabled();
+    expect(endTurnButton).toBeDisabled();
+    expect(within(controls).queryByRole("button", { name: "Step AI" })).not.toBeInTheDocument();
+    expect(within(controls).queryByRole("checkbox", { name: "Auto-step AI" })).not.toBeInTheDocument();
+
+    const management = await screen.findByRole("region", { name: "Property management" });
+    const mortgageButton = await within(management).findByRole("button", { name: "Mortgage" });
+    const unmortgageButton = within(management).getByRole("button", { name: "Unmortgage" });
+    const buildButton = within(management).getByRole("button", { name: "Build house" });
+    const sellButton = within(management).getByRole("button", { name: "Sell house" });
+    expect(mortgageButton).toBeDisabled();
+    expect(unmortgageButton).toBeDisabled();
+    expect(buildButton).toBeDisabled();
+    expect(sellButton).toBeDisabled();
+
+    const auction = await screen.findByRole("region", { name: "Auction" });
+    const adaControls = await within(auction).findByRole("group", { name: "Ada auction controls" });
+    const graceControls = await within(auction).findByRole("group", { name: "Grace auction controls" });
+    const adaBidButton = within(adaControls).getByRole("button", { name: "Bid" });
+    const adaPassButton = within(adaControls).getByRole("button", { name: "Pass" });
+    const graceBidButton = within(graceControls).getByRole("button", { name: "Bid" });
+    const gracePassButton = within(graceControls).getByRole("button", { name: "Pass" });
+    const aiBidderStepButton = await within(graceControls).findByRole("button", { name: "Step AI" });
+    expect(adaBidButton).toBeDisabled();
+    expect(adaPassButton).toBeDisabled();
+    expect(graceBidButton).toBeDisabled();
+    expect(gracePassButton).toBeDisabled();
+    expect(aiBidderStepButton).toBeDisabled();
+
+    for (const control of [
+      rollButton,
+      endTurnButton,
+      mortgageButton,
+      unmortgageButton,
+      buildButton,
+      sellButton,
+      adaBidButton,
+      adaPassButton,
+      graceBidButton,
+      gracePassButton,
+      aiBidderStepButton,
+    ]) {
+      fireEvent.click(control);
+    }
+
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+      ),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
   it("runs the Automatic AI step control while an active AI player is idle", async () => {
     // Automatic AI step control
     const fetchMock = baseFetchMock({

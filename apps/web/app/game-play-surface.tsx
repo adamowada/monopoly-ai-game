@@ -783,10 +783,11 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading || legalActionsQuery.isFetching;
-  const controlsDisabled = legalActionsLoading || submitAction.isPending || aiStep.isPending;
+  const gameAiBlocked = game.status === "AI_BLOCKED";
+  const controlsDisabled = gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending;
   const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
   const directActionControlsDisabled = controlsDisabled || Boolean(activeAiPlayer);
-  const aiStepStateBlocked = !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
+  const aiStepStateBlocked = gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
   const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
@@ -823,14 +824,14 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   }
 
   function handleAiStep(mode: AiStepMode, playerId = activeAiPlayer?.id) {
-    if (!playerId || aiStepStateBlocked) {
+    if (!playerId || aiStepStateBlocked || gameAiBlocked) {
       return;
     }
     aiStep.mutate({ mode, playerId });
   }
 
   useEffect(() => {
-    if (!autoStepAi || !activeAiPlayer || !autoStepKey || aiStep.isPending || submitAction.isPending) {
+    if (gameAiBlocked || !autoStepAi || !activeAiPlayer || !autoStepKey || aiStep.isPending || submitAction.isPending) {
       return;
     }
     if (stateQuery.isFetching || gameQuery.isFetching || lastAutoStepKey === autoStepKey) {
@@ -844,6 +845,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     autoStepAi,
     autoStepKey,
     gameQuery.isFetching,
+    gameAiBlocked,
     lastAutoStepKey,
     stateQuery.isFetching,
     submitAction.isPending,
@@ -918,6 +920,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
                   <input
                     type="checkbox"
                     checked={autoStepAi}
+                    disabled={gameAiBlocked}
                     onChange={(event) => setAutoStepAi(event.target.checked)}
                     className="size-4 accent-purple-700"
                   />
