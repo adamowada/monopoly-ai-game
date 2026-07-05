@@ -1819,7 +1819,17 @@ async def ai_step(
         )
     mandatory = payload.mandatory if payload.mandatory is not None else payload.decision_type == "action_decision"
     if payload.negotiation_id is not None:
-        await _ensure_negotiation_in_game(session_factory, game_id, payload.negotiation_id)
+        if payload.decision_type != "action_decision":
+            preflight_rejection = await _ai_negotiation_preflight_rejection(
+                session_factory=session_factory,
+                game_id=game_id,
+                player_id=payload.player_id,
+                negotiation_id=payload.negotiation_id,
+            )
+            if preflight_rejection is not None:
+                return preflight_rejection
+        else:
+            await _ensure_negotiation_in_game(session_factory, game_id, payload.negotiation_id)
         consumed_rejection = await _ai_consumed_response_opportunity_rejection(
             session_factory=session_factory,
             game_id=game_id,
@@ -1947,6 +1957,42 @@ def _ai_enforcement_kwargs(request: Request) -> dict[str, Any]:
     if work_dir is not None:
         kwargs["work_dir"] = work_dir
     return kwargs
+
+
+async def _ai_negotiation_preflight_rejection(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    player_id: UUID,
+    negotiation_id: UUID,
+) -> JSONResponse | None:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(negotiations.c.status, negotiations.c.context).where(
+                negotiations.c.game_id == game_id,
+                negotiations.c.id == negotiation_id,
+            )
+        )
+        negotiation_row = result.mappings().first()
+
+    if negotiation_row is None:
+        raise HTTPException(
+            status_code=422,
+            detail="negotiation does not belong to game",
+        )
+
+    terminal_response = _reject_if_negotiation_terminal(str(negotiation_row["status"]))
+    if terminal_response is not None:
+        return terminal_response
+
+    context = _normalized_negotiation_context({"context": negotiation_row["context"]})
+    if str(player_id) not in context["participant_player_ids"]:
+        return _lifecycle_rejection_response(
+            "player_not_participant",
+            "AI player must be a negotiation participant",
+            field="player_id",
+        )
+    return None
 
 
 async def _ai_consumed_response_opportunity_rejection(

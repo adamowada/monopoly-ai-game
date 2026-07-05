@@ -512,6 +512,112 @@ async def test_consumed_ai_negotiation_opportunities_reject_before_launching_cod
         await delete_game(session_factory, game_id)
 
 
+@pytest.mark.asyncio
+async def test_invalid_ai_negotiation_requests_reject_before_launching_codex(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    # Invalid AI negotiation requests reject before launching Codex
+    created = await create_three_player_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    participant_ai_player_id = created["players"][1]["id"]
+    nonparticipant_ai_player_id = created["players"][2]["id"]
+    expired_negotiation = await create_negotiation(
+        client,
+        game_id,
+        human_player_id,
+        participant_ai_player_id,
+    )
+    active_negotiation = await create_negotiation(
+        client,
+        game_id,
+        human_player_id,
+        participant_ai_player_id,
+    )
+    runner = QueueFakeCodexRunner(
+        [
+            negotiation_message_output(
+                game_id,
+                participant_ai_player_id,
+                human_player_id,
+                expired_negotiation["id"],
+            ),
+            negotiation_message_output(
+                game_id,
+                nonparticipant_ai_player_id,
+                human_player_id,
+                active_negotiation["id"],
+            ),
+        ]
+    )
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        expire_response = await client.post(
+            f"/games/{game_id}/negotiations/{expired_negotiation['id']}/expire"
+        )
+        ai_decision_count_before_invalid_requests = await table_count(
+            session_factory,
+            ai_decisions,
+            game_id,
+        )
+
+        expired_response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": participant_ai_player_id,
+                "decision_type": "negotiation_message",
+                "negotiation_id": expired_negotiation["id"],
+                "mandatory": False,
+            },
+        )
+        ai_decision_count_after_expired_request = await table_count(
+            session_factory,
+            ai_decisions,
+            game_id,
+        )
+        nonparticipant_response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": nonparticipant_ai_player_id,
+                "decision_type": "negotiation_message",
+                "negotiation_id": active_negotiation["id"],
+                "mandatory": False,
+            },
+        )
+        ai_decision_count_after_nonparticipant_request = await table_count(
+            session_factory,
+            ai_decisions,
+            game_id,
+        )
+
+        expired_body = expired_response.json()
+        nonparticipant_body = nonparticipant_response.json()
+        assert expire_response.status_code == 200, expire_response.text
+        assert expired_response.status_code == 422, expired_response.text
+        assert expired_body["status"] == "rejected"
+        assert expired_body["reason_code"] == "negotiation_expired"
+        assert expired_body["validation_errors"][0]["code"] == "negotiation_expired"
+        assert nonparticipant_response.status_code == 422, nonparticipant_response.text
+        assert nonparticipant_body["status"] == "rejected"
+        assert nonparticipant_body["reason_code"] == "player_not_participant"
+        assert nonparticipant_body["validation_errors"][0]["code"] == "player_not_participant"
+        assert runner.calls == []
+        assert (
+            ai_decision_count_after_expired_request
+            == ai_decision_count_before_invalid_requests
+        )
+        assert (
+            ai_decision_count_after_nonparticipant_request
+            == ai_decision_count_before_invalid_requests
+        )
+    finally:
+        await delete_game(session_factory, game_id)
+
+
 async def create_game(client: httpx.AsyncClient, *, ai_first: bool = False) -> dict[str, Any]:
     players = (
         [{"name": "Grace", "kind": "ai"}, {"name": "Ada", "kind": "human"}]
@@ -521,6 +627,22 @@ async def create_game(client: httpx.AsyncClient, *, ai_first: bool = False) -> d
     response = await client.post(
         "/games",
         json={"seed": "phase-7-stage-7.6-ai-step", "players": players},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def create_three_player_game(client: httpx.AsyncClient) -> dict[str, Any]:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "phase-7-stage-7.6-invalid-ai-step",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "ai"},
+                {"name": "Lin", "kind": "ai"},
+            ],
+        },
     )
     assert response.status_code == 201, response.text
     return response.json()
