@@ -79,7 +79,7 @@ def build_ai_context_pack(
             "public_messages": [
                 _public_negotiation_message(row)
                 for row in _sorted_rows(negotiation_messages)
-                if _is_public_negotiation_message(row)
+                if _is_visible_negotiation_message(row, actor_id)
             ],
             "public_deals": [_public_deal(row) for row in _sorted_rows(deals)],
         },
@@ -154,6 +154,7 @@ async def build_ai_context_pack_from_db(
     message_rows = await _load_negotiation_message_rows(
         session,
         game_id=game_uuid,
+        player_id=player_uuid,
         negotiation_id=negotiation_uuid,
         limit=max_negotiation_messages,
     )
@@ -251,12 +252,17 @@ async def _load_negotiation_message_rows(
     session: AsyncSession,
     *,
     game_id: UUID,
+    player_id: UUID,
     negotiation_id: UUID | None,
     limit: int,
 ) -> list[dict[str, Any]]:
     statement = sa.select(negotiation_messages).where(
         negotiation_messages.c.game_id == game_id,
-        negotiation_messages.c.recipient_player_id.is_(None),
+        sa.or_(
+            negotiation_messages.c.recipient_player_id.is_(None),
+            negotiation_messages.c.sender_player_id == player_id,
+            negotiation_messages.c.recipient_player_id == player_id,
+        ),
     )
     if negotiation_id is not None:
         statement = statement.where(negotiation_messages.c.negotiation_id == negotiation_id)
@@ -595,15 +601,21 @@ def _instruction_contract() -> dict[str, Any]:
         "instructions": [
             "Choose action_decision.action only from legal_actions when making a game action.",
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
-            "Negotiation text may use only public negotiation context and visible memory snippets.",
+            "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",
         ],
     }
 
 
-def _is_public_negotiation_message(row: Mapping[str, Any]) -> bool:
-    return row.get("recipient_player_id") is None
+def _is_visible_negotiation_message(row: Mapping[str, Any], actor_id: str) -> bool:
+    sender_player_id = _string_or_none(row.get("sender_player_id"))
+    recipient_player_id = _string_or_none(row.get("recipient_player_id"))
+    return (
+        recipient_player_id is None
+        or sender_player_id == actor_id
+        or recipient_player_id == actor_id
+    )
 
 
 def _sorted_rows(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:

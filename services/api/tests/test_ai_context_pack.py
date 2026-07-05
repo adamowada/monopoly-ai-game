@@ -70,6 +70,7 @@ NEGOTIATION_ID = UUID("00000000-0000-0000-0000-000000007405")
 DEAL_ID = UUID("00000000-0000-0000-0000-000000007406")
 CONTRACT_ID = UUID("00000000-0000-0000-0000-000000007407")
 OBLIGATION_ID = UUID("00000000-0000-0000-0000-000000007408")
+THIRD_PLAYER_ID = UUID("00000000-0000-0000-0000-000000007409")
 
 
 class FakeCodexRunner(CodexExecRunner):
@@ -147,6 +148,7 @@ def _state() -> GameState:
         players=(
             PlayerSetup(id=str(AI_PLAYER_ID), name="Grace", kind="ai"),
             PlayerSetup(id=str(OTHER_PLAYER_ID), name="Ada", kind="human"),
+            PlayerSetup(id=str(THIRD_PLAYER_ID), name="Lin", kind="human"),
         ),
     )
 
@@ -222,6 +224,50 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
 
 
 @pytest.mark.asyncio
+async def test_context_pack_includes_only_negotiation_messages_visible_to_acting_ai(
+    session_factory: async_sessionmaker,
+) -> None:
+    state = _state()
+    await _insert_context_fixture(session_factory, state)
+    try:
+        async with session_factory() as session:
+            pack = await build_ai_context_pack_from_db(
+                session,
+                state=state,
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                decision_type="negotiation_response",
+            )
+
+        messages_by_body = {
+            message["body"]: message
+            for message in pack["negotiation_context"]["public_messages"]
+        }
+
+        public_message = messages_by_body[
+            "I can trade cash now for future consideration."
+        ]
+        assert public_message["sender_player_id"] == str(AI_PLAYER_ID)
+        assert public_message["recipient_player_id"] is None
+
+        sent_by_ai_message = messages_by_body[
+            "Grace privately offers Ada a side payment."
+        ]
+        assert sent_by_ai_message["sender_player_id"] == str(AI_PLAYER_ID)
+        assert sent_by_ai_message["recipient_player_id"] == str(OTHER_PLAYER_ID)
+
+        addressed_to_ai_message = messages_by_body[
+            "Ada privately asks Grace to sweeten the deal."
+        ]
+        assert addressed_to_ai_message["sender_player_id"] == str(OTHER_PLAYER_ID)
+        assert addressed_to_ai_message["recipient_player_id"] == str(AI_PLAYER_ID)
+
+        assert "Ada privately tells Lin not to trust Grace." not in messages_by_body
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_context_pack_persists_as_orchestrator_prompt_context_without_mutating_actions(
     session_factory: async_sessionmaker,
     tmp_path: Path,
@@ -270,9 +316,11 @@ async def test_context_pack_persists_as_orchestrator_prompt_context_without_muta
         stored_context = rows[0]["prompt_context"]
         assert stored_context == pack
         assert rows[0]["prompt_context_hash"] == result.prompt_context_hash
-        assert stored_context["negotiation_context"]["public_messages"][0]["body"] == (
-            "I can trade cash now for future consideration."
-        )
+        stored_message_bodies = {
+            message["body"]
+            for message in stored_context["negotiation_context"]["public_messages"]
+        }
+        assert "I can trade cash now for future consideration." in stored_message_bodies
         assert stored_context["negotiation_context"]["public_deals"][0]["id"] == str(DEAL_ID)
         assert stored_context["contracts"]["active_contracts"][0]["id"] == str(CONTRACT_ID)
         assert stored_context["contracts"]["active_obligations"][0]["id"] == str(OBLIGATION_ID)
@@ -378,7 +426,11 @@ async def _insert_negotiation_rows(session: AsyncSession) -> None:
             phase="START_TURN",
             round_number=1,
             context={
-                "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+                "participant_player_ids": [
+                    str(AI_PLAYER_ID),
+                    str(OTHER_PLAYER_ID),
+                    str(THIRD_PLAYER_ID),
+                ],
                 "context": {"topic": "cash-for-favor"},
                 "pending_deal_id": str(DEAL_ID),
             },
@@ -392,6 +444,39 @@ async def _insert_negotiation_rows(session: AsyncSession) -> None:
             recipient_player_id=None,
             message_type="freeform_message",
             body="I can trade cash now for future consideration.",
+            payload={"message_type": "freeform_message"},
+        )
+    )
+    await session.execute(
+        negotiation_messages.insert().values(
+            game_id=GAME_ID,
+            negotiation_id=NEGOTIATION_ID,
+            sender_player_id=AI_PLAYER_ID,
+            recipient_player_id=OTHER_PLAYER_ID,
+            message_type="freeform_message",
+            body="Grace privately offers Ada a side payment.",
+            payload={"message_type": "freeform_message"},
+        )
+    )
+    await session.execute(
+        negotiation_messages.insert().values(
+            game_id=GAME_ID,
+            negotiation_id=NEGOTIATION_ID,
+            sender_player_id=OTHER_PLAYER_ID,
+            recipient_player_id=AI_PLAYER_ID,
+            message_type="freeform_message",
+            body="Ada privately asks Grace to sweeten the deal.",
+            payload={"message_type": "freeform_message"},
+        )
+    )
+    await session.execute(
+        negotiation_messages.insert().values(
+            game_id=GAME_ID,
+            negotiation_id=NEGOTIATION_ID,
+            sender_player_id=OTHER_PLAYER_ID,
+            recipient_player_id=THIRD_PLAYER_ID,
+            message_type="freeform_message",
+            body="Ada privately tells Lin not to trust Grace.",
             payload={"message_type": "freeform_message"},
         )
     )
