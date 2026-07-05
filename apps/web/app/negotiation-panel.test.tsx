@@ -238,6 +238,27 @@ function createNegotiationFetchMock({
 
     if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && method === "POST") {
       state.aiSteps.push(body);
+      if (body.decision_type === "open_negotiation") {
+        const negotiation: Negotiation = {
+          id: `neg-${++negotiationCounter}`,
+          game_id: gameId,
+          opened_by_player_id: body.player_id,
+          participant_player_ids: [body.player_id, adaId],
+          topic: "AI-opened negotiation",
+          context: "Linus starts a negotiation.",
+          status: "opened",
+          round_number: 1,
+          created_at: createdAt,
+          updated_at: createdAt,
+        };
+        state.negotiations.unshift(negotiation);
+        state.messages[negotiation.id] = [];
+        return Response.json({
+          ...aiStepResponse({ ...body, negotiation_id: negotiation.id }),
+          negotiation_id: negotiation.id,
+          negotiation,
+        });
+      }
       return Response.json(aiStepResponse(body));
     }
 
@@ -392,6 +413,30 @@ describe("NegotiationPanel", () => {
     await waitFor(() => expect(counterDeal).toHaveTextContent("Accepted"));
     expect(counterDeal).toHaveTextContent("accepted_at");
     expect(within(counterDeal).queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+  });
+
+  it("lets AI open a negotiation without selected thread id", async () => {
+    const { fetchMock, state } = createNegotiationFetchMock();
+    renderPanel(fetchMock);
+
+    expect(await screen.findByRole("region", { name: "Negotiation thread" })).toHaveTextContent(
+      "No negotiation selected",
+    );
+
+    const aiOpenControls = screen.getByRole("region", { name: "AI open negotiation controls" });
+    expect(aiOpenControls).toHaveTextContent("Linus");
+    fireEvent.click(within(aiOpenControls).getByRole("button", { name: "Ask AI open negotiation" }));
+
+    await waitFor(() => expect(state.aiSteps.length).toBe(1));
+    expect(state.aiSteps[0]).toMatchObject({
+      player_id: linusId,
+      decision_type: "open_negotiation",
+      mandatory: false,
+    });
+    expect(state.aiSteps[0]).not.toHaveProperty("negotiation_id");
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("AI-opened negotiation"),
+    );
   });
 
   it("adds AI participation in negotiation windows message and offer controls", async () => {
