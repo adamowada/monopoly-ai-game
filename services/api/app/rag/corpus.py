@@ -457,6 +457,31 @@ async def load_negotiation_history_corpus_from_db(
 
     if player_id is not None:
         player_uuid = _coerce_uuid(player_id)
+        visible_messages = negotiation_messages.alias("visible_negotiation_messages")
+        visible_negotiations = negotiations.alias("visible_negotiations")
+        visible_message_filter = sa.or_(
+            visible_messages.c.recipient_player_id.is_(None),
+            visible_messages.c.sender_player_id == player_uuid,
+            visible_messages.c.recipient_player_id == player_uuid,
+        )
+        visible_message_negotiation_ids = sa.select(visible_messages.c.negotiation_id).where(
+            visible_messages.c.game_id == game_uuid,
+            visible_message_filter,
+        )
+        visible_negotiation_ids = sa.select(visible_negotiations.c.id).where(
+            visible_negotiations.c.game_id == game_uuid,
+            sa.or_(
+                visible_negotiations.c.opened_by_player_id == player_uuid,
+                visible_negotiations.c.id.in_(visible_message_negotiation_ids),
+            ),
+        )
+        if negotiation_id is not None:
+            visible_negotiation_ids = visible_negotiation_ids.where(
+                visible_negotiations.c.id == negotiation_uuid
+            )
+        negotiation_statement = negotiation_statement.where(
+            negotiations.c.id.in_(visible_negotiation_ids)
+        )
         message_statement = message_statement.where(
             sa.or_(
                 negotiation_messages.c.recipient_player_id.is_(None),
@@ -464,6 +489,7 @@ async def load_negotiation_history_corpus_from_db(
                 negotiation_messages.c.recipient_player_id == player_uuid,
             )
         )
+        deal_statement = deal_statement.where(deals.c.negotiation_id.in_(visible_negotiation_ids))
 
     negotiation_statement = negotiation_statement.order_by(negotiations.c.created_at, negotiations.c.id)
     message_statement = message_statement.order_by(negotiation_messages.c.created_at, negotiation_messages.c.id)
