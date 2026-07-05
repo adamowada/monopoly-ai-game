@@ -78,7 +78,8 @@ test("human can propose, message, counter, accept, reject, and expire negotiatio
   await startNegotiation(page, "Expired package");
   await proposeSampleDeal(page);
   await page.getByRole("button", { name: "Expire negotiation" }).click();
-  await expect(page.getByRole("region", { name: "Negotiation thread" })).toContainText("Expired");
-  await expect(page.getByRole("region", { name: "Negotiation thread" })).toContainText("visibly closed");
-  await expect(page.getByRole("button", { name: "Accept" })).toHaveCount(0);
+  const expiredThread = page.getByRole("region", { name: "Negotiation thread" });
+  await expect(expiredThread).toContainText("Expired");
+  await expect(expiredThread).toContainText("visibly closed");
+  await expect(expiredThread.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
 });

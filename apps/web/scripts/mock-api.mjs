@@ -11,6 +11,7 @@ const classicData = JSON.parse(readFileSync(resolve(scriptDir, "../../../content
 const propertyData = classicData.properties;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
+const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
 
 const corsHeaders = {
   "access-control-allow-headers": "accept, content-type, Idempotency-Key",
@@ -40,6 +41,10 @@ function nowIso() {
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isActiveNegotiationStatus(status) {
+  return activeNegotiationStatuses.has(status);
 }
 
 function isHexColor(value) {
@@ -323,7 +328,7 @@ function createNegotiationRecord(game, payload) {
     participant_player_ids: [...payload.participant_player_ids],
     topic: payload.topic,
     context: payload.context ?? "",
-    status: "open",
+    status: "opened",
     round_number: 1,
     created_at: createdAt,
     updated_at: createdAt,
@@ -546,7 +551,7 @@ function configureContractsLogSeed(game) {
     participant_player_ids: [ada.id, grace.id],
     topic: "Stage 5.7 rent share",
     context: "Seeded source agreement for contracts, obligations, and game-log UI.",
-    status: "closed",
+    status: "accepted",
     round_number: 1,
     created_at: createdAt,
     updated_at: acceptedAt,
@@ -797,7 +802,7 @@ function validateOpenNegotiation(negotiation) {
   if (!negotiation) {
     return negotiationValidationError("missing_negotiation", "negotiation was not found", "negotiation_id");
   }
-  if (negotiation.status !== "open") {
+  if (!isActiveNegotiationStatus(negotiation.status)) {
     return negotiationValidationError("closed_negotiation", "negotiation is closed and cannot mutate", "negotiation_id");
   }
   return null;
@@ -881,6 +886,7 @@ function createDealRecord(game, payload) {
   game.deals.unshift(deal);
   const negotiation = negotiationById(game, payload.negotiation_id);
   if (negotiation) {
+    negotiation.status = payload.parent_deal_id ? "countered" : "active";
     negotiation.round_number = Math.max(negotiation.round_number, deal.version);
     negotiation.updated_at = createdAt;
   }
@@ -917,7 +923,7 @@ function acceptDealRecord(game, deal) {
   deal.updated_at = acceptedAt;
   const negotiation = negotiationById(game, deal.negotiation_id);
   if (negotiation) {
-    negotiation.status = "closed";
+    negotiation.status = "accepted";
     negotiation.updated_at = acceptedAt;
   }
   game.updated_at = acceptedAt;
@@ -931,6 +937,7 @@ function rejectDealRecord(game, deal) {
   deal.updated_at = rejectedAt;
   const negotiation = negotiationById(game, deal.negotiation_id);
   if (negotiation) {
+    negotiation.status = "rejected";
     negotiation.updated_at = rejectedAt;
   }
   game.updated_at = rejectedAt;

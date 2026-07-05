@@ -81,6 +81,10 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function isActiveNegotiationWindow(status: Negotiation["status"] | null | undefined): boolean {
+  return status === "opened" || status === "active" || status === "countered";
+}
+
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -366,7 +370,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   const previewTerms = draftTerms.length > 0 ? draftTerms : selectedDeal?.terms ?? [];
   const previewParticipants =
     selectedNegotiation?.participant_player_ids ?? selectedDeal?.participant_player_ids ?? participantPlayerIds;
-  const isNegotiationOpen = selectedNegotiation?.status === "open";
+  const isNegotiationOpen = isActiveNegotiationWindow(selectedNegotiation?.status);
   const hasDraftReady = Boolean(selectedNegotiation && draftTerms.length > 0 && proposerPlayerId);
 
   async function invalidateNegotiationData(negotiationId = selectedNegotiation?.id) {
@@ -696,7 +700,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                 <span
                   className={cn(
                     "inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset",
-                    selectedNegotiation.status === "open"
+                    isActiveNegotiationWindow(selectedNegotiation.status)
                       ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
                       : "bg-neutral-100 text-neutral-700 ring-neutral-200",
                   )}

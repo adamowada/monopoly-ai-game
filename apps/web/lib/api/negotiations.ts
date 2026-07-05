@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const NegotiationStatusSchema = z.enum(["open", "closed", "expired"]);
+export const NegotiationStatusSchema = z.enum(["opened", "active", "countered", "accepted", "rejected", "expired", "executed"]);
 export const DealStatusSchema = z.enum(["proposed", "accepted", "rejected", "expired"]);
 export const DealTermKindSchema = z.enum([
   "cash_transfer",
