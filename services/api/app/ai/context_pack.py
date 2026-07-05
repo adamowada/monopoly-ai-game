@@ -78,7 +78,7 @@ def build_ai_context_pack(
         "game_id": state.game_id,
         "player_id": actor_id,
         "caller_request_context": _json_safe(caller_request_context or {}),
-        "public_game_state": _public_game_state_summary(state),
+        "public_game_state": public_game_state_summary(state),
         "timing": _timing_context(state, legal_actions),
         "legal_actions": legal_actions,
         "negotiation_context": {
@@ -589,7 +589,7 @@ async def _load_obligation_rows(
     return [dict(row) for row in result.mappings().all()]
 
 
-def _public_game_state_summary(state: GameState) -> dict[str, Any]:
+def public_game_state_summary(state: GameState) -> dict[str, Any]:
     data = load_classic_monopoly_data()
     spaces_by_position = {space.position: space for space in data.board}
     properties_by_id = {property_data.id: property_data for property_data in data.properties}
@@ -984,4 +984,5 @@ __all__ = [
     "VISIBLE_MEMORY_SCOPES",
     "build_ai_context_pack",
     "build_ai_context_pack_from_db",
+    "public_game_state_summary",
 ]

@@ -182,6 +182,53 @@ async def test_stage_9_3_read_tools_return_fastapi_and_retrieval_payloads(
 
 
 @pytest.mark.asyncio
+async def test_stage_9_3_get_game_state_returns_public_redacted_state(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    created = await create_game(client, player_kinds=("human", "ai"))
+    game_id = created["id"]
+    context = LocalMCPContext(api_app=api_app)
+    try:
+        backend_response = await client.get(f"/games/{game_id}/state")
+        assert backend_response.status_code == 200, backend_response.text
+        backend_payload = backend_response.json()
+        assert {"seed", "rng", "decks"}.issubset(backend_payload["state"])
+
+        mcp_payload = await call_local_tool("get_game_state", {"game_id": game_id}, context=context)
+        public_state = mcp_payload["state"]
+
+        assert mcp_payload["source_path"] == f"/games/{game_id}/state"
+        assert mcp_payload["state_hash"] == backend_payload["state_hash"]
+        assert mcp_payload["event_sequence"] == backend_payload["event_sequence"]
+        assert public_state["state_hash"] == backend_payload["state_hash"]
+        assert public_state["event_sequence"] == backend_payload["event_sequence"]
+        assert public_state["turn"]["phase"] == "START_TURN"
+        assert public_state["turn"]["current_player_id"] == created["players"][0]["id"]
+        assert public_state["players"][0]["id"] == created["players"][0]["id"]
+        assert public_state["players"][0]["cash"] == 1500
+        assert public_state["players"][0]["space"]["name"] == "GO"
+        assert public_state["players"][0]["get_out_of_jail_card_count"] == 0
+        assert len(public_state["property_ownership"]) == 28
+        assert public_state["property_ownership"][0]["owner_id"] is None
+        assert public_state["bank_inventory"] == {"houses": 32, "hotels": 12}
+
+        serialized_payload = json.dumps(mcp_payload, sort_keys=True)
+        assert "draw_pile" not in serialized_payload
+        assert "discard_pile" not in serialized_payload
+        assert "get_out_of_jail_card_ids" not in serialized_payload
+        assert "seed" not in mcp_payload
+        assert "rng" not in mcp_payload
+        assert "decks" not in mcp_payload
+        assert "seed" not in public_state
+        assert "rng" not in public_state
+        assert "decks" not in public_state
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_stage_9_3_search_rules_defaults_cover_house_rules_and_contract_examples(
     api_app: FastAPI,
     session_factory: async_sessionmaker[AsyncSession],

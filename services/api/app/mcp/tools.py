@@ -17,9 +17,11 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.games import CreateDealRequest, _deal_proposed_by_player_id, _prepare_deal_terms
+from app.ai.context_pack import public_game_state_summary
 from app.db.metadata import contracts, games, obligations, players
 from app.main import create_app
 from app.rag.retrieval import RetrievalSearchResult, search_retrieval
+from app.rules.state import GameState
 
 
 JsonDict = dict[str, Any]
@@ -123,7 +125,18 @@ async def _get_game_state(context: LocalMCPContext, arguments: JsonMapping) -> J
     game_id = _required_uuid_text(arguments, "game_id")
     source_path = f"/games/{game_id}/state"
     payload = await _fastapi_json_request(context, "GET", source_path)
-    return {"tool": "get_game_state", "source_path": source_path, **payload["body"]}
+    body = _required_mapping(payload, "body")
+    raw_state = _required_mapping(body, "state")
+    raw_state.pop("state_hash", None)
+    state = GameState.model_validate(raw_state)
+    return {
+        "tool": "get_game_state",
+        "source_path": source_path,
+        "game_id": body["game_id"],
+        "state": public_game_state_summary(state),
+        "state_hash": body["state_hash"],
+        "event_sequence": body["event_sequence"],
+    }
 
 
 async def _get_legal_actions(context: LocalMCPContext, arguments: JsonMapping) -> JsonDict:
