@@ -297,6 +297,7 @@ def decision_request(fixture: OrchestratorFixture) -> CodexExecAIDecisionRequest
 
 
 def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) -> None:
+    evidence = "Codex exec command forces no approval prompts"
     schema_path = write_ai_output_schema_file(tmp_path / "agent_decision.schema.json")
     sandbox_dir = tmp_path / "ai-sandbox"
     last_message_path = tmp_path / "last-message.json"
@@ -308,7 +309,7 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
         output_last_message_path=last_message_path,
     )
 
-    assert command[:2] == ["codex", "exec"]
+    assert command[:4] == ["codex", "-a", "never", "exec"], evidence
     assert "--json" in command
     assert "--ephemeral" in command
     assert command[command.index("-c") + 1] == 'model_reasoning_effort="xhigh"'
@@ -316,8 +317,6 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
     assert command[command.index("-C") + 1] == str(sandbox_dir)
     assert command[command.index("--output-last-message") + 1] == str(last_message_path)
     assert command[-1] == "-"
-    assert "-a" not in command
-    assert "never" not in command
     assert json.loads(schema_path.read_text(encoding="utf-8"))["title"] == "AIDecisionOutput"
 
 

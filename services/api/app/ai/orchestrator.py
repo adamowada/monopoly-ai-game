@@ -145,6 +145,8 @@ def build_codex_exec_command(
 
     command = [
         codex_executable,
+        "-a",
+        "never",
         "exec",
         "--json",
         "--ephemeral",
