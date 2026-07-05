@@ -25,6 +25,7 @@ MEMORY_COMPACTION_DECISION_INTERVAL = 25
 MEMORY_COMPACTION_THRESHOLD = 25
 MEMORY_COMPACTION_TARGET_RAW_COUNT = 12
 MEMORY_COMPACTION_BATCH_SIZE = 20
+FINAL_MEMORY_DECISION_STATUSES = frozenset({"accepted", "validated"})
 
 _CATEGORY_WEIGHTS: dict[str, int] = {
     "strategic_belief": 80,
@@ -75,6 +76,9 @@ async def persist_memory_updates_for_trusted_output(
 ) -> list[dict[str, Any]]:
     """Persist schema-valid memory updates once for an AI decision."""
 
+    if ai_decision_status not in FINAL_MEMORY_DECISION_STATUSES:
+        return []
+
     raw_updates = parsed_output.get("memory_updates")
     if not isinstance(raw_updates, Sequence) or isinstance(raw_updates, str | bytes | bytearray):
         return []
@@ -120,6 +124,53 @@ async def persist_memory_updates_for_trusted_output(
         )
         persisted.append(dict(result.mappings().one()))
     return persisted
+
+
+async def persist_memory_updates_for_final_decision(
+    session: AsyncSession,
+    *,
+    decision_id: UUID,
+    ai_decision_status: str,
+    source_event_id: UUID | None = None,
+    source_negotiation_message_id: UUID | None = None,
+    evidence_metadata: Mapping[str, Any] | None = None,
+) -> int:
+    """Create and link memory updates only after a decision reaches a trusted final status."""
+
+    if ai_decision_status not in FINAL_MEMORY_DECISION_STATUSES:
+        return 0
+
+    result = await session.execute(
+        sa.select(ai_decisions)
+        .where(ai_decisions.c.id == decision_id)
+        .with_for_update()
+    )
+    decision = result.mappings().first()
+    if decision is None:
+        return 0
+
+    parsed_output = decision["parsed_output"]
+    if isinstance(parsed_output, Mapping):
+        await persist_memory_updates_for_trusted_output(
+            session,
+            decision_id=decision_id,
+            game_id=decision["game_id"],
+            player_id=decision["player_id"],
+            ai_profile_id=decision["ai_profile_id"],
+            parsed_output=parsed_output,
+            phase=decision["phase"],
+            state_hash=decision["state_hash"],
+            ai_decision_status=ai_decision_status,
+        )
+
+    return await link_memory_entries_to_decision_evidence(
+        session,
+        decision_id=decision_id,
+        ai_decision_status=ai_decision_status,
+        source_event_id=source_event_id,
+        source_negotiation_message_id=source_negotiation_message_id,
+        evidence_metadata=evidence_metadata,
+    )
 
 
 def score_memory_entry_for_context(
@@ -179,7 +230,9 @@ def select_memory_rows_for_context(
     if limit < 1:
         return []
 
-    rows_by_recency = _rows_oldest_first(rows)
+    rows_by_recency = _rows_oldest_first(
+        [row for row in rows if memory_row_is_usable_for_context(row)]
+    )
     total_rows = len(rows_by_recency)
     scored_rows: list[dict[str, Any]] = []
     for recency_rank, row in enumerate(rows_by_recency):
@@ -254,12 +307,19 @@ async def compact_memory_for_player(
     """Create a deterministic summary row for low-value raw memories."""
 
     result = await session.execute(
-        sa.select(ai_memory_entries)
+        sa.select(ai_memory_entries, ai_decisions.c.status.label("source_decision_status"))
+        .select_from(
+            ai_memory_entries.outerjoin(
+                ai_decisions,
+                ai_memory_entries.c.source_decision_id == ai_decisions.c.id,
+            )
+        )
         .where(ai_memory_entries.c.game_id == game_id, ai_memory_entries.c.player_id == player_id)
         .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
-        .with_for_update()
+        .with_for_update(of=ai_memory_entries)
     )
-    rows = [dict(row) for row in result.mappings().all()]
+    loaded_rows = [dict(row) for row in result.mappings().all()]
+    rows = [row for row in loaded_rows if memory_row_is_usable_for_context(row)]
     raw_rows = [
         row
         for row in rows
@@ -553,6 +613,18 @@ def _source_links(row: Mapping[str, Any]) -> dict[str, bool]:
     }
 
 
+def memory_row_is_usable_for_context(row: Mapping[str, Any]) -> bool:
+    """Return False for legacy rows sourced from rejected or failed AI decisions."""
+
+    metadata_blob = _mapping(row.get("metadata_blob", row.get("metadata")))
+    metadata_status = _string_or_none(metadata_blob.get("ai_decision_status"))
+    source_decision_status = _string_or_none(row.get("source_decision_status"))
+    for status in (metadata_status, source_decision_status):
+        if status is not None and status not in FINAL_MEMORY_DECISION_STATUSES:
+            return False
+    return True
+
+
 def _unique_source_ids(rows: Sequence[Mapping[str, Any]], key: str) -> list[str]:
     values = {_string_or_none(row.get(key)) for row in rows}
     return sorted(value for value in values if value is not None)
@@ -615,12 +687,15 @@ __all__ = [
     "MEMORY_COMPACTION_THRESHOLD",
     "MEMORY_CONTEXT_SCORING_VERSION",
     "MEMORY_VISIBILITIES",
+    "FINAL_MEMORY_DECISION_STATUSES",
     "MemoryCompactionResult",
     "MemoryContextScore",
     "compact_memory_after_scheduled_decision_if_due",
     "compact_memory_for_player",
     "TRUSTED_MEMORY_METADATA_VERSION",
     "link_memory_entries_to_decision_evidence",
+    "memory_row_is_usable_for_context",
+    "persist_memory_updates_for_final_decision",
     "persist_memory_updates_for_trusted_output",
     "score_memory_entry_for_context",
     "select_memory_rows_for_context",

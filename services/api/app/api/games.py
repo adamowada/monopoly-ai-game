@@ -21,7 +21,11 @@ from app.ai.profiles import (
     AIProfileGameNotFoundError,
     ensure_ai_profiles_for_game,
 )
-from app.ai.memory import link_memory_entries_to_decision_evidence
+from app.ai.memory import (
+    compact_memory_after_scheduled_decision_if_due,
+    link_memory_entries_to_decision_evidence,
+    persist_memory_updates_for_final_decision,
+)
 from app.contracts.execution import (
     ContractCreationResult,
     ContractExecutionError,
@@ -2949,7 +2953,7 @@ async def _mark_ai_decision_lifecycle_done(
                 .where(ai_decisions.c.id == ai_decision_id)
                 .values(**update_values)
             )
-            await link_memory_entries_to_decision_evidence(
+            await persist_memory_updates_for_final_decision(
                 session,
                 decision_id=ai_decision_id,
                 ai_decision_status="accepted",
@@ -2958,6 +2962,16 @@ async def _mark_ai_decision_lifecycle_done(
                     "kind": "ai_negotiation_lifecycle",
                     "lifecycle_result": _json_safe_mapping(outcome),
                 },
+            )
+            decision_row = await session.execute(
+                sa.select(ai_decisions.c.game_id, ai_decisions.c.player_id)
+                .where(ai_decisions.c.id == ai_decision_id)
+            )
+            decision_scope = decision_row.mappings().one()
+            await compact_memory_after_scheduled_decision_if_due(
+                session,
+                game_id=decision_scope["game_id"],
+                player_id=decision_scope["player_id"],
             )
 
 
@@ -3039,6 +3053,11 @@ async def _persist_ai_negotiation_application_rejection(
                         validation_errors=validation_errors,
                     ),
                 },
+            )
+            await compact_memory_after_scheduled_decision_if_due(
+                session,
+                game_id=game_id,
+                player_id=player_id,
             )
 
             if mandatory:

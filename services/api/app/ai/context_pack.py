@@ -20,9 +20,11 @@ from app.ai.memory import (
     MEMORY_COMPACTION_REASON_ON_DEMAND,
     MEMORY_COMPACTION_THRESHOLD,
     compact_memory_for_player,
+    memory_row_is_usable_for_context,
     select_memory_rows_for_context,
 )
 from app.db.metadata import (
+    ai_decisions,
     ai_memory_entries,
     ai_profiles,
     contracts,
@@ -277,7 +279,13 @@ async def _load_visible_memory_rows(
     limit: int,
 ) -> list[dict[str, Any]]:
     result = await session.execute(
-        sa.select(ai_memory_entries)
+        sa.select(ai_memory_entries, ai_decisions.c.status.label("source_decision_status"))
+        .select_from(
+            ai_memory_entries.outerjoin(
+                ai_decisions,
+                ai_memory_entries.c.source_decision_id == ai_decisions.c.id,
+            )
+        )
         .where(
             ai_memory_entries.c.game_id == game_id,
             sa.or_(
@@ -287,8 +295,9 @@ async def _load_visible_memory_rows(
         )
         .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
     )
+    rows = [dict(row) for row in result.mappings().all()]
     return select_memory_rows_for_context(
-        [dict(row) for row in result.mappings().all()],
+        [row for row in rows if memory_row_is_usable_for_context(row)],
         limit=limit,
     )
 

@@ -336,6 +336,17 @@ def valid_action_output_with_memory(state: GameState) -> dict[str, Any]:
     return output
 
 
+def valid_memory_update_output(state: GameState) -> dict[str, Any]:
+    output = {
+        key: value
+        for key, value in valid_action_output_with_memory(state).items()
+        if key not in {"action", "expected_event_sequence", "expected_state_hash"}
+    }
+    output["decision_type"] = "memory_update"
+    output["rationale"] = "This non-mutating decision only records trusted memory."
+    return output
+
+
 def decision_request(fixture: OrchestratorFixture) -> CodexExecAIDecisionRequest:
     return CodexExecAIDecisionRequest(
         game_id=fixture.game_id,
@@ -542,17 +553,17 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
 
 
 @pytest.mark.asyncio
-async def test_stage_8_2_memory_trusted_ai_output_writes_entries_linked_to_decision(
+async def test_stage_8_2_memory_trusted_non_mutating_ai_output_writes_entries_linked_to_decision(
     session_factory: async_sessionmaker,
     tmp_path: Path,
 ) -> None:
     fixture = await create_ai_game(session_factory)
-    ai_output = valid_action_output_with_memory(fixture.state)
+    ai_output = valid_memory_update_output(fixture.state)
     runner = FakeCodexRunner(final_output=ai_output)
     try:
         result = await request_codex_ai_decision(
             session_factory,
-            decision_request(fixture),
+            replace(decision_request(fixture), decision_type="memory_update"),
             runner=runner,
             schema_file=tmp_path / "schema.json",
             sandbox_dir=tmp_path / "sandbox",
