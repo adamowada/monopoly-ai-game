@@ -1912,9 +1912,6 @@ async def ai_step(
     guard_state = await _load_replayed_state(session_factory, game_id)
     guard_key = _ai_step_in_flight_guard_key(
         game_id=game_id,
-        player_id=payload.player_id,
-        decision_type=payload.decision_type,
-        negotiation_id=payload.negotiation_id,
         state_hash=guard_state.state_hash(),
         event_sequence=guard_state.event_sequence,
     )
@@ -1926,7 +1923,7 @@ async def ai_step(
         if not guard_acquired:
             return _lifecycle_rejection_response(
                 AI_STEP_IN_FLIGHT_REASON_CODE,
-                "AI step is already in flight for this game, player, decision, negotiation, and state",
+                "AI step is already in flight for this game state",
                 field="ai_step",
             )
 
@@ -2058,18 +2055,12 @@ def _ai_enforcement_kwargs(request: Request) -> dict[str, Any]:
 def _ai_step_in_flight_guard_key(
     *,
     game_id: UUID,
-    player_id: UUID,
-    decision_type: str,
-    negotiation_id: UUID | None,
     state_hash: str,
     event_sequence: int,
 ) -> int:
     guard_payload = {
         "scope": "ai_step",
         "game_id": str(game_id),
-        "player_id": str(player_id),
-        "decision_type": decision_type,
-        "negotiation_id": None if negotiation_id is None else str(negotiation_id),
         "state_hash": state_hash,
         "event_sequence": int(event_sequence),
     }

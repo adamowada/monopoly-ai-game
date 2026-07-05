@@ -294,6 +294,77 @@ async def test_concurrent_ai_steps_reject_duplicate_in_flight_before_codex(
 
 
 @pytest.mark.asyncio
+async def test_concurrent_ai_steps_serialize_same_state_across_decision_types_before_codex(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    state = await get_state(client, game_id)
+    runner = BlockingFirstCodexRunner(valid_action_output(game_id, ai_player_id, state))
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        action_payload = {
+            "player_id": ai_player_id,
+            "decision_type": "action_decision",
+            "mandatory": True,
+        }
+        open_negotiation_payload = {
+            "player_id": ai_player_id,
+            "decision_type": "open_negotiation",
+            "mandatory": False,
+        }
+        event_count_before = await table_count(session_factory, game_events, game_id)
+        action_task = asyncio.create_task(client.post(f"/games/{game_id}/ai/step", json=action_payload))
+        open_negotiation_response: httpx.Response | None = None
+        open_negotiation_error: BaseException | None = None
+        try:
+            first_started = await asyncio.wait_for(
+                asyncio.to_thread(runner.first_call_started.wait, 5),
+                timeout=6,
+            )
+            assert first_started is True
+
+            try:
+                open_negotiation_response = await client.post(
+                    f"/games/{game_id}/ai/step",
+                    json=open_negotiation_payload,
+                )
+            except BaseException as exc:
+                open_negotiation_error = exc
+        finally:
+            runner.release_first_call.set()
+        action_response = await action_task
+        if open_negotiation_error is not None:
+            raise open_negotiation_error
+        assert open_negotiation_response is not None
+
+        accepted_body = action_response.json()
+        rejected_body = open_negotiation_response.json()
+
+        assert action_response.status_code == 200, action_response.text
+        assert open_negotiation_response.status_code == 422, open_negotiation_response.text
+        assert accepted_body["status"] == "accepted"
+        assert rejected_body["status"] == "rejected"
+        assert rejected_body["reason_code"] == "ai_step_in_flight"
+        assert rejected_body["validation_errors"][0]["code"] == "ai_step_in_flight"
+        assert len(runner.calls) == 1
+        assert accepted_body["rejected_action_id"] is None
+        assert await table_count(session_factory, ai_decisions, game_id) == 1
+        assert await table_count(session_factory, rejected_actions, game_id) == 0
+        assert await table_count(session_factory, game_events, game_id) == (
+            event_count_before + len(accepted_body["accepted_events"])
+        )
+        assert await game_status(session_factory, game_id) != "AI_BLOCKED"
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_ai_controlled_player_direct_actions_reject_before_events_and_ai_step_still_accepts(
     api_app: FastAPI,
     client: httpx.AsyncClient,
