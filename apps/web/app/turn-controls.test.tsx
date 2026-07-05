@@ -673,6 +673,60 @@ describe("GamePlaySurface turn controls", () => {
     });
   });
 
+  it("Lifecycle-only AI step rejections parse into status panel results", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(
+          {
+            status: "rejected",
+            reason_code: "game_ai_blocked",
+            validation_errors: [
+              {
+                code: "game_ai_blocked",
+                message: "AI stepping is blocked for this game lifecycle state.",
+                field: "game_id",
+              },
+            ],
+          },
+          { status: 409 },
+        );
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
+
+    const status = await screen.findByRole("status", { name: "AI step status" });
+    await waitFor(() => expect(status).toHaveTextContent("AI rejected"));
+    expect(status).toHaveTextContent("game_ai_blocked");
+  });
+
   it("runs the Automatic AI step control while an active AI player is idle", async () => {
     // Automatic AI step control
     const fetchMock = baseFetchMock({
