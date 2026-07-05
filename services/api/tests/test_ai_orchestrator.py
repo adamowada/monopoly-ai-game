@@ -18,7 +18,7 @@ import json
 import os
 import subprocess
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -136,6 +136,30 @@ class FakeCodexRunner(CodexExecRunner):
             stdout=stdout,
             stderr=self.stderr,
         )
+
+
+class LaunchFailingCodexRunner(CodexExecRunner):
+    def __init__(self, error: OSError) -> None:
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        stdin: str,
+        timeout_seconds: float,
+        output_last_message_path: Path | None,
+    ) -> CodexExecProcessResult:
+        self.calls.append(
+            {
+                "command": list(command),
+                "stdin": stdin,
+                "timeout_seconds": timeout_seconds,
+                "output_last_message_path": output_last_message_path,
+            }
+        )
+        raise self.error
 
 
 @pytest_asyncio.fixture
@@ -555,6 +579,51 @@ async def test_process_error_persists_audit_record_and_no_fallback_move(
         assert result.validation_result["no_substitute_move"] is True
         assert rows[0]["status"] == "process_error"
         assert rows[0]["raw_output"] == '{"type":"error","message":"boom"}\n'
+        assert rows[0]["accepted_event_id"] is None
+        assert rows[0]["rejected_action_id"] is None
+        assert await count_events(session_factory) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_codex_launch_failure_persists_process_error_audit_without_action_ids(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    evidence = "Codex launch failures are audited as process errors"
+    fixture = await create_ai_game(session_factory)
+    base_request = decision_request(fixture)
+    prompt_context = dict(base_request.prompt_context)
+    prompt_context["evidence"] = evidence
+    runner = LaunchFailingCodexRunner(FileNotFoundError("codex executable missing"))
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            replace(base_request, prompt_context=prompt_context),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        rows = await fetch_ai_decision_rows(session_factory)
+
+        assert result.status == "process_error"
+        assert result.raw_output == ""
+        assert result.parsed_output is None
+        assert result.validation_result["reason_code"] == "codex_exec_process_error"
+        assert result.validation_result["error_type"] == "FileNotFoundError"
+        assert result.validation_result["no_substitute_move"] is True
+        assert result.validation_result["substitute_move"] is None
+        assert result.accepted_event_id is None
+        assert result.rejected_action_id is None
+        assert rows[0]["status"] == "process_error"
+        assert rows[0]["prompt_context"]["evidence"] == evidence
+        assert rows[0]["raw_output"] == ""
+        assert rows[0]["parsed_output"] is None
+        assert rows[0]["validation_result"]["reason_code"] == "codex_exec_process_error"
+        assert rows[0]["validation_result"]["error_type"] == "FileNotFoundError"
+        assert rows[0]["validation_result"]["substitute_move"] is None
         assert rows[0]["accepted_event_id"] is None
         assert rows[0]["rejected_action_id"] is None
         assert await count_events(session_factory) == 0

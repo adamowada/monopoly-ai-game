@@ -261,6 +261,24 @@ async def request_codex_ai_decision(
             prompt_context=prompt_context,
             prompt_context_hash=prompt_context_hash,
         )
+    except OSError as exc:
+        validation_result = _failure_validation_result(
+            reason_code="codex_exec_process_error",
+            message="codex exec failed to launch",
+            returncode=None,
+            stderr=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return await _persist_attempt_result(
+            session_factory,
+            request=request,
+            status="process_error",
+            raw_output="",
+            parsed_output=None,
+            validation_result=validation_result,
+            prompt_context=prompt_context,
+            prompt_context_hash=prompt_context_hash,
+        )
 
     if process.returncode != 0:
         validation_result = _failure_validation_result(
