@@ -84,6 +84,25 @@ function validationText(errors: AiValidationError[]): string {
     .join(" ");
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function compactionMetadata(entry: AiMemoryEntry): Record<string, unknown> | null {
+  return metadataRecord(metadataRecord(entry.metadata)?.compaction);
+}
+
+function isCompactedSummary(entry: AiMemoryEntry): boolean {
+  return compactionMetadata(entry)?.is_summary === true;
+}
+
+function compactionSourceIds(entry: AiMemoryEntry): string[] {
+  const sourceIds = compactionMetadata(entry)?.source_memory_ids;
+  return Array.isArray(sourceIds) ? sourceIds.filter((item): item is string => typeof item === "string") : [];
+}
+
 function EmptyState({ text }: Readonly<{ text: string }>) {
   return <p className="rounded-md border border-dashed border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-600">{text}</p>;
 }
@@ -96,18 +115,19 @@ function ErrorNote({ text }: Readonly<{ text: string }>) {
   );
 }
 
-function InlineMeta({ label, value }: Readonly<{ label: string; value: string }>) {
+function InlineMeta({ label, value }: Readonly<{ label: string; value: string | null | undefined }>) {
+  const displayValue = value ?? "n/a";
   return (
     <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-[11px] font-medium text-neutral-700">
       <span className="text-neutral-500">{label}</span>
       {" "}
-      <span className="break-all text-neutral-950">{value}</span>
+      <span className="break-all text-neutral-950">{displayValue}</span>
     </span>
   );
 }
 
 function StatusBadge({ status }: Readonly<{ status: AiDecision["status"] }>) {
-  const accepted = status === "accepted";
+  const accepted = status === "accepted" || status === "validated";
   return (
     <span
       className={cn(
@@ -209,6 +229,14 @@ function LinkedMemory({
             <li key={entry.memory_entry_id} className="text-sm text-neutral-700">
               <span className="font-medium text-neutral-950">memory_entry_id {entry.memory_entry_id}</span>
               <span className="block">Used by decision {decision.ai_decision_id}</span>
+              <span className="block">
+                {entry.category} - {entry.visibility} - importance {entry.importance}
+              </span>
+              <span className="block">
+                {isCompactedSummary(entry)
+                  ? `compacted summary of ${compactionSourceIds(entry).length} source memories`
+                  : `superseded by ${entry.superseded_by_memory_id ?? "n/a"}`}
+              </span>
               <span className="block">{entry.content}</span>
             </li>
           ))}
@@ -241,7 +269,7 @@ function LinkedRetrievals({
               <span className="font-medium text-neutral-950">retrieval_record_id {record.retrieval_record_id}</span>
               <span className="block">
                 Linked decision {record.ai_decision_id} · source {record.source_type}:{record.source_id} · score{" "}
-                {record.score.toFixed(2)}
+                {record.score === null ? "n/a" : record.score.toFixed(2)}
               </span>
               <span className="block">{record.content}</span>
             </li>
@@ -272,8 +300,17 @@ function LinkedDialogue({
               <span className="font-medium text-neutral-950">
                 #{entry.sequence} {entry.role} · self_dialogue_id {entry.self_dialogue_id}
               </span>
-              <span className="block">Linked decision {entry.ai_decision_id}</span>
+              <span className="block">
+                Linked decision {entry.ai_decision_id} - ai_profile_id {entry.ai_profile_id ?? "n/a"}
+              </span>
+              <span className="block">
+                player {entry.player_id} - phase {entry.phase ?? "n/a"} - state_hash {entry.state_hash ?? "n/a"} - status{" "}
+                {entry.status}
+              </span>
               <span className="block">{entry.content}</span>
+              <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-100 p-2 text-xs text-neutral-800">
+                {jsonBlock(entry.payload)}
+              </pre>
             </li>
           ))}
         </ol>
@@ -298,6 +335,8 @@ function RejectedOutputList({ records }: Readonly<{ records: AiRejectedOutput[] 
               <div className="flex flex-wrap gap-2">
                 <InlineMeta label="rejected_output_id" value={record.rejected_output_id} />
                 <InlineMeta label="state_hash" value={record.state_hash} />
+                <InlineMeta label="status" value={record.status} />
+                <InlineMeta label="rejected_action_id" value={record.rejected_action_id} />
               </div>
               <p className="mt-2 font-medium text-neutral-950">Validation errors</p>
               <p>{validationText(record.validation_errors)}</p>
@@ -561,7 +600,16 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
               <li key={entry.memory_entry_id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                 <span className="font-medium text-neutral-950">memory_entry_id {entry.memory_entry_id}</span>
                 <span className="block">
-                  {playerName(game, entry.player_id)} · {entry.kind} · ai_profile_id {entry.ai_profile_id}
+                  {playerName(game, entry.player_id)} · {entry.category} · {entry.visibility} · ai_profile_id{" "}
+                  {entry.ai_profile_id ?? "n/a"}
+                </span>
+                <span className="block">
+                  decision {entry.source_decision_id} · event {entry.source_event_id ?? "n/a"} · message{" "}
+                  {entry.source_negotiation_message_id ?? "n/a"}
+                </span>
+                <span className="block">
+                  superseded_by_memory_id {entry.superseded_by_memory_id ?? "n/a"}
+                  {isCompactedSummary(entry) ? ` - source_memory_ids ${compactionSourceIds(entry).join(", ")}` : ""}
                 </span>
                 <span className="block">{entry.content}</span>
               </li>

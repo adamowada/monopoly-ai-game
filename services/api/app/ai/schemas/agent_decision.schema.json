@@ -445,7 +445,18 @@
       "additionalProperties": false,
       "properties": {
         "category": {
-          "minLength": 1,
+          "enum": [
+            "strategic_belief",
+            "player_trust_model",
+            "deal_history",
+            "promise_made",
+            "promise_received",
+            "threat",
+            "grudge",
+            "opportunity",
+            "long_term_plan",
+            "mistake_lesson"
+          ],
           "title": "Category",
           "type": "string"
         },

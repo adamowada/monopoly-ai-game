@@ -28,6 +28,7 @@ import pytest_asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
 from app.ai.orchestrator import (
     CodexExecAIDecisionRequest,
     CodexExecProcessResult,
@@ -40,7 +41,16 @@ from app.ai.orchestrator import (
     request_codex_ai_decision,
     write_ai_output_schema_file,
 )
-from app.db.metadata import ai_decisions, ai_profiles, game_events, games, metadata, players
+from app.db.metadata import (
+    ai_decisions,
+    ai_memory_entries,
+    ai_profiles,
+    ai_self_dialogue,
+    game_events,
+    games,
+    metadata,
+    players,
+)
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
@@ -254,6 +264,32 @@ async def fetch_ai_decision_rows(
         return [dict(row) for row in result.mappings().all()]
 
 
+async def fetch_ai_self_dialogue_rows(
+    session_factory: async_sessionmaker,
+    game_id: UUID = GAME_ID,
+) -> list[dict[str, Any]]:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(ai_self_dialogue)
+            .where(ai_self_dialogue.c.game_id == game_id)
+            .order_by(ai_self_dialogue.c.created_at, ai_self_dialogue.c.id)
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+
+async def fetch_ai_memory_rows(
+    session_factory: async_sessionmaker,
+    game_id: UUID = GAME_ID,
+) -> list[dict[str, Any]]:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(ai_memory_entries)
+            .where(ai_memory_entries.c.game_id == game_id)
+            .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+
 async def count_events(session_factory: async_sessionmaker, game_id: UUID = GAME_ID) -> int:
     async with session_factory() as session:
         result = await session.execute(
@@ -278,6 +314,38 @@ def valid_action_output(state: GameState) -> dict[str, Any]:
         "confidence": 0.81,
         "rationale": "The turn is at START_TURN and a roll is available.",
     }
+
+
+def valid_action_output_with_memory(state: GameState) -> dict[str, Any]:
+    output = valid_action_output(state)
+    output["memory_updates"] = [
+        {
+            "visibility": "private",
+            "category": "strategic_belief",
+            "importance": 7,
+            "content": "Early rolling is tempo-positive when no negotiation is active.",
+            "metadata": {"stage": "8.2", "source": "schema-valid-output"},
+        },
+        {
+            "visibility": "table",
+            "category": "deal_history",
+            "importance": 4,
+            "content": "No deals have been offered before the first roll.",
+            "metadata": {"stage": "8.2", "visible_to_table": True},
+        },
+    ]
+    return output
+
+
+def valid_memory_update_output(state: GameState) -> dict[str, Any]:
+    output = {
+        key: value
+        for key, value in valid_action_output_with_memory(state).items()
+        if key not in {"action", "expected_event_sequence", "expected_state_hash"}
+    }
+    output["decision_type"] = "memory_update"
+    output["rationale"] = "This non-mutating decision only records trusted memory."
+    return output
 
 
 def decision_request(fixture: OrchestratorFixture) -> CodexExecAIDecisionRequest:
@@ -465,7 +533,9 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
         assert rows[0]["state_hash"] == fixture.state.state_hash()
         assert rows[0]["prompt_context"]["caller_context"] == "stage 7.3 fake subprocess request"
         assert rows[0]["prompt_context_hash"] == result.prompt_context_hash
-        assert rows[0]["raw_output"] == json.dumps(valid_action_output(fixture.state))
+        assert "session_configured" in rows[0]["raw_output"]
+        assert "item_completed" in rows[0]["raw_output"]
+        assert rows[0]["raw_output"] != json.dumps(valid_action_output(fixture.state))
         assert rows[0]["parsed_output"]["action"]["type"] == "ROLL_DICE"
         assert rows[0]["validation_result"]["status"] == "valid"
         assert rows[0]["accepted_event_id"] is None
@@ -479,6 +549,176 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
         assert "--ephemeral" in call["command"]
         assert 'model_reasoning_effort="xhigh"' in call["command"]
         assert "stage 7.3 fake subprocess request" in call["stdin"]
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_2_memory_trusted_non_mutating_ai_output_writes_entries_linked_to_decision(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_memory_update_output(fixture.state)
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=fixture.game_id,
+                player_id=fixture.player_id,
+                ai_profile_id=fixture.ai_profile_id,
+                decision_type="memory_update",
+                mandatory=False,
+                request_context={"caller_context": "stage 8.2 finalization memory test"},
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        memory_rows = await fetch_ai_memory_rows(session_factory)
+
+        assert result.status == "validated"
+        assert len(memory_rows) == 2
+        rows_by_category = {row["category"]: row for row in memory_rows}
+        updates_by_category = {
+            update["category"]: update for update in ai_output["memory_updates"]
+        }
+        assert set(rows_by_category) == {"strategic_belief", "deal_history"}
+        for category, update in updates_by_category.items():
+            row = rows_by_category[category]
+            assert row["game_id"] == fixture.game_id
+            assert row["player_id"] == fixture.player_id
+            assert row["ai_profile_id"] == fixture.ai_profile_id
+            assert row["source_decision_id"] == result.ai_decision_id
+            assert row["source_event_id"] is None
+            assert row["source_negotiation_message_id"] is None
+            assert row["visibility"] == update["visibility"]
+            assert row["content"] == update["content"]
+            assert row["importance"] == update["importance"]
+            assert row["metadata_blob"]["memory_update"] == update["metadata"]
+            assert row["metadata_blob"]["trusted_ai_output"] is True
+            assert row["metadata_blob"]["ai_decision_status"] == "validated"
+            assert row["created_at"] is not None
+            assert row["updated_at"] is not None
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_2_memory_untrusted_malformed_output_does_not_write_entries(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output_with_memory(fixture.state)
+    del ai_output["self_dialogue"]
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        memory_rows = await fetch_ai_memory_rows(session_factory)
+
+        assert result.status == "rejected"
+        assert result.validation_result["reason_code"] == "malformed_ai_output"
+        assert memory_rows == []
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_1_self_dialogue_valid_ai_decision_writes_linked_row(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output(fixture.state)
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        decision_rows = await fetch_ai_decision_rows(session_factory)
+        dialogue_rows = await fetch_ai_self_dialogue_rows(session_factory)
+
+        assert result.status == "validated"
+        assert len(decision_rows) == 1
+        assert len(dialogue_rows) == 1
+        dialogue = dialogue_rows[0]
+        assert dialogue["game_id"] == fixture.game_id
+        assert dialogue["player_id"] == fixture.player_id
+        assert dialogue["ai_decision_id"] == result.ai_decision_id
+        assert dialogue["ai_decision_id"] == decision_rows[0]["id"]
+        assert dialogue["phase"] == fixture.state.turn.phase.value
+        assert dialogue["state_hash"] == fixture.state.state_hash()
+        assert dialogue["content"] == ai_output["self_dialogue"]["text"]
+        assert dialogue["payload"] == {**ai_output["self_dialogue"], "reason": None}
+        assert dialogue["created_at"] is not None
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_1_self_dialogue_invalid_ai_decision_writes_rejected_row(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output(fixture.state)
+    ai_output["memory_updates"] = [
+        {
+            "visibility": "private",
+            "category": "mistake_lesson",
+            "importance": 6,
+            "content": "This malformed output must not persist memory.",
+            "metadata": {"stage": "8.2"},
+        }
+    ]
+    del ai_output["self_dialogue"]
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        decision_rows = await fetch_ai_decision_rows(session_factory)
+        dialogue_rows = await fetch_ai_self_dialogue_rows(session_factory)
+        memory_rows = await fetch_ai_memory_rows(session_factory)
+
+        assert result.status == "rejected"
+        assert result.validation_result["reason_code"] == "malformed_ai_output"
+        assert len(decision_rows) == 1
+        assert len(dialogue_rows) == 1
+        assert memory_rows == []
+        dialogue = dialogue_rows[0]
+        assert dialogue["game_id"] == fixture.game_id
+        assert dialogue["player_id"] == fixture.player_id
+        assert dialogue["ai_decision_id"] == result.ai_decision_id
+        assert dialogue["ai_decision_id"] == decision_rows[0]["id"]
+        assert dialogue["phase"] == fixture.state.turn.phase.value
+        assert dialogue["state_hash"] == fixture.state.state_hash()
+        assert dialogue["content"].startswith("Self-dialogue rejected:")
+        assert dialogue["payload"]["status"] == "rejected"
+        assert dialogue["payload"]["reason_code"] == "malformed_ai_output"
+        assert dialogue["payload"]["source_status"] == "rejected"
+        assert dialogue["payload"]["validation_errors"][0]["code"] == "malformed_ai_output"
     finally:
         await delete_game(session_factory)
 
@@ -515,7 +755,9 @@ async def test_malformed_process_output_is_rejected_without_mutating_game_state(
         assert result.validation_result["no_substitute_move"] is True
         assert result.validation_result["substitute_move"] is None
         assert rows[0]["status"] == "rejected"
-        assert rows[0]["raw_output"] == json.dumps(runner.final_output)
+        assert "session_configured" in rows[0]["raw_output"]
+        assert "item_completed" in rows[0]["raw_output"]
+        assert rows[0]["raw_output"] != json.dumps(runner.final_output)
         assert rows[0]["parsed_output"]["action"]["type"] == "ROLL_DICE"
         assert rows[0]["validation_result"]["reason_code"] == "malformed_ai_output"
         assert rows[0]["accepted_event_id"] is None
@@ -551,7 +793,9 @@ async def test_non_object_malformed_ai_output_preserves_decoded_value_without_ev
         assert result.rejected_action_id is None
         assert len(rows) == 1
         assert rows[0]["status"] == "rejected"
-        assert rows[0]["raw_output"] == json.dumps(decoded_value)
+        assert "session_configured" in rows[0]["raw_output"]
+        assert "item_completed" in rows[0]["raw_output"]
+        assert rows[0]["raw_output"] != json.dumps(decoded_value)
         assert rows[0]["parsed_output"] == decoded_value
         assert rows[0]["validation_result"]["reason_code"] == "malformed_ai_output"
         assert rows[0]["accepted_event_id"] is None

@@ -16,7 +16,15 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.decision_schema import AI_OUTPUT_SCHEMA
+from app.ai.memory import (
+    MEMORY_COMPACTION_REASON_ON_DEMAND,
+    MEMORY_COMPACTION_THRESHOLD,
+    compact_memory_for_player,
+    memory_row_is_usable_for_context,
+    select_memory_rows_for_context,
+)
 from app.db.metadata import (
+    ai_decisions,
     ai_memory_entries,
     ai_profiles,
     contracts,
@@ -121,11 +129,68 @@ async def build_ai_context_pack_from_db(
     caller_request_context: Mapping[str, Any] | None = None,
     rule_snippets: Sequence[Mapping[str, Any]] = (),
     max_memory_snippets: int = 12,
+    memory_compaction_threshold: int = MEMORY_COMPACTION_THRESHOLD,
     max_negotiations: int = 10,
     max_negotiation_messages: int = 40,
     max_deals: int = 20,
 ) -> dict[str, Any]:
     """Load visible AI context rows and build a Stage 7.4 context pack."""
+
+    if not session.in_transaction():
+        async with session.begin():
+            return await _build_ai_context_pack_from_db_in_transaction(
+                session,
+                game_id=game_id,
+                player_id=player_id,
+                state=state,
+                session_factory=session_factory,
+                decision_type=decision_type,
+                negotiation_id=negotiation_id,
+                caller_request_context=caller_request_context,
+                rule_snippets=rule_snippets,
+                max_memory_snippets=max_memory_snippets,
+                memory_compaction_threshold=memory_compaction_threshold,
+                max_negotiations=max_negotiations,
+                max_negotiation_messages=max_negotiation_messages,
+                max_deals=max_deals,
+            )
+
+    return await _build_ai_context_pack_from_db_in_transaction(
+        session,
+        game_id=game_id,
+        player_id=player_id,
+        state=state,
+        session_factory=session_factory,
+        decision_type=decision_type,
+        negotiation_id=negotiation_id,
+        caller_request_context=caller_request_context,
+        rule_snippets=rule_snippets,
+        max_memory_snippets=max_memory_snippets,
+        memory_compaction_threshold=memory_compaction_threshold,
+        max_negotiations=max_negotiations,
+        max_negotiation_messages=max_negotiation_messages,
+        max_deals=max_deals,
+    )
+
+
+async def _build_ai_context_pack_from_db_in_transaction(
+    session: AsyncSession,
+    *,
+    game_id: str | UUID,
+    player_id: str | UUID,
+    state: GameState | None,
+    session_factory: async_sessionmaker[AsyncSession] | None,
+    decision_type: str,
+    negotiation_id: str | UUID | None,
+    caller_request_context: Mapping[str, Any] | None,
+    rule_snippets: Sequence[Mapping[str, Any]],
+    max_memory_snippets: int,
+    memory_compaction_threshold: int,
+    max_negotiations: int,
+    max_negotiation_messages: int,
+    max_deals: int,
+) -> dict[str, Any]:
+    """Build the DB-backed context pack inside an existing or owned transaction."""
 
     game_uuid = _coerce_uuid(game_id)
     player_uuid = _coerce_uuid(player_id)
@@ -139,6 +204,13 @@ async def build_ai_context_pack_from_db(
         )
 
     ai_profile = await _load_ai_profile(session, game_id=game_uuid, player_id=player_uuid)
+    await compact_memory_for_player(
+        session,
+        game_id=game_uuid,
+        player_id=player_uuid,
+        reason=MEMORY_COMPACTION_REASON_ON_DEMAND,
+        compaction_threshold=memory_compaction_threshold,
+    )
     memory_rows = await _load_visible_memory_rows(
         session,
         game_id=game_uuid,
@@ -207,7 +279,13 @@ async def _load_visible_memory_rows(
     limit: int,
 ) -> list[dict[str, Any]]:
     result = await session.execute(
-        sa.select(ai_memory_entries)
+        sa.select(ai_memory_entries, ai_decisions.c.status.label("source_decision_status"))
+        .select_from(
+            ai_memory_entries.outerjoin(
+                ai_decisions,
+                ai_memory_entries.c.source_decision_id == ai_decisions.c.id,
+            )
+        )
         .where(
             ai_memory_entries.c.game_id == game_id,
             sa.or_(
@@ -215,14 +293,13 @@ async def _load_visible_memory_rows(
                 ai_memory_entries.c.visibility.in_(tuple(sorted(VISIBLE_MEMORY_SCOPES))),
             ),
         )
-        .order_by(
-            ai_memory_entries.c.importance.desc(),
-            ai_memory_entries.c.created_at.desc(),
-            ai_memory_entries.c.id.desc(),
-        )
-        .limit(limit)
+        .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
     )
-    return [dict(row) for row in result.mappings().all()]
+    rows = [dict(row) for row in result.mappings().all()]
+    return select_memory_rows_for_context(
+        [row for row in rows if memory_row_is_usable_for_context(row)],
+        limit=limit,
+    )
 
 
 async def _load_negotiation_rows(
@@ -523,12 +600,14 @@ def _memory_snippet(row: Mapping[str, Any]) -> dict[str, Any]:
         "category": _string_or_none(row.get("category")),
         "content": _string_or_none(row.get("content")),
         "importance": row.get("importance"),
+        "context_score": row.get("context_score"),
         "metadata": _mapping(row.get("metadata_blob", row.get("metadata"))),
         "source_decision_id": _string_or_none(row.get("source_decision_id")),
         "source_event_id": _string_or_none(row.get("source_event_id")),
         "source_negotiation_message_id": _string_or_none(
             row.get("source_negotiation_message_id")
         ),
+        "superseded_by_memory_id": _string_or_none(row.get("superseded_by_memory_id")),
         "created_at": _string_or_none(row.get("created_at")),
     }
 
@@ -626,7 +705,7 @@ def _sorted_memory_rows(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, 
     return sorted(
         rows,
         key=lambda row: (
-            -_int_or_zero(row.get("importance")),
+            -_int_or_zero(row.get("context_score", row.get("importance"))),
             _string_or_none(row.get("created_at")) or "",
             _row_id(row),
         ),

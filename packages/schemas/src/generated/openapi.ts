@@ -55,6 +55,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/ai/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Decisions */
+        get: operations["get_ai_decisions_games__game_id__ai_decisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/ai/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Memory */
+        get: operations["get_ai_memory_games__game_id__ai_memory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/ai/profiles": {
         parameters: {
             query?: never;
@@ -64,6 +98,57 @@ export interface paths {
         };
         /** Get Ai Profiles */
         get: operations["get_ai_profiles_games__game_id__ai_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/ai/rejected-outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Rejected Outputs */
+        get: operations["get_ai_rejected_outputs_games__game_id__ai_rejected_outputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/ai/retrieval-records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Retrieval Records */
+        get: operations["get_ai_retrieval_records_games__game_id__ai_retrieval_records_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/games/{game_id}/ai/self-dialogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Self Dialogue */
+        get: operations["get_ai_self_dialogue_games__game_id__ai_self_dialogue_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -469,6 +554,120 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIDecisionRecordResponse */
+        AIDecisionRecordResponse: {
+            /** Accepted Event Id */
+            accepted_event_id: string | null;
+            /**
+             * Ai Decision Id
+             * Format: uuid
+             */
+            ai_decision_id: string;
+            /** Ai Profile Id */
+            ai_profile_id: string | null;
+            /** Created At */
+            created_at: unknown;
+            /** Decision Type */
+            decision_type: string;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Legal Actions */
+            legal_actions: {
+                [key: string]: unknown;
+            }[];
+            /** Memory Entry Ids */
+            memory_entry_ids: string[];
+            /** Parsed Output */
+            parsed_output: unknown | null;
+            /** Phase */
+            phase: string | null;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Prompt Context */
+            prompt_context: {
+                [key: string]: unknown;
+            };
+            /** Prompt Context Hash */
+            prompt_context_hash: string | null;
+            /** Raw Output */
+            raw_output: string;
+            /** Rejected Action Id */
+            rejected_action_id: string | null;
+            /** Retrieval Record Ids */
+            retrieval_record_ids: string[];
+            /** State Hash */
+            state_hash: string | null;
+            /** Status */
+            status: string;
+            /** Validation Errors */
+            validation_errors: components["schemas"]["ValidationIssueResponse"][];
+            /** Validation Result */
+            validation_result: {
+                [key: string]: unknown;
+            };
+        };
+        /** AIDecisionsResponse */
+        AIDecisionsResponse: {
+            /** Decisions */
+            decisions: components["schemas"]["AIDecisionRecordResponse"][];
+        };
+        /** AIMemoryRecordResponse */
+        AIMemoryRecordResponse: {
+            /** Ai Profile Id */
+            ai_profile_id: string | null;
+            /** Category */
+            category: string;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: unknown;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Importance */
+            importance: number;
+            /**
+             * Memory Entry Id
+             * Format: uuid
+             */
+            memory_entry_id: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Source Decision Id */
+            source_decision_id: string | null;
+            /** Source Event Id */
+            source_event_id: string | null;
+            /** Source Negotiation Message Id */
+            source_negotiation_message_id: string | null;
+            /** Superseded By Memory Id */
+            superseded_by_memory_id: string | null;
+            /** Updated At */
+            updated_at: unknown;
+            /** Visibility */
+            visibility: string;
+        };
+        /** AIMemoryResponse */
+        AIMemoryResponse: {
+            /** Memory Entries */
+            memory_entries: components["schemas"]["AIMemoryRecordResponse"][];
+        };
         /** AIProfileResponse */
         AIProfileResponse: {
             /** Aggressiveness */
@@ -527,6 +726,149 @@ export interface components {
         AIProfilesResponse: {
             /** Profiles */
             profiles: components["schemas"]["AIProfileResponse"][];
+        };
+        /** AIRejectedOutputResponse */
+        AIRejectedOutputResponse: {
+            /**
+             * Ai Decision Id
+             * Format: uuid
+             */
+            ai_decision_id: string;
+            /** Ai Profile Id */
+            ai_profile_id: string | null;
+            /** Created At */
+            created_at: unknown;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Parsed Output */
+            parsed_output: unknown | null;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Raw Output */
+            raw_output: string;
+            /** Rejected Action Id */
+            rejected_action_id: string | null;
+            /**
+             * Rejected Output Id
+             * Format: uuid
+             */
+            rejected_output_id: string;
+            /**
+             * Source Ai Decision Id
+             * Format: uuid
+             */
+            source_ai_decision_id: string;
+            /** State Hash */
+            state_hash: string | null;
+            /** Status */
+            status: string;
+            /** Validation Errors */
+            validation_errors: components["schemas"]["ValidationIssueResponse"][];
+        };
+        /** AIRejectedOutputsResponse */
+        AIRejectedOutputsResponse: {
+            /** Rejected Outputs */
+            rejected_outputs: components["schemas"]["AIRejectedOutputResponse"][];
+        };
+        /** AIRetrievalRecordResponse */
+        AIRetrievalRecordResponse: {
+            /** Ai Decision Id */
+            ai_decision_id: string | null;
+            /** Ai Profile Id */
+            ai_profile_id: string | null;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: unknown;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Memory Entry Id */
+            memory_entry_id: string | null;
+            /** Player Id */
+            player_id: string | null;
+            /** Query Context */
+            query_context: {
+                [key: string]: unknown;
+            };
+            /** Query Text */
+            query_text: string;
+            /**
+             * Retrieval Record Id
+             * Format: uuid
+             */
+            retrieval_record_id: string;
+            /** Retrieved Context */
+            retrieved_context: {
+                [key: string]: unknown;
+            };
+            /** Score */
+            score: number | null;
+            /** Source Id */
+            source_id: string | null;
+            /** Source Type */
+            source_type: string | null;
+        };
+        /** AIRetrievalRecordsResponse */
+        AIRetrievalRecordsResponse: {
+            /** Retrieval Records */
+            retrieval_records: components["schemas"]["AIRetrievalRecordResponse"][];
+        };
+        /** AISelfDialogueRecordResponse */
+        AISelfDialogueRecordResponse: {
+            /**
+             * Ai Decision Id
+             * Format: uuid
+             */
+            ai_decision_id: string;
+            /** Ai Profile Id */
+            ai_profile_id: string | null;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: unknown;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Phase */
+            phase: string | null;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Role */
+            role: string;
+            /**
+             * Self Dialogue Id
+             * Format: uuid
+             */
+            self_dialogue_id: string;
+            /** Sequence */
+            sequence: number;
+            /** State Hash */
+            state_hash: string | null;
+            /** Status */
+            status: string;
+        };
+        /** AISelfDialogueResponse */
+        AISelfDialogueResponse: {
+            /** Self Dialogue */
+            self_dialogue: components["schemas"]["AISelfDialogueRecordResponse"][];
         };
         /** AcceptedEventResponse */
         AcceptedEventResponse: {
@@ -1446,6 +1788,68 @@ export interface operations {
             };
         };
     };
+    get_ai_decisions_games__game_id__ai_decisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIDecisionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_memory_games__game_id__ai_memory_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIMemoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_ai_profiles_games__game_id__ai_profiles_get: {
         parameters: {
             query?: never;
@@ -1464,6 +1868,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AIProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_rejected_outputs_games__game_id__ai_rejected_outputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIRejectedOutputsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_retrieval_records_games__game_id__ai_retrieval_records_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIRetrievalRecordsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_self_dialogue_games__game_id__ai_self_dialogue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AISelfDialogueResponse"];
                 };
             };
             /** @description Validation Error */

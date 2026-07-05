@@ -224,7 +224,9 @@ async def test_legal_ai_action_commits_exactly_like_human_action_and_attempts_on
         ]
         assert decisions[0]["accepted_event_id"] == events[0]["id"]
         assert decisions[0]["rejected_action_id"] is None
-        assert decisions[0]["raw_output"] == json.dumps(valid_action_output(fixture.state))
+        assert "session_configured" in decisions[0]["raw_output"]
+        assert "item_completed" in decisions[0]["raw_output"]
+        assert decisions[0]["raw_output"] != json.dumps(valid_action_output(fixture.state))
         assert decisions[0]["parsed_output"]["action"]["type"] == "ROLL_DICE"
         assert decisions[0]["prompt_context"]["context_pack_schema_version"] == "ai-context-pack-v1"
         assert await table_count(session_factory, rejected_actions) == 0

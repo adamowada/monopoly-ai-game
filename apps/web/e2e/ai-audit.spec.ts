@@ -47,6 +47,7 @@ test("user can inspect AI audit records for profiles, decisions, memory, retriev
   await expect(panel).toContainText("Linked decision");
   await expect(panel).toContainText("Memory entries");
   await expect(panel).toContainText("Used by decision");
+  await expect(panel).toContainText("superseded_by_memory_id");
   await expect(panel).toContainText("Retrieved context records");
   await expect(panel).toContainText("retrieval_record_id");
 

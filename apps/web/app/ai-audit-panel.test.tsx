@@ -115,7 +115,11 @@ function decisionsFixture(): AiDecision[] {
       game_id: gameId,
       ai_profile_id: graceProfileId,
       player_id: graceId,
+      decision_type: "action_decision",
+      status: "accepted",
+      phase: "START_TURN",
       state_hash: "mock-state-ai-audit-1",
+      prompt_context_hash: "mock-prompt-context-hash-1",
       legal_actions: [
         {
           actor_id: graceId,
@@ -132,16 +136,115 @@ function decisionsFixture(): AiDecision[] {
         board_position: 0,
         legal_action_count: 1,
       },
-      raw_output: "{\"action\":\"ROLL_DICE\"}",
+      raw_output:
+        "{\"type\":\"session_configured\",\"model\":\"codex\"}\n" +
+        "{\"type\":\"item_completed\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"action\\\":\\\"ROLL_DICE\\\"}\"}]}}",
       parsed_output: {
         action: "ROLL_DICE",
         confidence: 0.81,
       },
+      validation_result: {
+        status: "accepted",
+        raw_output_format: "codex_exec_jsonl",
+      },
       validation_errors: [],
       memory_entry_ids: [memoryEntryId],
       retrieval_record_ids: [retrievalRecordId],
-      status: "accepted",
+      accepted_event_id: "event-grace-1",
+      rejected_action_id: null,
       created_at: "2026-07-04T00:02:00.000Z",
+    },
+    {
+      ai_decision_id: "decision-validated-1",
+      game_id: gameId,
+      ai_profile_id: graceProfileId,
+      player_id: graceId,
+      decision_type: "negotiation_message",
+      status: "validated",
+      phase: "NEGOTIATION_WINDOW",
+      state_hash: "mock-state-ai-audit-2",
+      prompt_context_hash: "mock-prompt-context-hash-2",
+      legal_actions: [],
+      prompt_context: { decision_type: "negotiation_message" },
+      raw_output:
+        "{\"type\":\"session_configured\",\"model\":\"codex\"}\n" +
+        "{\"type\":\"item_completed\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"decision_type\\\":\\\"negotiation_message\\\"}\"}]}}",
+      parsed_output: { decision_type: "negotiation_message" },
+      validation_result: { status: "validated", raw_output_format: "codex_exec_jsonl" },
+      validation_errors: [],
+      memory_entry_ids: [],
+      retrieval_record_ids: [],
+      accepted_event_id: null,
+      rejected_action_id: null,
+      created_at: "2026-07-04T00:02:10.000Z",
+    },
+    {
+      ai_decision_id: "decision-rejected-1",
+      game_id: gameId,
+      ai_profile_id: graceProfileId,
+      player_id: graceId,
+      decision_type: "action_decision",
+      status: "rejected",
+      phase: "START_TURN",
+      state_hash: "mock-state-ai-audit-3",
+      prompt_context_hash: "mock-prompt-context-hash-3",
+      legal_actions: [],
+      prompt_context: { decision_type: "action_decision" },
+      raw_output:
+        "{\"type\":\"session_configured\",\"model\":\"codex\"}\n" +
+        "{\"type\":\"item_completed\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"action\\\":\\\"BUY_PROPERTY\\\"}\"}]}}",
+      parsed_output: { action: "BUY_PROPERTY" },
+      validation_result: { status: "rejected", reason_code: "illegal_action" },
+      validation_errors: [{ code: "illegal_action", message: "BUY_PROPERTY is not legal.", field: "action.type" }],
+      memory_entry_ids: [],
+      retrieval_record_ids: [],
+      accepted_event_id: null,
+      rejected_action_id: "rejected-action-1",
+      created_at: "2026-07-04T00:02:20.000Z",
+    },
+    {
+      ai_decision_id: "decision-timeout-1",
+      game_id: gameId,
+      ai_profile_id: graceProfileId,
+      player_id: graceId,
+      decision_type: "action_decision",
+      status: "timeout",
+      phase: "START_TURN",
+      state_hash: "mock-state-ai-audit-4",
+      prompt_context_hash: "mock-prompt-context-hash-4",
+      legal_actions: [],
+      prompt_context: { decision_type: "action_decision" },
+      raw_output: "",
+      parsed_output: null,
+      validation_result: { status: "rejected", reason_code: "codex_exec_timeout" },
+      validation_errors: [{ code: "codex_exec_timeout", message: "codex exec timed out", field: null }],
+      memory_entry_ids: [],
+      retrieval_record_ids: [],
+      accepted_event_id: null,
+      rejected_action_id: null,
+      created_at: "2026-07-04T00:02:30.000Z",
+    },
+    {
+      ai_decision_id: "decision-process-error-1",
+      game_id: gameId,
+      ai_profile_id: graceProfileId,
+      player_id: graceId,
+      decision_type: "action_decision",
+      status: "process_error",
+      phase: "START_TURN",
+      state_hash: "mock-state-ai-audit-5",
+      prompt_context_hash: "mock-prompt-context-hash-5",
+      legal_actions: [],
+      prompt_context: { decision_type: "action_decision" },
+      raw_output: "{\"type\":\"error\",\"message\":\"boom\"}\n",
+      parsed_output: null,
+      validation_result: { status: "rejected", reason_code: "codex_exec_process_error" },
+      validation_errors: [{ code: "codex_exec_process_error", message: "codex exec failed", field: null }],
+      memory_entry_ids: [],
+      retrieval_record_ids: [],
+      accepted_event_id: null,
+      rejected_action_id: null,
+      created_at: "2026-07-04T00:02:40.000Z",
     },
   ];
 }
@@ -151,11 +254,19 @@ function selfDialogueFixture(): AiSelfDialogueRecord[] {
     {
       self_dialogue_id: "dialogue-1",
       game_id: gameId,
+      player_id: graceId,
       ai_decision_id: decisionId,
       ai_profile_id: graceProfileId,
       sequence: 1,
       role: "critic",
+      status: "provided",
+      phase: "START_TURN",
+      state_hash: "mock-state-ai-audit-1",
       content: "The legal action set is narrow, so preserve tempo with ROLL_DICE.",
+      payload: {
+        status: "provided",
+        text: "The legal action set is narrow, so preserve tempo with ROLL_DICE.",
+      },
       created_at: "2026-07-04T00:02:01.000Z",
     },
   ];
@@ -168,10 +279,18 @@ function memoryFixture(): AiMemoryEntry[] {
       game_id: gameId,
       ai_profile_id: graceProfileId,
       player_id: graceId,
-      kind: "strategy",
+      source_decision_id: decisionId,
+      source_event_id: "event-grace-1",
+      source_negotiation_message_id: null,
+      superseded_by_memory_id: null,
+      sequence: 1,
+      category: "player_trust_model",
+      visibility: "private",
       content: "Grace remembers Ada prefers keeping $200 cash after trades.",
-      importance: 0.74,
+      importance: 7,
+      metadata: { source: "unit-test" },
       created_at: "2026-07-04T00:01:30.000Z",
+      updated_at: "2026-07-04T00:01:31.000Z",
     },
   ];
 }
@@ -181,11 +300,15 @@ function retrievalFixture(): AiRetrievalRecord[] {
     {
       retrieval_record_id: retrievalRecordId,
       game_id: gameId,
+      player_id: graceId,
       ai_decision_id: decisionId,
       ai_profile_id: graceProfileId,
       memory_entry_id: memoryEntryId,
       source_type: "memory",
       source_id: memoryEntryId,
+      query_text: "prompt_context.memory.snippets",
+      query_context: { prompt_context_hash: "mock-prompt-context-hash-1" },
+      retrieved_context: { id: memoryEntryId, content: "Retrieved context confirms Ada cash-reserve behavior." },
       score: 0.93,
       content: "Retrieved context confirms Ada cash-reserve behavior.",
       created_at: "2026-07-04T00:01:45.000Z",
@@ -199,10 +322,14 @@ function rejectedOutputsFixture(): AiRejectedOutput[] {
       rejected_output_id: "rejected-output-1",
       game_id: gameId,
       ai_decision_id: decisionId,
+      source_ai_decision_id: decisionId,
       ai_profile_id: graceProfileId,
       player_id: graceId,
       state_hash: "mock-state-ai-audit-1",
-      raw_output: "{\"action\":\"BUY_PROPERTY\"}",
+      status: "rejected",
+      raw_output:
+        "{\"type\":\"session_configured\",\"model\":\"codex\"}\n" +
+        "{\"type\":\"item_completed\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"action\\\":\\\"BUY_PROPERTY\\\"}\"}]}}",
       parsed_output: {
         action: "BUY_PROPERTY",
         property_id: "property_boardwalk",
@@ -214,6 +341,7 @@ function rejectedOutputsFixture(): AiRejectedOutput[] {
           field: "parsed_output.action",
         },
       ],
+      rejected_action_id: "rejected-action-1",
       created_at: "2026-07-04T00:02:30.000Z",
     },
   ];
@@ -296,9 +424,13 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("Prompt context");
     expect(panel).toHaveTextContent("board_position");
     expect(panel).toHaveTextContent("Raw output");
-    expect(panel).toHaveTextContent("{\"action\":\"ROLL_DICE\"}");
+    expect(panel).toHaveTextContent("session_configured");
     expect(panel).toHaveTextContent("Parsed output");
     expect(panel).toHaveTextContent("\"confidence\": 0.81");
+    expect(panel).toHaveTextContent("validated");
+    expect(panel).toHaveTextContent("rejected");
+    expect(panel).toHaveTextContent("timeout");
+    expect(panel).toHaveTextContent("process_error");
 
     expect(panel).toHaveTextContent("Self-dialogue timeline");
     expect(panel).toHaveTextContent("self_dialogue_id dialogue-1");
@@ -308,6 +440,10 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("Memory entries");
     expect(panel).toHaveTextContent("memory_entry_id memory-grace-1");
     expect(panel).toHaveTextContent("Used by decision decision-grace-1");
+    expect(panel).toHaveTextContent("player_trust_model");
+    expect(panel).toHaveTextContent("decision decision-grace-1");
+    expect(panel).toHaveTextContent("event event-grace-1");
+    expect(panel).toHaveTextContent("superseded_by_memory_id n/a");
     expect(panel).toHaveTextContent("Grace remembers Ada prefers keeping $200 cash after trades.");
 
     expect(panel).toHaveTextContent("Retrieved context records");
