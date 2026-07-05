@@ -96,12 +96,13 @@ function ErrorNote({ text }: Readonly<{ text: string }>) {
   );
 }
 
-function InlineMeta({ label, value }: Readonly<{ label: string; value: string }>) {
+function InlineMeta({ label, value }: Readonly<{ label: string; value: string | null | undefined }>) {
+  const displayValue = value ?? "n/a";
   return (
     <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-[11px] font-medium text-neutral-700">
       <span className="text-neutral-500">{label}</span>
       {" "}
-      <span className="break-all text-neutral-950">{value}</span>
+      <span className="break-all text-neutral-950">{displayValue}</span>
     </span>
   );
 }
@@ -272,8 +273,17 @@ function LinkedDialogue({
               <span className="font-medium text-neutral-950">
                 #{entry.sequence} {entry.role} · self_dialogue_id {entry.self_dialogue_id}
               </span>
-              <span className="block">Linked decision {entry.ai_decision_id}</span>
+              <span className="block">
+                Linked decision {entry.ai_decision_id} - ai_profile_id {entry.ai_profile_id ?? "n/a"}
+              </span>
+              <span className="block">
+                player {entry.player_id} - phase {entry.phase ?? "n/a"} - state_hash {entry.state_hash ?? "n/a"} - status{" "}
+                {entry.status}
+              </span>
               <span className="block">{entry.content}</span>
+              <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-100 p-2 text-xs text-neutral-800">
+                {jsonBlock(entry.payload)}
+              </pre>
             </li>
           ))}
         </ol>

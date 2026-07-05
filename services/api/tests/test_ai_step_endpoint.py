@@ -16,9 +16,10 @@ import json
 import os
 import threading
 from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -38,6 +39,7 @@ from app.core.config import Settings
 from app.db.metadata import (
     action_idempotency_keys,
     ai_decisions,
+    ai_self_dialogue,
     deals,
     game_events,
     games,
@@ -259,6 +261,115 @@ async def test_ai_turn_stepping_endpoint_progresses_mixed_human_ai_game(
         assert await table_count(session_factory, game_events, game_id) >= 1
         assert await table_count(session_factory, ai_decisions, game_id) == 1
         assert await table_count(session_factory, rejected_actions, game_id) == 0
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_1_self_dialogue_endpoint_returns_persisted_timeline_with_linkage(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    profiles_response = await client.get(f"/games/{game_id}/ai/profiles")
+    assert profiles_response.status_code == 200, profiles_response.text
+    ai_profile_id = profiles_response.json()["profiles"][0]["ai_profile_id"]
+    first_decision_id = uuid4()
+    second_decision_id = uuid4()
+    first_dialogue_id = uuid4()
+    second_dialogue_id = uuid4()
+    first_payload = {"status": "provided", "text": "First persisted self-dialogue entry."}
+    second_payload = {"status": "rejected", "reason": "Schema validation rejected private notes."}
+    first_created_at = datetime(2026, 7, 5, 12, 1, tzinfo=UTC)
+    second_created_at = first_created_at + timedelta(minutes=1)
+
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                for decision_id, phase, state_hash, payload in (
+                    (first_decision_id, "START_TURN", "stage-8-state-1", first_payload),
+                    (second_decision_id, "NEGOTIATION", "stage-8-state-2", second_payload),
+                ):
+                    await session.execute(
+                        ai_decisions.insert().values(
+                            id=decision_id,
+                            game_id=UUID(game_id),
+                            player_id=UUID(ai_player_id),
+                            ai_profile_id=UUID(ai_profile_id),
+                            decision_type="action_decision",
+                            status="validated",
+                            phase=phase,
+                            state_hash=state_hash,
+                            prompt_context_hash=f"{state_hash}-prompt",
+                            prompt_context={"stage": "8.1"},
+                            raw_output=json.dumps({"self_dialogue": payload}),
+                            parsed_output={"self_dialogue": payload},
+                            validation_result={"status": "valid"},
+                        )
+                    )
+                await session.execute(
+                    ai_self_dialogue.insert().values(
+                        id=second_dialogue_id,
+                        game_id=UUID(game_id),
+                        player_id=UUID(ai_player_id),
+                        ai_decision_id=second_decision_id,
+                        phase="NEGOTIATION",
+                        state_hash="stage-8-state-2",
+                        content="Self-dialogue rejected: Schema validation rejected private notes.",
+                        payload=second_payload,
+                        created_at=second_created_at,
+                    )
+                )
+                await session.execute(
+                    ai_self_dialogue.insert().values(
+                        id=first_dialogue_id,
+                        game_id=UUID(game_id),
+                        player_id=UUID(ai_player_id),
+                        ai_decision_id=first_decision_id,
+                        phase="START_TURN",
+                        state_hash="stage-8-state-1",
+                        content="First persisted self-dialogue entry.",
+                        payload=first_payload,
+                        created_at=first_created_at,
+                    )
+                )
+
+        response = await client.get(f"/games/{game_id}/ai/self-dialogue")
+        body = response.json()
+
+        assert response.status_code == 200, response.text
+        assert [entry["self_dialogue_id"] for entry in body["self_dialogue"]] == [
+            str(first_dialogue_id),
+            str(second_dialogue_id),
+        ]
+        assert [entry["sequence"] for entry in body["self_dialogue"]] == [1, 2]
+        assert [entry["content"] for entry in body["self_dialogue"]] == [
+            "First persisted self-dialogue entry.",
+            "Self-dialogue rejected: Schema validation rejected private notes.",
+        ]
+        first = body["self_dialogue"][0]
+        second = body["self_dialogue"][1]
+        assert first["game_id"] == game_id
+        assert first["player_id"] == ai_player_id
+        assert first["ai_decision_id"] == str(first_decision_id)
+        assert first["ai_profile_id"] == ai_profile_id
+        assert first["phase"] == "START_TURN"
+        assert first["state_hash"] == "stage-8-state-1"
+        assert first["status"] == "provided"
+        assert first["role"] == "provided"
+        assert first["payload"] == first_payload
+        assert first["created_at"]
+        assert second["game_id"] == game_id
+        assert second["player_id"] == ai_player_id
+        assert second["ai_decision_id"] == str(second_decision_id)
+        assert second["ai_profile_id"] == ai_profile_id
+        assert second["phase"] == "NEGOTIATION"
+        assert second["state_hash"] == "stage-8-state-2"
+        assert second["status"] == "rejected"
+        assert second["role"] == "rejected"
+        assert second["payload"] == second_payload
     finally:
         await delete_game(session_factory, game_id)
 

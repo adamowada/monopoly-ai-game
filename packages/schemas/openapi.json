@@ -130,6 +130,121 @@
         "title": "AIProfilesResponse",
         "type": "object"
       },
+      "AISelfDialogueRecordResponse": {
+        "properties": {
+          "ai_decision_id": {
+            "format": "uuid",
+            "title": "Ai Decision Id",
+            "type": "string"
+          },
+          "ai_profile_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Profile Id"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "self_dialogue_id": {
+            "format": "uuid",
+            "title": "Self Dialogue Id",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "state_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Hash"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "self_dialogue_id",
+          "game_id",
+          "player_id",
+          "ai_decision_id",
+          "ai_profile_id",
+          "sequence",
+          "role",
+          "status",
+          "phase",
+          "state_hash",
+          "content",
+          "payload",
+          "created_at"
+        ],
+        "title": "AISelfDialogueRecordResponse",
+        "type": "object"
+      },
+      "AISelfDialogueResponse": {
+        "properties": {
+          "self_dialogue": {
+            "items": {
+              "$ref": "#/components/schemas/AISelfDialogueRecordResponse"
+            },
+            "title": "Self Dialogue",
+            "type": "array"
+          }
+        },
+        "required": [
+          "self_dialogue"
+        ],
+        "title": "AISelfDialogueResponse",
+        "type": "object"
+      },
       "AcceptedEventResponse": {
         "properties": {
           "actor_player_id": {
@@ -2510,6 +2625,49 @@
           }
         },
         "summary": "Get Ai Profiles",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/ai/self-dialogue": {
+      "get": {
+        "operationId": "get_ai_self_dialogue_games__game_id__ai_self_dialogue_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISelfDialogueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Self Dialogue",
         "tags": [
           "games"
         ]

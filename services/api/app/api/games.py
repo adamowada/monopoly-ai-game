@@ -39,6 +39,7 @@ from app.contracts.settlement_engine import (
 from app.db.metadata import (
     action_idempotency_keys,
     ai_decisions,
+    ai_self_dialogue,
     contracts,
     deals,
     games,
@@ -579,6 +580,26 @@ class AIProfileResponse(BaseModel):
 
 class AIProfilesResponse(BaseModel):
     profiles: list[AIProfileResponse]
+
+
+class AISelfDialogueRecordResponse(BaseModel):
+    self_dialogue_id: UUID
+    game_id: UUID
+    player_id: UUID
+    ai_decision_id: UUID
+    ai_profile_id: UUID | None
+    sequence: int
+    role: str
+    status: str
+    phase: str | None
+    state_hash: str | None
+    content: str
+    payload: Mapping[str, Any]
+    created_at: Any
+
+
+class AISelfDialogueResponse(BaseModel):
+    self_dialogue: list[AISelfDialogueRecordResponse]
 
 
 @router.post("", response_model=GameMetadataResponse, status_code=status.HTTP_201_CREATED)
@@ -1896,6 +1917,42 @@ async def get_ai_profiles(game_id: UUID, request: Request) -> AIProfilesResponse
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
 
     return AIProfilesResponse(profiles=[_ai_profile_response(profile) for profile in profile_records])
+
+
+@router.get("/{game_id}/ai/self-dialogue", response_model=AISelfDialogueResponse)
+async def get_ai_self_dialogue(game_id: UUID, request: Request) -> AISelfDialogueResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    sequence = (
+        sa.func.row_number()
+        .over(order_by=(ai_self_dialogue.c.created_at, ai_self_dialogue.c.id))
+        .label("sequence")
+    )
+
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(
+                ai_self_dialogue.c.id.label("self_dialogue_id"),
+                ai_self_dialogue.c.game_id,
+                ai_self_dialogue.c.player_id,
+                ai_self_dialogue.c.ai_decision_id,
+                ai_decisions.c.ai_profile_id,
+                sequence,
+                ai_self_dialogue.c.phase,
+                ai_self_dialogue.c.state_hash,
+                ai_self_dialogue.c.content,
+                ai_self_dialogue.c.payload,
+                ai_self_dialogue.c.created_at,
+            )
+            .join(ai_decisions, ai_decisions.c.id == ai_self_dialogue.c.ai_decision_id)
+            .where(ai_self_dialogue.c.game_id == game_id)
+            .order_by(ai_self_dialogue.c.created_at, ai_self_dialogue.c.id)
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+
+    return AISelfDialogueResponse(
+        self_dialogue=[_ai_self_dialogue_response(row) for row in rows],
+    )
 
 
 @router.post(
@@ -4815,6 +4872,40 @@ def _ai_profile_response(profile: AIProfile) -> AIProfileResponse:
         created_at=profile.created_at,
         updated_at=profile.updated_at,
     )
+
+
+def _ai_self_dialogue_response(row: Mapping[str, Any]) -> AISelfDialogueRecordResponse:
+    payload = row["payload"] if isinstance(row["payload"], Mapping) else {}
+    safe_payload = _json_safe_mapping(payload)
+    dialogue_status = _self_dialogue_payload_status(safe_payload)
+    content = row["content"] if isinstance(row["content"], str) and row["content"].strip() else None
+    if content is None:
+        content = f"Self-dialogue {dialogue_status}."
+    return AISelfDialogueRecordResponse(
+        self_dialogue_id=row["self_dialogue_id"],
+        game_id=row["game_id"],
+        player_id=row["player_id"],
+        ai_decision_id=row["ai_decision_id"],
+        ai_profile_id=row["ai_profile_id"],
+        sequence=int(row["sequence"]),
+        role=_self_dialogue_payload_role(safe_payload, dialogue_status),
+        status=dialogue_status,
+        phase=row["phase"],
+        state_hash=row["state_hash"],
+        content=content,
+        payload=safe_payload,
+        created_at=row["created_at"],
+    )
+
+
+def _self_dialogue_payload_status(payload: Mapping[str, Any]) -> str:
+    status_value = payload.get("status")
+    return status_value if isinstance(status_value, str) and status_value else "unknown"
+
+
+def _self_dialogue_payload_role(payload: Mapping[str, Any], status_value: str) -> str:
+    role = payload.get("role")
+    return role if isinstance(role, str) and role else status_value
 
 
 def _rejected_response(record: RejectedActionRecord) -> RejectedActionResponse:

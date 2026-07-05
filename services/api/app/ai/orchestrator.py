@@ -27,7 +27,7 @@ from app.ai.decision_schema import (
     rejected_ai_output,
     validate_ai_decision_output,
 )
-from app.db.metadata import ai_decisions, ai_profiles
+from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue
 
 
 DEFAULT_AI_SCHEMA_FILE = Path(__file__).resolve().parent / "schemas" / "agent_decision.schema.json"
@@ -439,6 +439,22 @@ async def _persist_attempt_result(
                 .returning(ai_decisions.c.id)
             )
             decision_id = result.scalar_one()
+            content, self_dialogue_payload = _self_dialogue_content_and_payload(
+                status=status,
+                parsed_output=persisted_parsed_output,
+                validation_result=validation_result,
+            )
+            await session.execute(
+                ai_self_dialogue.insert().values(
+                    game_id=game_id,
+                    player_id=player_id,
+                    ai_decision_id=decision_id,
+                    phase=request.phase,
+                    state_hash=request.state_hash,
+                    content=content,
+                    payload=self_dialogue_payload,
+                )
+            )
 
     return CodexExecAIDecisionResult(
         ai_decision_id=decision_id,
@@ -448,6 +464,78 @@ async def _persist_attempt_result(
         validation_result=validation_result,
         prompt_context_hash=prompt_context_hash,
     )
+
+
+def _self_dialogue_content_and_payload(
+    *,
+    status: str,
+    parsed_output: Any | None,
+    validation_result: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    trusted_payload = _trusted_self_dialogue_payload(status=status, parsed_output=parsed_output)
+    if trusted_payload is not None:
+        dialogue_status = _string_value(trusted_payload.get("status")) or "rejected"
+        if dialogue_status == "provided":
+            text = _string_value(trusted_payload.get("text"))
+            if text is not None and text.strip():
+                return text, trusted_payload
+
+        reason = _string_value(trusted_payload.get("reason"))
+        if dialogue_status == "empty":
+            return _self_dialogue_status_content("empty", reason), trusted_payload
+        if dialogue_status == "rejected":
+            return _self_dialogue_status_content("rejected", reason), trusted_payload
+
+    reason = _validation_reason(validation_result) or "AI output could not be trusted."
+    reason_code = _string_value(validation_result.get("reason_code")) or status
+    payload = {
+        "status": "rejected",
+        "reason": reason,
+        "reason_code": reason_code,
+        "source_status": status,
+        "validation_errors": _validation_errors(validation_result),
+        "validation_result": _json_safe(validation_result),
+    }
+    return _self_dialogue_status_content("rejected", reason), payload
+
+
+def _trusted_self_dialogue_payload(
+    *,
+    status: str,
+    parsed_output: Any | None,
+) -> dict[str, Any] | None:
+    if status != "validated" or not isinstance(parsed_output, Mapping):
+        return None
+    payload = parsed_output.get("self_dialogue")
+    if not isinstance(payload, Mapping):
+        return None
+    return dict(_json_safe(payload))
+
+
+def _self_dialogue_status_content(status: str, reason: str | None) -> str:
+    if reason is None:
+        return f"Self-dialogue {status}."
+    return f"Self-dialogue {status}: {reason}"
+
+
+def _validation_reason(validation_result: Mapping[str, Any]) -> str | None:
+    errors = _validation_errors(validation_result)
+    if errors:
+        message = _string_value(errors[0].get("message"))
+        if message is not None:
+            return message
+    return _string_value(validation_result.get("message"))
+
+
+def _validation_errors(validation_result: Mapping[str, Any]) -> list[dict[str, Any]]:
+    errors = validation_result.get("validation_errors")
+    if not isinstance(errors, Sequence) or isinstance(errors, str | bytes | bytearray):
+        return []
+    return [dict(error) for error in errors if isinstance(error, Mapping)]
+
+
+def _string_value(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 async def _load_ai_profile_id(

@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/ai/self-dialogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Self Dialogue */
+        get: operations["get_ai_self_dialogue_games__game_id__ai_self_dialogue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/ai/step": {
         parameters: {
             query?: never;
@@ -527,6 +544,54 @@ export interface components {
         AIProfilesResponse: {
             /** Profiles */
             profiles: components["schemas"]["AIProfileResponse"][];
+        };
+        /** AISelfDialogueRecordResponse */
+        AISelfDialogueRecordResponse: {
+            /**
+             * Ai Decision Id
+             * Format: uuid
+             */
+            ai_decision_id: string;
+            /** Ai Profile Id */
+            ai_profile_id: string | null;
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: unknown;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Phase */
+            phase: string | null;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Role */
+            role: string;
+            /**
+             * Self Dialogue Id
+             * Format: uuid
+             */
+            self_dialogue_id: string;
+            /** Sequence */
+            sequence: number;
+            /** State Hash */
+            state_hash: string | null;
+            /** Status */
+            status: string;
+        };
+        /** AISelfDialogueResponse */
+        AISelfDialogueResponse: {
+            /** Self Dialogue */
+            self_dialogue: components["schemas"]["AISelfDialogueRecordResponse"][];
         };
         /** AcceptedEventResponse */
         AcceptedEventResponse: {
@@ -1464,6 +1529,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AIProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_self_dialogue_games__game_id__ai_self_dialogue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AISelfDialogueResponse"];
                 };
             };
             /** @description Validation Error */

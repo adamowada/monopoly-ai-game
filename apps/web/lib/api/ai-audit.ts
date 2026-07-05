@@ -40,11 +40,16 @@ export const AiDecisionSchema = z.object({
 export const AiSelfDialogueRecordSchema = z.object({
   self_dialogue_id: z.string().min(1),
   game_id: z.string().min(1),
+  player_id: z.string().min(1),
   ai_decision_id: z.string().min(1),
-  ai_profile_id: z.string().min(1),
+  ai_profile_id: z.string().min(1).nullable(),
   sequence: z.number().int().positive(),
   role: z.string().min(1),
+  status: z.string().min(1),
+  phase: z.string().min(1).nullable(),
+  state_hash: z.string().min(1).nullable(),
   content: z.string().min(1),
+  payload: z.record(z.string(), z.unknown()),
   created_at: z.coerce.string().min(1),
 });
 

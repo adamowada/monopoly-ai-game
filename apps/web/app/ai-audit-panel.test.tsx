@@ -151,11 +151,19 @@ function selfDialogueFixture(): AiSelfDialogueRecord[] {
     {
       self_dialogue_id: "dialogue-1",
       game_id: gameId,
+      player_id: graceId,
       ai_decision_id: decisionId,
       ai_profile_id: graceProfileId,
       sequence: 1,
       role: "critic",
+      status: "provided",
+      phase: "START_TURN",
+      state_hash: "mock-state-ai-audit-1",
       content: "The legal action set is narrow, so preserve tempo with ROLL_DICE.",
+      payload: {
+        status: "provided",
+        text: "The legal action set is narrow, so preserve tempo with ROLL_DICE.",
+      },
       created_at: "2026-07-04T00:02:01.000Z",
     },
   ];

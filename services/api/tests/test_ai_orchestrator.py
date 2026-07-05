@@ -40,7 +40,15 @@ from app.ai.orchestrator import (
     request_codex_ai_decision,
     write_ai_output_schema_file,
 )
-from app.db.metadata import ai_decisions, ai_profiles, game_events, games, metadata, players
+from app.db.metadata import (
+    ai_decisions,
+    ai_profiles,
+    ai_self_dialogue,
+    game_events,
+    games,
+    metadata,
+    players,
+)
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
@@ -250,6 +258,19 @@ async def fetch_ai_decision_rows(
             sa.select(ai_decisions)
             .where(ai_decisions.c.game_id == game_id)
             .order_by(ai_decisions.c.created_at.desc(), ai_decisions.c.id.desc())
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+
+async def fetch_ai_self_dialogue_rows(
+    session_factory: async_sessionmaker,
+    game_id: UUID = GAME_ID,
+) -> list[dict[str, Any]]:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(ai_self_dialogue)
+            .where(ai_self_dialogue.c.game_id == game_id)
+            .order_by(ai_self_dialogue.c.created_at, ai_self_dialogue.c.id)
         )
         return [dict(row) for row in result.mappings().all()]
 
@@ -479,6 +500,84 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
         assert "--ephemeral" in call["command"]
         assert 'model_reasoning_effort="xhigh"' in call["command"]
         assert "stage 7.3 fake subprocess request" in call["stdin"]
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_1_self_dialogue_valid_ai_decision_writes_linked_row(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output(fixture.state)
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        decision_rows = await fetch_ai_decision_rows(session_factory)
+        dialogue_rows = await fetch_ai_self_dialogue_rows(session_factory)
+
+        assert result.status == "validated"
+        assert len(decision_rows) == 1
+        assert len(dialogue_rows) == 1
+        dialogue = dialogue_rows[0]
+        assert dialogue["game_id"] == fixture.game_id
+        assert dialogue["player_id"] == fixture.player_id
+        assert dialogue["ai_decision_id"] == result.ai_decision_id
+        assert dialogue["ai_decision_id"] == decision_rows[0]["id"]
+        assert dialogue["phase"] == fixture.state.turn.phase.value
+        assert dialogue["state_hash"] == fixture.state.state_hash()
+        assert dialogue["content"] == ai_output["self_dialogue"]["text"]
+        assert dialogue["payload"] == {**ai_output["self_dialogue"], "reason": None}
+        assert dialogue["created_at"] is not None
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_8_1_self_dialogue_invalid_ai_decision_writes_rejected_row(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output(fixture.state)
+    del ai_output["self_dialogue"]
+    runner = FakeCodexRunner(final_output=ai_output)
+    try:
+        result = await request_codex_ai_decision(
+            session_factory,
+            decision_request(fixture),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        decision_rows = await fetch_ai_decision_rows(session_factory)
+        dialogue_rows = await fetch_ai_self_dialogue_rows(session_factory)
+
+        assert result.status == "rejected"
+        assert result.validation_result["reason_code"] == "malformed_ai_output"
+        assert len(decision_rows) == 1
+        assert len(dialogue_rows) == 1
+        dialogue = dialogue_rows[0]
+        assert dialogue["game_id"] == fixture.game_id
+        assert dialogue["player_id"] == fixture.player_id
+        assert dialogue["ai_decision_id"] == result.ai_decision_id
+        assert dialogue["ai_decision_id"] == decision_rows[0]["id"]
+        assert dialogue["phase"] == fixture.state.turn.phase.value
+        assert dialogue["state_hash"] == fixture.state.state_hash()
+        assert dialogue["content"].startswith("Self-dialogue rejected:")
+        assert dialogue["payload"]["status"] == "rejected"
+        assert dialogue["payload"]["reason_code"] == "malformed_ai_output"
+        assert dialogue["payload"]["source_status"] == "rejected"
+        assert dialogue["payload"]["validation_errors"][0]["code"] == "malformed_ai_output"
     finally:
         await delete_game(session_factory)
 
