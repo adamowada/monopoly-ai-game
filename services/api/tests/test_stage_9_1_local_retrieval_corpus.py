@@ -6,6 +6,7 @@ import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from pathlib import PureWindowsPath
 from typing import Any, cast
 from uuid import UUID
 
@@ -252,9 +253,64 @@ def test_stage_9_1_local_retrieval_corpus_jsonl_index_command_is_deterministic(
     assert all(isinstance(row["metadata"], dict) for row in rows)
 
 
+def test_stage_9_1_index_paths_repo_relative(tmp_path: Path) -> None:
+    expected_files = {
+        "content/rules/classic_monopoly.json",
+        "content/rules/contract_examples.json",
+        "content/rules/house_rules_and_deviations.json",
+    }
+
+    documents = build_static_local_corpus(content_rules_dir=CONTENT_RULES)
+    _assert_static_metadata_files_are_repo_relative(
+        [document.to_json_dict() for document in documents],
+        expected_files=expected_files,
+    )
+
+    output = tmp_path / "corpus.jsonl"
+    script = REPO_ROOT / "services" / "api" / "scripts" / "build_rag_index.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), "--output", str(output)],
+        cwd=REPO_ROOT,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    assert completed.returncode == 0, completed.stdout
+
+    jsonl_text = output.read_text(encoding="utf-8")
+    assert str(REPO_ROOT) not in jsonl_text
+    assert str(Path.home()) not in jsonl_text
+
+    rows = [json.loads(line) for line in jsonl_text.splitlines()]
+    _assert_static_metadata_files_are_repo_relative(rows, expected_files=expected_files)
+
+
 def _only(documents: list[CorpusDocument]) -> CorpusDocument:
     assert len(documents) == 1
     return documents[0]
+
+
+def _assert_static_metadata_files_are_repo_relative(
+    rows: list[Mapping[str, Any]],
+    *,
+    expected_files: set[str],
+) -> None:
+    file_values = {
+        metadata["file"]
+        for row in rows
+        if row["source_type"] in {"rules", "house_rules", "contract_examples"}
+        for metadata in [row["metadata"]]
+        if isinstance(metadata, dict) and "file" in metadata
+    }
+
+    assert file_values == expected_files
+    for file_value in file_values:
+        assert isinstance(file_value, str)
+        assert not file_value.startswith("/")
+        assert "\\" not in file_value
+        assert PureWindowsPath(file_value).drive == ""
+        assert ".." not in Path(file_value).parts
 
 
 def _resolve_contract_example_party_aliases(

@@ -94,7 +94,7 @@ def build_rules_corpus(path: Path = CLASSIC_RULES_PATH) -> list[CorpusDocument]:
                 f"{currency.get('name', 'Game dollars')} uses symbol "
                 f"{currency.get('symbol', '$')}."
             ),
-            metadata={"kind": "ruleset", "version": version, "file": str(path)},
+            metadata={"kind": "ruleset", "version": version, "file": _static_metadata_file_path(path)},
         )
     ]
 
@@ -124,7 +124,7 @@ def build_rules_corpus(path: Path = CLASSIC_RULES_PATH) -> list[CorpusDocument]:
                 "kind": "bank_inventory",
                 "version": version,
                 "bank_inventory": bank_inventory,
-                "file": str(path),
+                "file": _static_metadata_file_path(path),
             },
         )
     )
@@ -151,7 +151,7 @@ def build_house_rule_corpus(path: Path = HOUSE_RULES_PATH) -> list[CorpusDocumen
                     "version": version,
                     "category": entry.get("category"),
                     "entry_metadata": _json_safe(entry.get("metadata") or {}),
-                    "file": str(path),
+                    "file": _static_metadata_file_path(path),
                 },
             )
         )
@@ -189,7 +189,7 @@ def build_contract_example_corpus(path: Path = CONTRACT_EXAMPLES_PATH) -> list[C
                     "parties": _json_safe(example.get("parties") or []),
                     "instruments": _json_safe(instruments),
                     "validation_notes": _json_safe(example.get("validation_notes") or []),
-                    "file": str(path),
+                    "file": _static_metadata_file_path(path),
                 },
             )
         )
@@ -483,7 +483,12 @@ def _board_space_document(
         source_id=source_id,
         title=f"Board Space: {name}",
         text=text,
-        metadata={"kind": "board_space", "version": version, "space": space, "file": str(path)},
+        metadata={
+            "kind": "board_space",
+            "version": version,
+            "space": space,
+            "file": _static_metadata_file_path(path),
+        },
     )
 
 
@@ -506,7 +511,12 @@ def _property_group_document(
         source_id=source_id,
         title=f"Property Group: {name}",
         text=text,
-        metadata={"kind": "property_group", "version": version, "group": group, "file": str(path)},
+        metadata={
+            "kind": "property_group",
+            "version": version,
+            "group": group,
+            "file": _static_metadata_file_path(path),
+        },
     )
 
 
@@ -535,7 +545,7 @@ def _property_document(
             "kind": "property",
             "version": version,
             "property": property_data,
-            "file": str(path),
+            "file": _static_metadata_file_path(path),
         },
     )
 
@@ -553,7 +563,12 @@ def _card_document(card: Mapping[str, Any], *, path: Path, version: str) -> Corp
         source_id=source_id,
         title=f"Card: {title}",
         text=text,
-        metadata={"kind": "card", "version": version, "card": card, "file": str(path)},
+        metadata={
+            "kind": "card",
+            "version": version,
+            "card": card,
+            "file": _static_metadata_file_path(path),
+        },
     )
 
 
@@ -614,6 +629,13 @@ def _read_json(path: Path) -> Mapping[str, Any]:
     if not isinstance(data, Mapping):
         raise ValueError(f"{path} must contain a JSON object")
     return data
+
+
+def _static_metadata_file_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return (Path("content") / "rules" / path.name).as_posix()
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
