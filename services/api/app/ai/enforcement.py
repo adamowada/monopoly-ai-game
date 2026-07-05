@@ -105,6 +105,7 @@ async def enforce_ai_output(
     *,
     runner: CodexExecRunner | None = None,
     codex_executable: str = "codex",
+    codex_home: Path | str | None = None,
     schema_file: Path | str | None = None,
     sandbox_dir: Path | str | None = None,
     work_dir: Path | str | None = None,
@@ -123,6 +124,7 @@ async def enforce_ai_output(
         prompt_context,
         runner=runner,
         codex_executable=codex_executable,
+        codex_home=codex_home,
         schema_file=schema_file,
         sandbox_dir=sandbox_dir,
         work_dir=work_dir,
@@ -234,14 +236,17 @@ async def _request_once(
     *,
     runner: CodexExecRunner | None,
     codex_executable: str,
-    schema_file: Path | str | None,
-    sandbox_dir: Path | str | None,
-    work_dir: Path | str | None,
+    codex_home: Path | str | None = None,
+    schema_file: Path | str | None = None,
+    sandbox_dir: Path | str | None = None,
+    work_dir: Path | str | None = None,
 ) -> CodexExecAIDecisionResult:
     kwargs: dict[str, Any] = {
         "runner": runner,
         "codex_executable": codex_executable,
     }
+    if codex_home is not None:
+        kwargs["codex_home"] = codex_home
     if schema_file is not None:
         kwargs["schema_file"] = schema_file
     if sandbox_dir is not None:

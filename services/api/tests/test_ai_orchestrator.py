@@ -352,6 +352,41 @@ def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch:
     assert result.returncode == 0
 
 
+def test_subprocess_wrapper_passes_configured_codex_home_and_preserves_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, Any] = {}
+    configured_codex_home = tmp_path / "configured-codex-home"
+    monkeypatch.setenv("CODEX_HOME", "inherited-codex-home")
+    monkeypatch.setenv("MONOPOLY_CODEX_HOME_TEST_ENV", "preserved")
+
+    def fake_run(command: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        captured["command"] = list(command)
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(
+            args=list(command),
+            returncode=0,
+            stdout='{"type":"session_configured"}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = CodexSubprocessRunner(codex_home=configured_codex_home).run(
+        ["codex", "exec", "--json", "-"],
+        stdin="prompt on stdin",
+        timeout_seconds=3,
+        output_last_message_path=Path("unused.json"),
+    )
+
+    assert captured["command"] == ["codex", "exec", "--json", "-"]
+    env = captured["kwargs"]["env"]
+    assert env["CODEX_HOME"] == str(configured_codex_home)
+    assert env["MONOPOLY_CODEX_HOME_TEST_ENV"] == "preserved"
+    assert result.returncode == 0
+
+
 def test_prompt_construction_keeps_caller_context_without_building_stage_7_4_pack() -> None:
     request = CodexExecAIDecisionRequest(
         game_id=GAME_ID,

@@ -2035,6 +2035,9 @@ def _ai_enforcement_kwargs(request: Request) -> dict[str, Any]:
     codex_executable = getattr(app_state, "codex_ai_executable", None)
     if codex_executable is not None:
         kwargs["codex_executable"] = codex_executable
+    codex_home = getattr(app_state, "codex_home", None)
+    if codex_home is not None:
+        kwargs["codex_home"] = codex_home
     schema_file = getattr(app_state, "codex_ai_schema_file", None)
     if schema_file is not None:
         kwargs["schema_file"] = schema_file

@@ -25,6 +25,7 @@ import pytest
 import pytest_asyncio
 import sqlalchemy as sa
 from fastapi import FastAPI
+from starlette.requests import Request
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from app.ai.orchestrator import (
@@ -32,7 +33,7 @@ from app.ai.orchestrator import (
     CodexExecRunner,
     CodexExecTimeoutError,
 )
-from app.api.games import _ai_step_in_flight_guard_key
+from app.api.games import _ai_enforcement_kwargs, _ai_step_in_flight_guard_key
 from app.core.config import Settings
 from app.db.metadata import (
     action_idempotency_keys,
@@ -194,6 +195,25 @@ def test_ai_step_guard_key_is_game_scoped_to_avoid_prelock_state_races() -> None
     assert _ai_step_in_flight_guard_key(game_id=game_id) != _ai_step_in_flight_guard_key(
         game_id=other_game_id
     )
+
+
+def test_ai_enforcement_kwargs_forwards_codex_home_from_app_state(tmp_path: Path) -> None:
+    app = FastAPI()
+    codex_home = tmp_path / "configured-codex-home"
+    app.state.codex_home = codex_home
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/games/00000000-0000-0000-0000-000000007601/ai/step",
+            "headers": [],
+            "app": app,
+        }
+    )
+
+    kwargs = _ai_enforcement_kwargs(request)
+
+    assert kwargs["codex_home"] == codex_home
 
 
 @pytest.mark.asyncio

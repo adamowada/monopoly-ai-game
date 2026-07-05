@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -93,6 +94,9 @@ class CodexExecRunner(Protocol):
 
 
 class CodexSubprocessRunner:
+    def __init__(self, *, codex_home: Path | str | None = None) -> None:
+        self.codex_home = codex_home
+
     def run(
         self,
         command: Sequence[str],
@@ -102,15 +106,23 @@ class CodexSubprocessRunner:
         output_last_message_path: Path | None,
     ) -> CodexExecProcessResult:
         del output_last_message_path
+        run_kwargs: dict[str, Any] = {
+            "input": stdin,
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "timeout": timeout_seconds,
+            "check": False,
+        }
+        if self.codex_home is not None:
+            run_kwargs["env"] = {
+                **os.environ,
+                "CODEX_HOME": str(self.codex_home),
+            }
         try:
             completed = subprocess.run(
                 list(command),
-                input=stdin,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=timeout_seconds,
-                check=False,
+                **run_kwargs,
             )
         except subprocess.TimeoutExpired as exc:
             raise CodexExecTimeoutError(timeout_seconds) from exc
@@ -219,6 +231,7 @@ async def request_codex_ai_decision(
     *,
     runner: CodexExecRunner | None = None,
     codex_executable: str = "codex",
+    codex_home: Path | str | None = None,
     schema_file: Path | str = DEFAULT_AI_SCHEMA_FILE,
     sandbox_dir: Path | str = DEFAULT_AI_SANDBOX_DIR,
     work_dir: Path | str = DEFAULT_AI_WORK_DIR,
@@ -237,7 +250,7 @@ async def request_codex_ai_decision(
         sandbox_dir=sandbox_path,
         output_last_message_path=output_last_message_path,
     )
-    process_runner = runner or CodexSubprocessRunner()
+    process_runner = runner or CodexSubprocessRunner(codex_home=codex_home)
 
     try:
         process = await asyncio.to_thread(

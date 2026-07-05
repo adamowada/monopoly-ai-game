@@ -20,13 +20,13 @@ import os
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.ai import enforcement as enforcement_module
 from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
@@ -230,6 +230,71 @@ async def test_legal_ai_action_commits_exactly_like_human_action_and_attempts_on
         assert await table_count(session_factory, rejected_actions) == 0
     finally:
         await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_request_once_forwards_codex_home_to_codex_decision_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    state = create_initial_game_state(
+        seed="phase-7-codex-home-forwarding",
+        game_id=str(GAME_ID),
+        players=(
+            PlayerSetup(id=str(AI_PLAYER_ID), name="Grace", kind="ai"),
+            PlayerSetup(id=str(HUMAN_PLAYER_ID), name="Ada", kind="human"),
+        ),
+    )
+    codex_home = tmp_path / "configured-codex-home"
+    captured: dict[str, Any] = {}
+
+    async def fake_request_codex_ai_decision(*args: Any, **kwargs: Any) -> CodexExecAIDecisionResult:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return CodexExecAIDecisionResult(
+            ai_decision_id=DEAL_ID,
+            status="timeout",
+            raw_output="",
+            parsed_output=None,
+            validation_result={
+                "status": "rejected",
+                "reason_code": "codex_exec_timeout",
+                "no_substitute_move": True,
+                "substitute_move": None,
+            },
+            prompt_context_hash="codex-home-forwarding",
+        )
+
+    monkeypatch.setattr(
+        enforcement_module,
+        "request_codex_ai_decision",
+        fake_request_codex_ai_decision,
+    )
+    session_factory_stub = cast(async_sessionmaker[AsyncSession], object())
+
+    result = await enforcement_module._request_once(
+        session_factory_stub,
+        AIOutputEnforcementRequest(
+            game_id=GAME_ID,
+            player_id=AI_PLAYER_ID,
+            ai_profile_id=AI_PROFILE_ID,
+            decision_type="action_decision",
+            timeout_seconds=7,
+        ),
+        enforcement_module._PromptContext(
+            state=state,
+            context_pack={"legal_actions": [{"type": "ROLL_DICE", "payload": {}}]},
+        ),
+        runner=None,
+        codex_executable="codex",
+        schema_file=None,
+        sandbox_dir=None,
+        work_dir=None,
+        codex_home=codex_home,
+    )
+
+    assert result.prompt_context_hash == "codex-home-forwarding"
+    assert captured["kwargs"]["codex_home"] == codex_home
 
 
 @pytest.mark.asyncio
