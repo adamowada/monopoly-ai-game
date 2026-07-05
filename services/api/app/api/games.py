@@ -85,6 +85,7 @@ NEGOTIATION_TERMINAL_STATUSES = frozenset(
 AI_NEGOTIATION_DECISION_TYPES = frozenset(
     {"negotiation_message", "deal_proposal", "counteroffer", "accept_reject"}
 )
+AI_STEP_IN_FLIGHT_REASON_CODE = "ai_step_in_flight"
 AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE = "ai_response_opportunity_consumed"
 AI_BLOCKED_STATUS = "AI_BLOCKED"
 GAME_AI_BLOCKED_REASON_CODE = "game_ai_blocked"
@@ -1904,34 +1905,59 @@ async def ai_step(
         if consumed_rejection is not None:
             return consumed_rejection
 
-    from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
-
     request_context = dict(payload.request_context)
     if payload.mode is not None:
         request_context["mode"] = payload.mode
 
-    enforcement_kwargs = _ai_enforcement_kwargs(request)
-    enforcement_result = await enforce_ai_output(
-        session_factory,
-        AIOutputEnforcementRequest(
-            game_id=game_id,
-            player_id=payload.player_id,
-            ai_profile_id=ai_profile_id_or_response,
-            decision_type=payload.decision_type,
-            negotiation_id=payload.negotiation_id,
-            mandatory=mandatory,
-            request_context=request_context,
-        ),
-        **enforcement_kwargs,
+    guard_state = await _load_replayed_state(session_factory, game_id)
+    guard_key = _ai_step_in_flight_guard_key(
+        game_id=game_id,
+        player_id=payload.player_id,
+        decision_type=payload.decision_type,
+        negotiation_id=payload.negotiation_id,
+        state_hash=guard_state.state_hash(),
+        event_sequence=guard_state.event_sequence,
     )
 
-    return await _ai_step_response_from_enforcement(
-        session_factory=session_factory,
-        request=request,
-        game_id=game_id,
-        payload=payload,
-        enforcement_result=enforcement_result,
-    )
+    guard_session = session_factory()
+    guard_acquired = False
+    try:
+        guard_acquired = await _try_acquire_ai_step_in_flight_guard(guard_session, guard_key)
+        if not guard_acquired:
+            return _lifecycle_rejection_response(
+                AI_STEP_IN_FLIGHT_REASON_CODE,
+                "AI step is already in flight for this game, player, decision, negotiation, and state",
+                field="ai_step",
+            )
+
+        from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
+
+        enforcement_kwargs = _ai_enforcement_kwargs(request)
+        enforcement_result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=game_id,
+                player_id=payload.player_id,
+                ai_profile_id=ai_profile_id_or_response,
+                decision_type=payload.decision_type,
+                negotiation_id=payload.negotiation_id,
+                mandatory=mandatory,
+                request_context=request_context,
+            ),
+            **enforcement_kwargs,
+        )
+
+        return await _ai_step_response_from_enforcement(
+            session_factory=session_factory,
+            request=request,
+            game_id=game_id,
+            payload=payload,
+            enforcement_result=enforcement_result,
+        )
+    finally:
+        if guard_acquired:
+            await _release_ai_step_in_flight_guard(guard_session, guard_key)
+        await guard_session.close()
 
 
 @dataclass(frozen=True)
@@ -2029,6 +2055,49 @@ def _ai_enforcement_kwargs(request: Request) -> dict[str, Any]:
     return kwargs
 
 
+def _ai_step_in_flight_guard_key(
+    *,
+    game_id: UUID,
+    player_id: UUID,
+    decision_type: str,
+    negotiation_id: UUID | None,
+    state_hash: str,
+    event_sequence: int,
+) -> int:
+    guard_payload = {
+        "scope": "ai_step",
+        "game_id": str(game_id),
+        "player_id": str(player_id),
+        "decision_type": decision_type,
+        "negotiation_id": None if negotiation_id is None else str(negotiation_id),
+        "state_hash": state_hash,
+        "event_sequence": int(event_sequence),
+    }
+    serialized = json.dumps(guard_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return int.from_bytes(hashlib.blake2b(serialized, digest_size=8).digest(), "big", signed=True)
+
+
+async def _try_acquire_ai_step_in_flight_guard(
+    session: AsyncSession,
+    guard_key: int,
+) -> bool:
+    statement = sa.text("SELECT pg_try_advisory_lock(:guard_key)").bindparams(
+        sa.bindparam("guard_key", type_=sa.BigInteger)
+    )
+    result = await session.execute(statement, {"guard_key": guard_key})
+    return bool(result.scalar_one())
+
+
+async def _release_ai_step_in_flight_guard(
+    session: AsyncSession,
+    guard_key: int,
+) -> None:
+    statement = sa.text("SELECT pg_advisory_unlock(:guard_key)").bindparams(
+        sa.bindparam("guard_key", type_=sa.BigInteger)
+    )
+    await session.execute(statement, {"guard_key": guard_key})
+
+
 async def _ai_negotiation_preflight_rejection(
     *,
     session_factory: async_sessionmaker[AsyncSession],
@@ -2054,6 +2123,12 @@ async def _ai_negotiation_preflight_rejection(
     terminal_response = _reject_if_negotiation_terminal(str(negotiation_row["status"]))
     if terminal_response is not None:
         return terminal_response
+    if str(negotiation_row["status"]) == NEGOTIATION_STATUS_ACCEPTED:
+        return _lifecycle_rejection_response(
+            "negotiation_already_accepted",
+            "accepted negotiations can only execute or expire",
+            field="status",
+        )
 
     context = _normalized_negotiation_context({"context": negotiation_row["context"]})
     if str(player_id) not in context["participant_player_ids"]:

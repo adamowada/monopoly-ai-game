@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import threading
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -107,6 +109,38 @@ class QueueFakeCodexRunner(CodexExecRunner):
         return CodexExecProcessResult(returncode=0, stdout=stdout, stderr="")
 
 
+class BlockingFirstCodexRunner(QueueFakeCodexRunner):
+    def __init__(self, output: Mapping[str, Any] | str) -> None:
+        super().__init__([output])
+        self.first_call_started = threading.Event()
+        self.release_first_call = threading.Event()
+        self._call_lock = threading.Lock()
+        self._call_count = 0
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        stdin: str,
+        timeout_seconds: float,
+        output_last_message_path: Path | None,
+    ) -> CodexExecProcessResult:
+        with self._call_lock:
+            self._call_count += 1
+            call_number = self._call_count
+        if call_number != 1:
+            raise AssertionError("duplicate concurrent AI step launched Codex")
+        self.first_call_started.set()
+        if not self.release_first_call.wait(timeout=10):
+            raise AssertionError("first fake Codex call was not released")
+        return super().run(
+            command,
+            stdin=stdin,
+            timeout_seconds=timeout_seconds,
+            output_last_message_path=output_last_message_path,
+        )
+
+
 @pytest_asyncio.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     engine = create_async_engine(TEST_DATABASE_URL, pool_pre_ping=True)
@@ -192,6 +226,69 @@ async def test_ai_turn_stepping_endpoint_progresses_mixed_human_ai_game(
         assert await table_count(session_factory, game_events, game_id) >= 1
         assert await table_count(session_factory, ai_decisions, game_id) == 1
         assert await table_count(session_factory, rejected_actions, game_id) == 0
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_ai_steps_reject_duplicate_in_flight_before_codex(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    state = await get_state(client, game_id)
+    runner = BlockingFirstCodexRunner(valid_action_output(game_id, ai_player_id, state))
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        request_payload = {
+            "player_id": ai_player_id,
+            "decision_type": "action_decision",
+            "mandatory": True,
+        }
+        event_count_before = await table_count(session_factory, game_events, game_id)
+        first_task = asyncio.create_task(client.post(f"/games/{game_id}/ai/step", json=request_payload))
+        duplicate_response: httpx.Response | None = None
+        duplicate_error: BaseException | None = None
+        try:
+            first_started = await asyncio.wait_for(
+                asyncio.to_thread(runner.first_call_started.wait, 5),
+                timeout=6,
+            )
+            assert first_started is True
+
+            try:
+                duplicate_response = await client.post(f"/games/{game_id}/ai/step", json=request_payload)
+            except BaseException as exc:
+                duplicate_error = exc
+        finally:
+            runner.release_first_call.set()
+        first_response = await first_task
+        if duplicate_error is not None:
+            raise duplicate_error
+        assert duplicate_response is not None
+
+        accepted_body = first_response.json()
+        duplicate_body = duplicate_response.json()
+
+        assert first_response.status_code == 200, first_response.text
+        assert duplicate_response.status_code == 422, duplicate_response.text
+        assert accepted_body["status"] == "accepted"
+        assert duplicate_body["status"] == "rejected"
+        assert duplicate_body["reason_code"] == "ai_step_in_flight"
+        assert duplicate_body["validation_errors"][0]["code"] == "ai_step_in_flight"
+        assert len(runner.calls) == 1
+        assert accepted_body["rejected_action_id"] is None
+        assert await table_count(session_factory, ai_decisions, game_id) == 1
+        assert await table_count(session_factory, rejected_actions, game_id) == 0
+        assert await table_count(session_factory, game_events, game_id) == (
+            event_count_before + len(accepted_body["accepted_events"])
+        )
+        assert await game_status(session_factory, game_id) != "AI_BLOCKED"
     finally:
         await delete_game(session_factory, game_id)
 
@@ -1092,6 +1189,72 @@ async def test_consumed_ai_negotiation_opportunities_reject_before_launching_cod
 
 
 @pytest.mark.asyncio
+async def test_accepted_ai_negotiation_requests_reject_before_launching_codex(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    human_player_id = created["players"][0]["id"]
+    ai_player_id = created["players"][1]["id"]
+    negotiation = await create_negotiation(client, game_id, human_player_id, ai_player_id)
+    current_deal = await create_human_deal(
+        client,
+        game_id,
+        negotiation["id"],
+        human_player_id,
+        ai_player_id,
+    )
+    ai_accept = await client.post(
+        f"/games/{game_id}/deals/{current_deal['id']}/accept",
+        json={"player_id": ai_player_id},
+    )
+    human_accept = await client.post(
+        f"/games/{game_id}/deals/{current_deal['id']}/accept",
+        json={"player_id": human_player_id},
+    )
+    accepted_negotiation = await get_negotiation(client, game_id, negotiation["id"])
+    runner = QueueFakeCodexRunner(
+        [
+            negotiation_message_output(
+                game_id,
+                ai_player_id,
+                human_player_id,
+                negotiation["id"],
+            )
+        ]
+    )
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        ai_decision_count_before = await table_count(session_factory, ai_decisions, game_id)
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "negotiation_message",
+                "negotiation_id": negotiation["id"],
+                "mandatory": False,
+            },
+        )
+
+        body = response.json()
+        assert ai_accept.status_code == 200, ai_accept.text
+        assert human_accept.status_code == 200, human_accept.text
+        assert accepted_negotiation["status"] == "accepted"
+        assert response.status_code == 422, response.text
+        assert body["status"] == "rejected"
+        assert body["reason_code"] == "negotiation_already_accepted"
+        assert body["validation_errors"][0]["code"] == "negotiation_already_accepted"
+        assert runner.calls == []
+        assert await table_count(session_factory, ai_decisions, game_id) == ai_decision_count_before
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_invalid_ai_negotiation_requests_reject_before_launching_codex(
     api_app: FastAPI,
     client: httpx.AsyncClient,
@@ -1229,6 +1392,16 @@ async def create_three_player_game(client: httpx.AsyncClient) -> dict[str, Any]:
 
 async def get_state(client: httpx.AsyncClient, game_id: str) -> dict[str, Any]:
     response = await client.get(f"/games/{game_id}/state")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def get_negotiation(
+    client: httpx.AsyncClient,
+    game_id: str,
+    negotiation_id: str,
+) -> dict[str, Any]:
+    response = await client.get(f"/games/{game_id}/negotiations/{negotiation_id}")
     assert response.status_code == 200, response.text
     return response.json()
 
