@@ -354,6 +354,57 @@ async def test_ai_step_blocks_and_surfaces_auditable_stalls(
 
 
 @pytest.mark.asyncio
+async def test_action_decision_rejects_non_mandatory_override(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    created = await create_game(client, ai_first=True)
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    runner = QueueFakeCodexRunner(timeout=True)
+    install_fake_runner(api_app, runner, tmp_path)
+
+    try:
+        response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={
+                "player_id": ai_player_id,
+                "decision_type": "action_decision",
+                "mandatory": False,
+            },
+        )
+        body = response.json()
+
+        assert response.status_code == 422, response.text
+        assert body["status"] == "rejected"
+        assert body["reason_code"] == "action_decision_mandatory_required"
+        assert body["validation_errors"][0]["field"] == "mandatory"
+        assert runner.calls == []
+        assert await table_count(session_factory, ai_decisions, game_id) == 0
+        assert await table_count(session_factory, rejected_actions, game_id) == 0
+        assert await game_status(session_factory, game_id) == "active"
+
+        omitted_response = await client.post(
+            f"/games/{game_id}/ai/step",
+            json={"player_id": ai_player_id, "decision_type": "action_decision"},
+        )
+        omitted_body = omitted_response.json()
+
+        assert omitted_response.status_code == 200, omitted_response.text
+        assert omitted_body["status"] == "blocked"
+        assert omitted_body["game_status"] == "AI_BLOCKED"
+        assert omitted_body["rejected_action_id"] is not None
+        assert len(runner.calls) == 1
+        assert await table_count(session_factory, ai_decisions, game_id) == 1
+        assert await table_count(session_factory, rejected_actions, game_id) == 1
+        assert await game_status(session_factory, game_id) == "AI_BLOCKED"
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_ai_blocked_games_reject_later_actions_and_ai_steps_before_mutation(
     api_app: FastAPI,
     client: httpx.AsyncClient,

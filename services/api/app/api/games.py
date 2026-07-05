@@ -1876,6 +1876,12 @@ async def ai_step(
             "open_negotiation creates a new negotiation and cannot target an existing negotiation_id",
             field="negotiation_id",
         )
+    if payload.decision_type == "action_decision" and payload.mandatory is False:
+        return _lifecycle_rejection_response(
+            "action_decision_mandatory_required",
+            "action_decision AI step requests cannot set mandatory to false",
+            field="mandatory",
+        )
     mandatory = payload.mandatory if payload.mandatory is not None else payload.decision_type == "action_decision"
     if payload.negotiation_id is not None:
         if payload.decision_type != "action_decision":
