@@ -35,7 +35,7 @@ REQUIRED_LOCAL_MCP_TOOL_NAMES: tuple[str, ...] = (
     "submit_action",
 )
 RULE_SOURCE_TYPES = ("rules", "house_rules", "contract_examples")
-DEFAULT_RULE_SOURCE_TYPES = ("rules",)
+DEFAULT_RULE_SOURCE_TYPES = RULE_SOURCE_TYPES
 MEMORY_SOURCE_TYPES = ("ai_memory", "negotiation_history", "past_decision")
 
 

@@ -457,10 +457,18 @@ def _negotiation_history_visible(
             ),
         )
     )
+    direct_deal_participant_visible = sa.and_(
+        negotiation_id.is_(None),
+        sa.or_(
+            metadata_blob["terms"].contains({"participants": [player_text]}),
+            metadata_blob["terms"].contains({"participant_player_ids": [player_text]}),
+        ),
+    )
     deal_row_visible = sa.and_(
         row_type == "deal",
         sa.or_(
             metadata_blob["proposed_by_player_id"].astext == player_text,
+            direct_deal_participant_visible,
             visible_negotiation_exists,
         ),
     )

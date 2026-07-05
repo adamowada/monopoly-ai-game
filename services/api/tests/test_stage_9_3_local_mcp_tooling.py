@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -134,7 +134,12 @@ async def test_stage_9_3_read_tools_return_fastapi_and_retrieval_payloads(
         )
         rules_payload = await call_local_tool(
             "search_rules",
-            {"query_text": "Boardwalk hotel rent", "game_id": game_id, "limit": 3},
+            {
+                "query_text": "Boardwalk hotel rent",
+                "game_id": game_id,
+                "source_types": ["rules"],
+                "limit": 3,
+            },
             context=context,
         )
         memory_payload = await call_local_tool(
@@ -170,6 +175,106 @@ async def test_stage_9_3_read_tools_return_fastapi_and_retrieval_payloads(
         assert contract_payload["contract"]["id"] == contract_id
         assert contract_payload["contract"]["terms"]["fixture"] == "stage-9.3"
         assert await table_count(session_factory, retrieval_records_table_name(), game_id) == 0
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_stage_9_3_search_rules_defaults_cover_house_rules_and_contract_examples(
+    api_app: FastAPI,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await refresh_static_index(session_factory)
+    context = LocalMCPContext(api_app=api_app)
+
+    house_rules_payload = await call_local_tool(
+        "search_rules",
+        {"query_text": "no fallback AI decisions", "limit": 5},
+        context=context,
+    )
+    contract_examples_payload = await call_local_tool(
+        "search_rules",
+        {"query_text": "rent-share contract example", "limit": 5},
+        context=context,
+    )
+
+    assert house_rules_payload["source_types"] == [
+        "rules",
+        "house_rules",
+        "contract_examples",
+    ]
+    assert contract_examples_payload["source_types"] == [
+        "rules",
+        "house_rules",
+        "contract_examples",
+    ]
+    assert "house_rules" in {
+        result["source_type"] for result in house_rules_payload["results"]
+    }
+    assert "no_fallback_ai_decisions" in {
+        result["source_id"] for result in house_rules_payload["results"]
+    }
+    assert "contract_examples" in {
+        result["source_type"] for result in contract_examples_payload["results"]
+    }
+    assert "rent_share_boardwalk_example" in {
+        result["source_id"] for result in contract_examples_payload["results"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_stage_9_3_direct_deal_participants_can_retrieve_own_deal_history(
+    api_app: FastAPI,
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    created = await create_game(client, player_kinds=("human", "human", "human"))
+    game_id = created["id"]
+    proposer_player_id = created["players"][0]["id"]
+    direct_participant_player_id = created["players"][1]["id"]
+    unrelated_player_id = created["players"][2]["id"]
+    deal_id = "00000000-0000-0000-0000-000000009932"
+    context = LocalMCPContext(api_app=api_app)
+    try:
+        await insert_direct_deal_fixture(
+            session_factory,
+            game_id=game_id,
+            deal_id=deal_id,
+            proposer_player_id=proposer_player_id,
+            direct_participant_player_id=direct_participant_player_id,
+        )
+
+        participant_payload = await call_local_tool(
+            "search_memory",
+            {
+                "query_text": "stage93 direct deal rent-share history",
+                "game_id": game_id,
+                "player_id": direct_participant_player_id,
+                "limit": 5,
+            },
+            context=context,
+        )
+        unrelated_payload = await call_local_tool(
+            "search_memory",
+            {
+                "query_text": "stage93 direct deal rent-share history",
+                "game_id": game_id,
+                "player_id": unrelated_player_id,
+                "limit": 5,
+            },
+            context=context,
+        )
+
+        assert deal_id in {
+            result["source_id"]
+            for result in participant_payload["results"]
+            if result["source_type"] == "negotiation_history"
+        }
+        assert deal_id not in {
+            result["source_id"]
+            for result in unrelated_payload["results"]
+            if result["source_type"] == "negotiation_history"
+        }
     finally:
         await delete_game(session_factory, game_id)
 
@@ -276,7 +381,11 @@ async def test_stage_9_3_mcp_server_stdio_smoke_lists_and_calls_tools(
             "method": "tools/call",
             "params": {
                 "name": "search_rules",
-                "arguments": {"query_text": "Boardwalk hotel rent", "limit": 1},
+                "arguments": {
+                    "query_text": "Boardwalk hotel rent",
+                    "source_types": ["rules"],
+                    "limit": 1,
+                },
             },
         },
     ]
@@ -382,15 +491,16 @@ def test_stage_9_3_mcp_tools_are_local_only_and_documented() -> None:
 async def create_game(
     client: httpx.AsyncClient,
     *,
-    player_kinds: tuple[str, str],
+    player_kinds: Sequence[str],
 ) -> dict[str, Any]:
+    player_names = ("Ada", "Grace", "Linus", "Katherine", "Donald")
     response = await client.post(
         "/games",
         json={
             "seed": "stage-9.3-local-mcp",
             "players": [
-                {"name": "Ada", "kind": player_kinds[0]},
-                {"name": "Grace", "kind": player_kinds[1]},
+                {"name": player_names[index], "kind": player_kind}
+                for index, player_kind in enumerate(player_kinds)
             ],
         },
     )
@@ -432,6 +542,52 @@ async def insert_memory_and_contract_fixture(
                     effective_event_id=None,
                     status="active",
                     terms={"fixture": "stage-9.3"},
+                )
+            )
+
+    async with session_factory() as session:
+        await refresh_rag_index_entries(session, game_id=UUID(game_id))
+        await session.commit()
+
+
+async def insert_direct_deal_fixture(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    game_id: str,
+    deal_id: str,
+    proposer_player_id: str,
+    direct_participant_player_id: str,
+) -> None:
+    terms = {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [proposer_player_id, direct_participant_player_id],
+        "terms": [
+            {
+                "kind": "rent_share",
+                "instrument_id": "stage-9-3-direct-rent-share",
+                "from_player_id": proposer_player_id,
+                "to_player_id": direct_participant_player_id,
+                "property_id": "property_boardwalk",
+                "share_percent": 25,
+                "duration_turns": 4,
+            }
+        ],
+        "visibility_marker": "stage93 direct deal rent-share history",
+    }
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                deals.insert().values(
+                    id=UUID(deal_id),
+                    game_id=UUID(game_id),
+                    negotiation_id=None,
+                    proposed_by_player_id=UUID(proposer_player_id),
+                    parent_deal_id=None,
+                    status="proposed",
+                    version=1,
+                    terms=terms,
+                    validation_errors=[],
                 )
             )
 
