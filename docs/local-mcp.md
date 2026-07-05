@@ -16,8 +16,16 @@ uv run python scripts/local_mcp_server.py --smoke
 ```
 
 Configuration uses the same local backend settings as FastAPI. Set `DATABASE_URL` or keep the
-default local Postgres URL. Retrieval tools read the Stage 9.2 local index; build or refresh that
-index with the existing local index command before expecting search results.
+default local Postgres URL. Fresh local setup for MCP search tools must refresh the Stage 9.2
+database-backed retrieval index after migrations:
+
+```powershell
+uv run python scripts/refresh_rag_index.py
+```
+
+This command populates the `rag_index_entries` table used by `search_rules` and `search_memory`.
+`uv run python scripts/build_rag_index.py` only writes reproducible JSONL corpus artifacts; it does
+not populate the database table that the MCP search tools query.
 
 The validation boundary is explicit: `submit_action` is the only MCP tool that can mutate game state. It calls the
 local FastAPI action path `/games/{game_id}/actions` through an in-process ASGI client and sends the

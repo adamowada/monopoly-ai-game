@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,26 @@ TEST_DATABASE_URL = os.getenv(
     "MONOPOLY_TEST_DATABASE_URL",
     "postgresql+asyncpg://monopoly:monopoly@127.0.0.1:5432/monopoly_ai_game",
 )
+
+
+def test_stage_9_3_mcp_runtime_dependency_and_docs_reference_db_refresh() -> None:
+    pyproject = tomllib.loads((API_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    runtime_dependencies = {
+        dependency.split("[", maxsplit=1)[0]
+        .split(">=", maxsplit=1)[0]
+        .split("==", maxsplit=1)[0]
+        .split("~=", maxsplit=1)[0]
+        for dependency in pyproject["project"]["dependencies"]
+    }
+
+    assert "httpx" in runtime_dependencies
+
+    docs = DOCS_PATH.read_text(encoding="utf-8")
+    assert "uv run python scripts/refresh_rag_index.py" in docs
+    assert "rag_index_entries" in docs
+    assert "DATABASE_URL" in docs
+    assert "build_rag_index.py" in docs
+    assert "JSONL" in docs
 
 
 @pytest_asyncio.fixture
