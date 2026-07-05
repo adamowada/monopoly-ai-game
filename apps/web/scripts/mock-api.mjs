@@ -1538,6 +1538,92 @@ function applyMockAiNegotiationStep(game, payload, decision) {
   });
 }
 
+function chooseMockAuctionAiAction(game, playerId) {
+  const legalActions = legalActionsFor(game, playerId);
+  return (
+    legalActions.find((action) => action.type === "BID_AUCTION") ??
+    legalActions.find((action) => action.type === "PASS_AUCTION") ??
+    null
+  );
+}
+
+function applyMockAiAuctionStep(game, payload, decision) {
+  const action = chooseMockAuctionAiAction(game, payload.player_id);
+  if (!action) {
+    const errors = [
+      aiValidationError("no_legal_auction_action", "AI bidder has no legal auction action", "player_id"),
+    ];
+    const rejection = createRejectedAction(
+      game,
+      { actor_id: payload.player_id, type: "AI_ACTION_DECISION", payload },
+      "no_legal_auction_action",
+      errors,
+    );
+    decision.status = "rejected";
+    decision.validation_errors = errors;
+    return {
+      statusCode: 200,
+      body: aiStepPayload({
+        game,
+        payload,
+        decision,
+        status: "rejected",
+        rejectedActionId: rejection.id,
+        outcome: { kind: "action_decision", status: "rejected" },
+        reasonCode: "no_legal_auction_action",
+        validationErrors: errors,
+      }),
+    };
+  }
+
+  decision.raw_output = JSON.stringify({
+    action: action.type,
+    payload: action.payload,
+    rationale: "Auction is active; choose a legal auction bidder action.",
+  });
+  decision.parsed_output = {
+    mock: true,
+    decision_type: "action_decision",
+    action: action.type,
+    payload: action.payload,
+  };
+
+  const auctionResponse = acceptAuctionAction(game, action);
+  if (auctionResponse?.payload.status !== "accepted") {
+    const rejectedActionId = auctionResponse?.payload.rejected_action_id ?? null;
+    const validationErrors = auctionResponse?.payload.validation_errors ?? [
+      aiValidationError("auction_action_rejected", "mock auction action was rejected", "action"),
+    ];
+    decision.status = "rejected";
+    return {
+      statusCode: 200,
+      body: aiStepPayload({
+        game,
+        payload,
+        decision,
+        status: "rejected",
+        rejectedActionId,
+        outcome: { kind: "action_decision", status: "rejected", action: action.type },
+        reasonCode: auctionResponse?.payload.reason_code ?? "auction_action_rejected",
+        validationErrors,
+      }),
+    };
+  }
+
+  decision.status = "accepted";
+  return {
+    statusCode: 200,
+    body: aiStepPayload({
+      game,
+      payload,
+      decision,
+      status: "accepted",
+      acceptedEvents: auctionResponse.payload.accepted_events,
+      outcome: { kind: "action_decision", status: "accepted", action: action.type },
+    }),
+  };
+}
+
 function applyMockAiStep(game, payload) {
   if (!isObject(payload)) {
     const decision = createAiDecisionRecord(game, { player_id: null, decision_type: "action_decision" }, "rejected");
@@ -1616,6 +1702,10 @@ function applyMockAiStep(game, payload) {
       statusCode: 200,
       body: applyMockAiNegotiationStep(game, { ...payload, decision_type: decisionType }, decision),
     };
+  }
+
+  if (game.active_auction) {
+    return applyMockAiAuctionStep(game, { ...payload, decision_type: decisionType, negotiation_id: null }, decision);
   }
 
   const action = legalAction(game, "ROLL_DICE", {}, payload.player_id);
