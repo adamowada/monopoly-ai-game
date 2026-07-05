@@ -6,6 +6,7 @@ import json
 import math
 import os
 import shutil
+import tomllib
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +45,7 @@ from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTENT_RULES = REPO_ROOT / "content" / "rules"
+API_PYPROJECT = REPO_ROOT / "services" / "api" / "pyproject.toml"
 TEST_DATABASE_URL = os.getenv(
     "MONOPOLY_TEST_DATABASE_URL",
     "postgresql+asyncpg://monopoly:monopoly@127.0.0.1:5432/monopoly_ai_game",
@@ -357,6 +359,94 @@ async def test_stage_9_2_context_pack_includes_retrieved_rules_and_memories(
             and "ranking" in record["retrieved_context"]
             for record in records
         )
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_9_2_retrieval_audit_context_ids_are_collision_resistant_per_pack(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state()
+    await _insert_retrieval_fixture(session_factory, state)
+    query_text = "Boardwalk hotel rent dark-blue monopoly plan"
+
+    async def no_refresh(*args: object, **kwargs: object) -> int:
+        return 0
+
+    async def no_compaction(*args: object, **kwargs: object) -> None:
+        return None
+
+    try:
+        async with session_factory() as setup_session:
+            await refresh_rag_index_entries(setup_session, game_id=GAME_ID)
+            await setup_session.commit()
+
+        monkeypatch.setattr("app.rag.retrieval.refresh_rag_index_entries", no_refresh)
+        monkeypatch.setattr("app.ai.context_pack.compact_memory_for_player", no_compaction)
+
+        async with session_factory() as first_session, session_factory() as second_session:
+            async with first_session.begin(), second_session.begin():
+                first_pack = await build_ai_context_pack_from_db(
+                    first_session,
+                    state=state,
+                    game_id=GAME_ID,
+                    player_id=AI_PLAYER_ID,
+                    decision_type="action_decision",
+                    caller_request_context={"retrieval_query": query_text},
+                    max_memory_snippets=2,
+                )
+                second_pack = await build_ai_context_pack_from_db(
+                    second_session,
+                    state=state,
+                    game_id=GAME_ID,
+                    player_id=AI_PLAYER_ID,
+                    decision_type="action_decision",
+                    caller_request_context={"retrieval_query": query_text},
+                    max_memory_snippets=2,
+                )
+
+        first_context_id = first_pack["retrieval_audit_context_id"]
+        second_context_id = second_pack["retrieval_audit_context_id"]
+        assert first_context_id != second_context_id
+
+        records = await _fetch_retrieval_records(session_factory)
+        recorded_context_ids = {
+            record["query_context"].get("retrieval_audit_context_id")
+            for record in records
+            if record["query_context"].get("source") == "build_ai_context_pack_from_db"
+        }
+        assert {first_context_id, second_context_id} <= recorded_context_ids
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_9_2_context_pack_preserves_backend_guardrail_rules_with_rag(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    state = _state()
+    await _insert_retrieval_fixture(session_factory, state)
+    try:
+        async with session_factory() as session:
+            pack = await build_ai_context_pack_from_db(
+                session,
+                state=state,
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                decision_type="action_decision",
+                caller_request_context={
+                    "retrieval_query": "Boardwalk hotel rent dark-blue monopoly plan"
+                },
+                max_memory_snippets=2,
+                audit_retrieval=False,
+            )
+
+        rule_ids = {snippet["id"] for snippet in pack["rules"]["snippets"]}
+        assert "backend-rules-authority" in rule_ids
+        assert f"phase-{state.turn.phase.value.lower()}-legal-actions" in rule_ids
+        assert "property_boardwalk" in rule_ids
     finally:
         await _delete_game(session_factory)
 
@@ -688,6 +778,20 @@ async def test_stage_9_2_refresh_does_not_duplicate_global_static_documents(
         assert search_results[0].source_id == "property_boardwalk"
     finally:
         await _delete_game(session_factory)
+
+
+def test_stage_9_2_api_package_discovery_includes_subpackages() -> None:
+    pyproject = tomllib.loads(API_PYPROJECT.read_text(encoding="utf-8"))
+
+    setuptools_config = pyproject["tool"]["setuptools"]
+    package_finder = setuptools_config["packages"]["find"]
+
+    assert "packages" not in setuptools_config or not isinstance(
+        setuptools_config["packages"],
+        list,
+    )
+    assert package_finder["where"] == ["."]
+    assert package_finder["include"] == ["app*"]
 
 
 async def _insert_retrieval_fixture(

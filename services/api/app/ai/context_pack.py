@@ -7,11 +7,10 @@ such as deck order and RNG counters.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, TypeAlias
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -33,7 +32,6 @@ from app.db.metadata import (
     negotiation_messages,
     negotiations,
     obligations,
-    retrieval_records,
 )
 from app.db.persistence import EventPersistence
 from app.rules.actions import list_legal_actions
@@ -45,7 +43,6 @@ from app.rules.timing import ACTION_TIMING_WINDOWS
 
 CONTEXT_PACK_SCHEMA_VERSION = "ai-context-pack-v1"
 RETRIEVAL_AUDIT_CONTEXT_ID_KEY = "retrieval_audit_context_id"
-_RETRIEVAL_AUDIT_CONTEXT_NAMESPACE = UUID("47642003-f3fc-5c47-a58e-9ed7ec0bb4a0")
 VISIBLE_MEMORY_SCOPES = frozenset({"public", "table", "audit"})
 ACTIVE_NEGOTIATION_STATUSES = ("opened", "active", "countered", "accepted")
 AIContextPack: TypeAlias = dict[str, Any]
@@ -383,32 +380,7 @@ async def _next_retrieval_audit_context_id(
     phase: str,
     query_text: str,
 ) -> str:
-    context_id_expr = retrieval_records.c.query_context[
-        RETRIEVAL_AUDIT_CONTEXT_ID_KEY
-    ].as_string()
-    result = await session.execute(
-        sa.select(sa.func.count(sa.distinct(context_id_expr))).where(
-            retrieval_records.c.game_id == game_id,
-            retrieval_records.c.player_id == player_id,
-        )
-    )
-    ordinal = int(result.scalar_one() or 0) + 1
-    query_hash = hashlib.sha256(query_text.encode("utf-8")).hexdigest()
-    payload = {
-        "decision_type": decision_type,
-        "game_id": str(game_id),
-        "ordinal": ordinal,
-        "phase": phase,
-        "player_id": str(player_id),
-        "query_hash": query_hash,
-    }
-    canonical_payload = json.dumps(
-        payload,
-        ensure_ascii=True,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-    return str(uuid5(_RETRIEVAL_AUDIT_CONTEXT_NAMESPACE, canonical_payload))
+    return str(uuid4())
 
 
 def _context_retrieval_query_text(
@@ -841,13 +813,10 @@ def _rule_snippets(
     legal_actions: Sequence[Mapping[str, Any]],
     state: GameState,
 ) -> list[dict[str, Any]]:
-    if rule_snippets:
-        return [_json_safe(dict(snippet)) for snippet in rule_snippets]
-
     legal_action_types = sorted(
         {str(action["type"]) for action in legal_actions if isinstance(action.get("type"), str)}
     )
-    return [
+    default_snippets = [
         {
             "id": "backend-rules-authority",
             "source": "backend",
@@ -861,6 +830,10 @@ def _rule_snippets(
                 f"these backend-generated legal action types: {', '.join(legal_action_types)}."
             ),
         },
+    ]
+    return [
+        *default_snippets,
+        *[_json_safe(dict(snippet)) for snippet in rule_snippets],
     ]
 
 
