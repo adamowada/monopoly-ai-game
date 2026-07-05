@@ -6,7 +6,7 @@ import json
 import math
 import os
 import shutil
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +18,12 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.ai.context_pack import build_ai_context_pack_from_db
+from app.ai.orchestrator import (
+    CodexExecAIDecisionRequest,
+    CodexExecProcessResult,
+    CodexExecRunner,
+    request_codex_ai_decision,
+)
 from app.db.metadata import (
     RAG_EMBEDDING_DIMENSIONS,
     ai_decisions,
@@ -55,6 +61,50 @@ TABLE_MEMORY_ID = UUID("00000000-0000-0000-0000-000000009209")
 NEGOTIATION_ID = UUID("00000000-0000-0000-0000-00000000920a")
 NEGOTIATION_MESSAGE_ID = UUID("00000000-0000-0000-0000-00000000920b")
 SECOND_GAME_ID = UUID("00000000-0000-0000-0000-00000000920c")
+
+
+class _AuditLinkingFakeCodexRunner(CodexExecRunner):
+    def __init__(self, final_output: Mapping[str, Any]) -> None:
+        self.final_output = final_output
+        self.calls: list[dict[str, Any]] = []
+
+    def run(
+        self,
+        command: Sequence[str],
+        *,
+        stdin: str,
+        timeout_seconds: float,
+        output_last_message_path: Path | None,
+    ) -> CodexExecProcessResult:
+        self.calls.append(
+            {
+                "command": list(command),
+                "stdin": stdin,
+                "timeout_seconds": timeout_seconds,
+                "output_last_message_path": output_last_message_path,
+            }
+        )
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "session_configured", "model": "codex"}),
+                json.dumps(
+                    {
+                        "type": "item_completed",
+                        "item": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": json.dumps(self.final_output),
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        )
+        return CodexExecProcessResult(returncode=0, stdout=stdout, stderr="")
 
 
 @pytest_asyncio.fixture
@@ -370,6 +420,86 @@ async def test_stage_9_2_context_pack_audits_retrieval_by_default_for_live_ai_pa
             )
 
         assert await _fetch_retrieval_records(session_factory) == []
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_stage_9_2_retrieval_audit_linking_uses_context_id_not_source_matching(
+    session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    state = _state()
+    await _insert_retrieval_fixture(session_factory, state)
+    query_text = "Boardwalk hotel rent dark-blue monopoly plan"
+    try:
+        async with session_factory() as session:
+            stale_pack = await build_ai_context_pack_from_db(
+                session,
+                state=state,
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                decision_type="action_decision",
+                caller_request_context={"retrieval_query": query_text},
+                max_memory_snippets=2,
+            )
+
+        async with session_factory() as session:
+            current_pack = await build_ai_context_pack_from_db(
+                session,
+                state=state,
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                decision_type="action_decision",
+                caller_request_context={"retrieval_query": query_text},
+                max_memory_snippets=2,
+            )
+
+        stale_context_id = stale_pack["retrieval_audit_context_id"]
+        current_context_id = current_pack["retrieval_audit_context_id"]
+        assert stale_context_id != current_context_id
+
+        runner = _AuditLinkingFakeCodexRunner(_valid_action_output(state))
+        result = await request_codex_ai_decision(
+            session_factory,
+            CodexExecAIDecisionRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="action_decision",
+                phase=state.turn.phase.value,
+                state_hash=state.state_hash(),
+                prompt_context=current_pack,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+
+        records = await _fetch_retrieval_records(session_factory)
+        rag_records = [
+            record
+            for record in records
+            if record["query_context"].get("source") == "build_ai_context_pack_from_db"
+        ]
+        stale_records = [
+            record
+            for record in rag_records
+            if record["query_context"].get("retrieval_audit_context_id") == stale_context_id
+        ]
+        current_records = [
+            record
+            for record in rag_records
+            if record["query_context"].get("retrieval_audit_context_id") == current_context_id
+        ]
+
+        assert result.status == "validated"
+        assert stale_records
+        assert current_records
+        assert all(record["ai_decision_id"] is None for record in stale_records)
+        assert {record["ai_decision_id"] for record in current_records} == {result.ai_decision_id}
     finally:
         await _delete_game(session_factory)
 
@@ -743,3 +873,21 @@ async def _delete_game(session_factory: async_sessionmaker[AsyncSession]) -> Non
     async with session_factory() as session:
         async with session.begin():
             await session.execute(games.delete().where(games.c.id == GAME_ID))
+
+
+def _valid_action_output(state: GameState) -> dict[str, Any]:
+    return {
+        "decision_type": "action_decision",
+        "game_id": str(GAME_ID),
+        "player_id": str(AI_PLAYER_ID),
+        "expected_state_hash": state.state_hash(),
+        "expected_event_sequence": state.event_sequence,
+        "action": {"type": "ROLL_DICE", "payload": {}},
+        "self_dialogue": {
+            "status": "provided",
+            "text": "The current prompt asks for the opening roll.",
+        },
+        "memory_updates": [],
+        "confidence": 0.82,
+        "rationale": "ROLL_DICE is the legal START_TURN action.",
+    }

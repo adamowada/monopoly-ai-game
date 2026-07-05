@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.ai.context_pack import RETRIEVAL_AUDIT_CONTEXT_ID_KEY
 from app.ai.decision_schema import (
     AI_OUTPUT_SCHEMA,
     AIDecisionValidationError,
@@ -514,23 +515,28 @@ async def _link_context_pack_retrieval_records_to_decision(
     decision_type: str,
     prompt_context: Mapping[str, Any],
 ) -> None:
-    for retrieval in _rag_retrieval_references(prompt_context):
-        await session.execute(
-            retrieval_records.update()
-            .where(
-                retrieval_records.c.game_id == game_id,
-                retrieval_records.c.player_id == player_id,
-                retrieval_records.c.ai_decision_id.is_(None),
-                retrieval_records.c.source_type == retrieval["source_type"],
-                retrieval_records.c.source_id == retrieval["source_id"],
-                retrieval_records.c.query_context["source"].as_string()
-                == "build_ai_context_pack_from_db",
-                retrieval_records.c.query_context["decision_type"].as_string() == decision_type,
-                retrieval_records.c.query_context["retrieval_section"].as_string()
-                == retrieval["retrieval_section"],
-            )
-            .values(ai_decision_id=decision_id)
+    retrieval_audit_context_id = _string_value(
+        prompt_context.get(RETRIEVAL_AUDIT_CONTEXT_ID_KEY)
+    )
+    if retrieval_audit_context_id is None:
+        return
+
+    await session.execute(
+        retrieval_records.update()
+        .where(
+            retrieval_records.c.game_id == game_id,
+            retrieval_records.c.player_id == player_id,
+            retrieval_records.c.ai_decision_id.is_(None),
+            retrieval_records.c.query_context["source"].as_string()
+            == "build_ai_context_pack_from_db",
+            retrieval_records.c.query_context["decision_type"].as_string() == decision_type,
+            retrieval_records.c.query_context[
+                RETRIEVAL_AUDIT_CONTEXT_ID_KEY
+            ].as_string()
+            == retrieval_audit_context_id,
         )
+        .values(ai_decision_id=decision_id)
+    )
 
 
 def _rag_retrieval_references(
@@ -611,7 +617,17 @@ async def _persist_prompt_context_retrieval_records(
     if not records:
         return
 
+    retrieval_audit_context_id = _string_value(
+        prompt_context.get(RETRIEVAL_AUDIT_CONTEXT_ID_KEY)
+    )
     for rank, record in enumerate(records, start=1):
+        query_context = {
+            "prompt_context_hash": prompt_context_hash,
+            "decision_type": decision_type,
+            "source_path": record["source_path"],
+        }
+        if retrieval_audit_context_id is not None:
+            query_context[RETRIEVAL_AUDIT_CONTEXT_ID_KEY] = retrieval_audit_context_id
         await session.execute(
             retrieval_records.insert().values(
                 game_id=game_id,
@@ -619,11 +635,7 @@ async def _persist_prompt_context_retrieval_records(
                 ai_decision_id=decision_id,
                 memory_entry_id=record["memory_entry_id"],
                 query_text=record["query_text"],
-                query_context={
-                    "prompt_context_hash": prompt_context_hash,
-                    "decision_type": decision_type,
-                    "source_path": record["source_path"],
-                },
+                query_context=query_context,
                 retrieved_context=record["retrieved_context"],
                 source_type=record["source_type"],
                 source_id=record["source_id"],

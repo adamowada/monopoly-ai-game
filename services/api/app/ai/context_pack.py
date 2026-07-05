@@ -7,10 +7,11 @@ such as deck order and RNG counters.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, TypeAlias
-from uuid import UUID
+from uuid import UUID, uuid5
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -32,6 +33,7 @@ from app.db.metadata import (
     negotiation_messages,
     negotiations,
     obligations,
+    retrieval_records,
 )
 from app.db.persistence import EventPersistence
 from app.rules.actions import list_legal_actions
@@ -42,6 +44,8 @@ from app.rules.timing import ACTION_TIMING_WINDOWS
 
 
 CONTEXT_PACK_SCHEMA_VERSION = "ai-context-pack-v1"
+RETRIEVAL_AUDIT_CONTEXT_ID_KEY = "retrieval_audit_context_id"
+_RETRIEVAL_AUDIT_CONTEXT_NAMESPACE = UUID("47642003-f3fc-5c47-a58e-9ed7ec0bb4a0")
 VISIBLE_MEMORY_SCOPES = frozenset({"public", "table", "audit"})
 ACTIVE_NEGOTIATION_STATUSES = ("opened", "active", "countered", "accepted")
 AIContextPack: TypeAlias = dict[str, Any]
@@ -250,7 +254,11 @@ async def _build_ai_context_pack_from_db_in_transaction(
     )
     contract_rows = await _load_contract_rows(session, game_id=game_uuid)
     obligation_rows = await _load_obligation_rows(session, game_id=game_uuid)
-    retrieval_rule_snippets, retrieval_memory_rows = await _load_retrieved_context_rows(
+    (
+        retrieval_rule_snippets,
+        retrieval_memory_rows,
+        retrieval_audit_context_id,
+    ) = await _load_retrieved_context_rows(
         session,
         game_id=game_uuid,
         player_id=player_uuid,
@@ -263,7 +271,7 @@ async def _build_ai_context_pack_from_db_in_transaction(
         audit=audit_retrieval,
     )
 
-    return build_ai_context_pack(
+    pack = build_ai_context_pack(
         state,
         player_id=player_uuid,
         decision_type=decision_type,
@@ -277,6 +285,9 @@ async def _build_ai_context_pack_from_db_in_transaction(
         memory_snippets=_merge_memory_rows(memory_rows, retrieval_memory_rows),
         rule_snippets=[*rule_snippets, *retrieval_rule_snippets],
     )
+    if retrieval_audit_context_id is not None:
+        pack[RETRIEVAL_AUDIT_CONTEXT_ID_KEY] = retrieval_audit_context_id
+    return _json_safe(pack)
 
 
 async def _load_retrieved_context_rows(
@@ -291,9 +302,9 @@ async def _load_retrieved_context_rows(
     phase: str,
     limit: int,
     audit: bool,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
     if limit < 1:
-        return [], []
+        return [], [], None
 
     query_text = _context_retrieval_query_text(
         retrieval_query_text=retrieval_query_text,
@@ -303,7 +314,16 @@ async def _load_retrieved_context_rows(
         decision_type=decision_type,
     )
     if not query_text:
-        return [], []
+        return [], [], None
+
+    retrieval_audit_context_id = await _next_retrieval_audit_context_id(
+        session,
+        game_id=game_id,
+        player_id=player_id,
+        decision_type=decision_type,
+        phase=phase,
+        query_text=query_text,
+    )
 
     from app.rag.retrieval import refresh_rag_index_entries, search_retrieval
 
@@ -321,6 +341,7 @@ async def _load_retrieved_context_rows(
             "decision_type": decision_type,
             "phase": phase,
             "retrieval_section": "rules",
+            RETRIEVAL_AUDIT_CONTEXT_ID_KEY: retrieval_audit_context_id,
         },
         audit=audit,
     )
@@ -337,6 +358,7 @@ async def _load_retrieved_context_rows(
             "decision_type": decision_type,
             "phase": phase,
             "retrieval_section": "memory",
+            RETRIEVAL_AUDIT_CONTEXT_ID_KEY: retrieval_audit_context_id,
         },
         audit=audit,
     )
@@ -349,7 +371,44 @@ async def _load_retrieved_context_rows(
         result.to_memory_row()
         for result in memory_results
     ]
-    return rule_snippets, memory_rows
+    return rule_snippets, memory_rows, retrieval_audit_context_id
+
+
+async def _next_retrieval_audit_context_id(
+    session: AsyncSession,
+    *,
+    game_id: UUID,
+    player_id: UUID,
+    decision_type: str,
+    phase: str,
+    query_text: str,
+) -> str:
+    context_id_expr = retrieval_records.c.query_context[
+        RETRIEVAL_AUDIT_CONTEXT_ID_KEY
+    ].as_string()
+    result = await session.execute(
+        sa.select(sa.func.count(sa.distinct(context_id_expr))).where(
+            retrieval_records.c.game_id == game_id,
+            retrieval_records.c.player_id == player_id,
+        )
+    )
+    ordinal = int(result.scalar_one() or 0) + 1
+    query_hash = hashlib.sha256(query_text.encode("utf-8")).hexdigest()
+    payload = {
+        "decision_type": decision_type,
+        "game_id": str(game_id),
+        "ordinal": ordinal,
+        "phase": phase,
+        "player_id": str(player_id),
+        "query_hash": query_hash,
+    }
+    canonical_payload = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return str(uuid5(_RETRIEVAL_AUDIT_CONTEXT_NAMESPACE, canonical_payload))
 
 
 def _context_retrieval_query_text(
@@ -948,6 +1007,7 @@ def _json_safe(value: Any) -> Any:
 __all__ = [
     "AIContextPack",
     "CONTEXT_PACK_SCHEMA_VERSION",
+    "RETRIEVAL_AUDIT_CONTEXT_ID_KEY",
     "VISIBLE_MEMORY_SCOPES",
     "build_ai_context_pack",
     "build_ai_context_pack_from_db",
