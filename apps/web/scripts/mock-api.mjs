@@ -10,6 +10,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const classicData = JSON.parse(readFileSync(resolve(scriptDir, "../../../content/rules/classic_monopoly.json"), "utf8"));
 const propertyData = classicData.properties;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
+const aiStepPathSuffix = "/ai/step";
 
 const corsHeaders = {
   "access-control-allow-headers": "accept, content-type, Idempotency-Key",
@@ -1203,6 +1204,334 @@ function rejectAction(game, action, reasonCode, message, field = "expected_state
   return rejectedPayload(record, action);
 }
 
+function aiValidationError(reasonCode, message, field) {
+  return {
+    code: reasonCode,
+    message,
+    field,
+  };
+}
+
+function createAiDecisionRecord(game, payload, status, patch = {}) {
+  const createdAt = nowIso();
+  const decision = {
+    id: `${game.id}-ai-decision-${game.ai_decisions.length + 1}`,
+    game_id: game.id,
+    player_id: payload.player_id,
+    decision_type: payload.decision_type ?? "action_decision",
+    negotiation_id: payload.negotiation_id ?? null,
+    status,
+    phase: game.current_phase,
+    state_hash: stateHash(game),
+    prompt_context_hash: `mock-ai-context-${game.ai_decisions.length + 1}`,
+    prompt_context: { mock: true, request_context: payload.request_context ?? {} },
+    raw_output: JSON.stringify({ mock: true, decision_type: payload.decision_type ?? "action_decision" }),
+    parsed_output: { mock: true, decision_type: payload.decision_type ?? "action_decision" },
+    validation_result: { no_substitute_move: true, substitute_move: null },
+    accepted_event_id: null,
+    rejected_action_id: null,
+    created_at: createdAt,
+    ...patch,
+  };
+  game.ai_decisions.unshift(decision);
+  return decision;
+}
+
+function aiStepPayload({
+  game,
+  payload,
+  decision,
+  status,
+  acceptedEvents = [],
+  rejectedActionId = null,
+  outcome = {},
+  reasonCode = null,
+  validationErrors = [],
+  negotiation = null,
+  message = null,
+  deal = null,
+}) {
+  const acceptedEventId = acceptedEvents[0]?.id ?? null;
+  if (acceptedEventId) {
+    decision.accepted_event_id = acceptedEventId;
+  }
+  if (rejectedActionId) {
+    decision.rejected_action_id = rejectedActionId;
+  }
+  return {
+    status,
+    game_id: game.id,
+    player_id: payload.player_id,
+    decision_type: payload.decision_type ?? "action_decision",
+    negotiation_id: payload.negotiation_id ?? null,
+    ai_decision_id: decision.id,
+    accepted_events: acceptedEvents,
+    accepted_event_id: acceptedEventId,
+    rejected_action_id: rejectedActionId,
+    game_status: game.status,
+    consumed_response_opportunity: false,
+    consumed_negotiation_opportunity: null,
+    outcome,
+    reason_code: reasonCode,
+    validation_errors: validationErrors,
+    negotiation,
+    message,
+    deal,
+  };
+}
+
+function sampleAiDealTerms(game, negotiation, proposerPlayerId) {
+  const participants = negotiation.participant_player_ids;
+  const recipient = participants.find((playerId) => playerId !== proposerPlayerId) ?? participants[0];
+  return [
+    {
+      kind: "cash_transfer",
+      from_player_id: proposerPlayerId,
+      to_player_id: recipient,
+      amount: 90,
+      summary: `${playerById(game, proposerPlayerId)?.name ?? "AI"} pays $90 now`,
+    },
+    {
+      kind: "rent_share",
+      from_player_id: recipient,
+      to_player_id: proposerPlayerId,
+      property_id: "property_reading_railroad",
+      percentage: 20,
+      expires_round: 4,
+      summary: `${playerById(game, proposerPlayerId)?.name ?? "AI"} receives 20% rent share`,
+    },
+  ];
+}
+
+function applyMockAiNegotiationStep(game, payload, decision) {
+  const negotiation = negotiationById(game, payload.negotiation_id);
+  const validation = validateOpenNegotiation(negotiation);
+  if (validation) {
+    const errors = validation.validation_errors;
+    const rejection = createRejectedAction(
+      game,
+      { actor_id: payload.player_id, type: `AI_${payload.decision_type ?? "action_decision"}`, payload },
+      validation.reason_code,
+      errors,
+    );
+    decision.status = "rejected";
+    return aiStepPayload({
+      game,
+      payload,
+      decision,
+      status: "rejected",
+      rejectedActionId: rejection.id,
+      outcome: { kind: "ai_negotiation", status: "rejected" },
+      reasonCode: validation.reason_code,
+      validationErrors: errors,
+    });
+  }
+  if (!negotiation.participant_player_ids.includes(payload.player_id)) {
+    const errors = [
+      aiValidationError("player_not_participant", "AI player must be a negotiation participant", "player_id"),
+    ];
+    const rejection = createRejectedAction(
+      game,
+      { actor_id: payload.player_id, type: `AI_${payload.decision_type ?? "action_decision"}`, payload },
+      "player_not_participant",
+      errors,
+    );
+    decision.status = "rejected";
+    return aiStepPayload({
+      game,
+      payload,
+      decision,
+      status: "rejected",
+      rejectedActionId: rejection.id,
+      outcome: { kind: "ai_negotiation", status: "rejected" },
+      reasonCode: "player_not_participant",
+      validationErrors: errors,
+    });
+  }
+
+  if (payload.decision_type === "negotiation_message") {
+    game.message_counter += 1;
+    const createdAt = nowIso();
+    const author = playerById(game, payload.player_id);
+    const message = {
+      id: `${game.id}-message-${game.message_counter}`,
+      game_id: game.id,
+      negotiation_id: negotiation.id,
+      author_player_id: payload.player_id,
+      body: `${author?.name ?? "AI"} proposes a structured trade window.`,
+      created_at: createdAt,
+    };
+    game.negotiation_messages[negotiation.id] = [...(game.negotiation_messages[negotiation.id] ?? []), message];
+    negotiation.updated_at = createdAt;
+    game.updated_at = createdAt;
+    decision.status = "accepted";
+    return aiStepPayload({
+      game,
+      payload,
+      decision,
+      status: "done",
+      outcome: { kind: "negotiation_message", status: "done", message_id: message.id },
+      negotiation,
+      message,
+    });
+  }
+
+  if (payload.decision_type === "deal_proposal" || payload.decision_type === "counteroffer") {
+    const currentDeal = game.deals.find((deal) => deal.negotiation_id === negotiation.id && deal.status === "proposed") ?? null;
+    const deal = createDealRecord(game, {
+      negotiation_id: negotiation.id,
+      proposer_player_id: payload.player_id,
+      participant_player_ids: negotiation.participant_player_ids,
+      parent_deal_id: payload.decision_type === "counteroffer" ? currentDeal?.id ?? null : null,
+      terms: sampleAiDealTerms(game, negotiation, payload.player_id),
+    });
+    decision.status = "accepted";
+    return aiStepPayload({
+      game,
+      payload,
+      decision,
+      status: "done",
+      outcome: { kind: payload.decision_type, status: "done", deal_id: deal.id },
+      negotiation,
+      deal,
+    });
+  }
+
+  if (payload.decision_type === "accept_reject") {
+    const deal = game.deals.find((item) => item.negotiation_id === negotiation.id && item.status === "proposed") ?? null;
+    if (!deal) {
+      const errors = [aiValidationError("deal_not_found", "AI response requires a proposed deal", "deal_id")];
+      const rejection = createRejectedAction(
+        game,
+        { actor_id: payload.player_id, type: "AI_ACCEPT_REJECT", payload },
+        "deal_not_found",
+        errors,
+      );
+      decision.status = "rejected";
+      return aiStepPayload({
+        game,
+        payload,
+        decision,
+        status: "rejected",
+        rejectedActionId: rejection.id,
+        outcome: { kind: "accept_reject", status: "rejected" },
+        reasonCode: "deal_not_found",
+        validationErrors: errors,
+      });
+    }
+    const acceptedDeal = acceptDealRecord(game, deal);
+    decision.status = "accepted";
+    return aiStepPayload({
+      game,
+      payload,
+      decision,
+      status: "done",
+      outcome: { kind: "accept_reject", status: "done", deal_id: acceptedDeal.id, decision: "accept" },
+      negotiation: negotiationById(game, negotiation.id),
+      deal: acceptedDeal,
+    });
+  }
+
+  const errors = [aiValidationError("unsupported_ai_decision_type", "unsupported AI decision type", "decision_type")];
+  const rejection = createRejectedAction(
+    game,
+    { actor_id: payload.player_id, type: `AI_${payload.decision_type ?? "unknown"}`, payload },
+    "unsupported_ai_decision_type",
+    errors,
+  );
+  decision.status = "rejected";
+  return aiStepPayload({
+    game,
+    payload,
+    decision,
+    status: "rejected",
+    rejectedActionId: rejection.id,
+    outcome: { kind: "unsupported_ai_decision_type", status: "rejected" },
+    reasonCode: "unsupported_ai_decision_type",
+    validationErrors: errors,
+  });
+}
+
+function applyMockAiStep(game, payload) {
+  if (!isObject(payload)) {
+    const decision = createAiDecisionRecord(game, { player_id: null, decision_type: "action_decision" }, "rejected");
+    const errors = [aiValidationError("malformed_ai_step", "request body must be a JSON object", "body")];
+    return {
+      statusCode: 422,
+      body: aiStepPayload({
+        game,
+        payload: { player_id: "", decision_type: "action_decision", negotiation_id: null },
+        decision,
+        status: "rejected",
+        outcome: { kind: "ai_step", status: "rejected" },
+        reasonCode: "malformed_ai_step",
+        validationErrors: errors,
+      }),
+    };
+  }
+  const player = playerById(game, payload.player_id);
+  if (!player) {
+    const errors = [aiValidationError("unknown_player", "player_id must reference a game player", "player_id")];
+    return { statusCode: 422, body: { status: "rejected", reason_code: "unknown_player", validation_errors: errors } };
+  }
+  if (player.controller_type !== "ai") {
+    const errors = [aiValidationError("human_player_not_ai_controlled", "AI step requests require an AI-controlled player", "player_id")];
+    return {
+      statusCode: 409,
+      body: { status: "rejected", reason_code: "human_player_not_ai_controlled", validation_errors: errors },
+    };
+  }
+
+  const decisionType = payload.decision_type ?? "action_decision";
+  const decision = createAiDecisionRecord(game, { ...payload, decision_type: decisionType }, "requested");
+  if (typeof game.seed === "string" && game.seed.includes("stage-7-6-ai-blocked")) {
+    const errors = [aiValidationError("codex_exec_timeout", "mock Codex AI step timed out", null)];
+    const rejection = createRejectedAction(
+      game,
+      { actor_id: payload.player_id, type: `AI_${decisionType}`, payload },
+      "codex_exec_timeout",
+      errors,
+    );
+    game.status = "AI_BLOCKED";
+    decision.status = "rejected";
+    return {
+      statusCode: 200,
+      body: aiStepPayload({
+        game,
+        payload: { ...payload, decision_type: decisionType },
+        decision,
+        status: "blocked",
+        rejectedActionId: rejection.id,
+        outcome: { kind: "ai_blocked", status: "blocked" },
+        reasonCode: "codex_exec_timeout",
+        validationErrors: errors,
+      }),
+    };
+  }
+
+  if (decisionType !== "action_decision") {
+    return {
+      statusCode: 200,
+      body: applyMockAiNegotiationStep(game, { ...payload, decision_type: decisionType }, decision),
+    };
+  }
+
+  const action = legalAction(game, "ROLL_DICE", {}, payload.player_id);
+  const accepted = acceptRollDice(game, action);
+  decision.status = "accepted";
+  return {
+    statusCode: 200,
+    body: aiStepPayload({
+      game,
+      payload: { ...payload, decision_type: decisionType, negotiation_id: null },
+      decision,
+      status: "accepted",
+      acceptedEvents: accepted.accepted_events,
+      outcome: { kind: "action_decision", status: "accepted" },
+    }),
+  };
+}
+
 function actionMatchesLegalAction(candidate, action) {
   if (candidate.type !== action.type) {
     return false;
@@ -1948,6 +2277,31 @@ const server = createServer(async (request, response) => {
     }
     json(response, 200, { status: "ok", negotiation: expireNegotiationRecord(game, negotiation) });
     return;
+  }
+
+  const aiStepMatch = url.pathname.endsWith(aiStepPathSuffix)
+    ? url.pathname.slice(0, -aiStepPathSuffix.length).match(/^\/games\/([^/]+)$/)
+    : null;
+  if (request.method === "POST" && aiStepMatch) {
+    const gameId = decodeURIComponent(aiStepMatch[1]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    try {
+      const payload = await readBody(request);
+      const result = applyMockAiStep(game, payload);
+      json(response, result.statusCode, result.body);
+      return;
+    } catch {
+      json(response, 400, {
+        status: "rejected",
+        reason_code: "malformed_json",
+        validation_errors: [aiValidationError("malformed_json", "request body must be valid JSON", "body")],
+      });
+      return;
+    }
   }
 
   const actionsMatch = url.pathname.match(/^\/games\/([^/]+)\/actions$/);

@@ -583,33 +583,20 @@ export interface components {
             /** Player Id */
             player_id?: string | null;
         };
-        /** AiStepNotImplementedResponse */
-        AiStepNotImplementedResponse: {
-            /**
-             * Game Id
-             * Format: uuid
-             */
-            game_id: string;
-            /** Message */
-            message: string;
-            /**
-             * Player Id
-             * Format: uuid
-             */
-            player_id: string;
-            /**
-             * Reason Code
-             * @constant
-             */
-            reason_code: "ai_runtime_not_implemented";
-            /**
-             * Status
-             * @constant
-             */
-            status: "not_implemented";
-        };
         /** AiStepRequest */
         AiStepRequest: {
+            /**
+             * Decision Type
+             * @default action_decision
+             * @enum {string}
+             */
+            decision_type: "action_decision" | "negotiation_message" | "deal_proposal" | "counteroffer" | "accept_reject";
+            /** Mandatory */
+            mandatory?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Negotiation Id */
+            negotiation_id?: string | null;
             /**
              * Player Id
              * Format: uuid
@@ -619,6 +606,63 @@ export interface components {
             request_context?: {
                 [key: string]: unknown;
             };
+        };
+        /** AiStepResponse */
+        AiStepResponse: {
+            /** Accepted Event Id */
+            accepted_event_id: string | null;
+            /** Accepted Events */
+            accepted_events: components["schemas"]["AcceptedEventResponse"][];
+            /**
+             * Ai Decision Id
+             * Format: uuid
+             */
+            ai_decision_id: string;
+            /** Consumed Negotiation Opportunity */
+            consumed_negotiation_opportunity: {
+                [key: string]: unknown;
+            } | null;
+            /** Consumed Response Opportunity */
+            consumed_response_opportunity: boolean;
+            deal?: components["schemas"]["DealResponse"] | null;
+            /** Decision Type */
+            decision_type: string;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Game Status */
+            game_status: string | null;
+            message?: components["schemas"]["NegotiationMessageResponse"] | null;
+            negotiation?: components["schemas"]["NegotiationResponse"] | null;
+            /** Negotiation Id */
+            negotiation_id: string | null;
+            /** Outcome */
+            outcome: {
+                [key: string]: unknown;
+            };
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Rejected Action Id */
+            rejected_action_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "rejected" | "blocked" | "done";
+            /**
+             * Validation Errors
+             * @default []
+             */
+            validation_errors: {
+                [key: string]: unknown;
+            }[];
         };
         /** ContractCreationResponse */
         ContractCreationResponse: {
@@ -797,6 +841,12 @@ export interface components {
             author_player_id?: string | null;
             /** Body */
             body: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Recipient Player Id */
+            recipient_player_id?: string | null;
             /** Sender Player Id */
             sender_player_id?: string | null;
         };
@@ -1442,6 +1492,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiStepResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1449,15 +1508,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Successful Response */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AiStepNotImplementedResponse"];
                 };
             };
         };

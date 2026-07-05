@@ -27,8 +27,10 @@ import {
   readGameState,
   readLegalActions,
   submitGameAction,
+  submitAiStep,
   type AcceptedEvent,
   type ActionRejectedResponse,
+  type AiStepResponse,
   type GameStateResponse,
   type LegalAction,
 } from "../lib/api/gameplay";
@@ -211,6 +213,62 @@ function RejectedActionAlert({
         </div>
       </div>
     </section>
+  );
+}
+
+function aiStepStatusLabel(result: AiStepResponse | null, isThinking: boolean): string {
+  if (isThinking) {
+    return "AI thinking";
+  }
+  if (!result) {
+    return "AI idle";
+  }
+  if (result.status === "blocked") {
+    return "AI blocked";
+  }
+  if (result.status === "rejected") {
+    return "AI rejected";
+  }
+  return "AI done";
+}
+
+function AiStepStatusPanel({
+  result,
+  isThinking,
+}: Readonly<{
+  result: AiStepResponse | null;
+  isThinking: boolean;
+}>) {
+  const label = aiStepStatusLabel(result, isThinking);
+  const isProblem = label === "AI blocked" || label === "AI rejected";
+  return (
+    <div
+      aria-label="AI step status"
+      role="status"
+      className={cn(
+        "rounded-md border px-3 py-2 text-sm",
+        isProblem
+          ? "border-rose-200 bg-rose-50 text-rose-800"
+          : "border-neutral-200 bg-neutral-50 text-neutral-700",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        {isThinking ? (
+          <Loader2 aria-hidden="true" className="mt-0.5 size-4 animate-spin text-neutral-600" />
+        ) : isProblem ? (
+          <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 text-rose-700" />
+        ) : (
+          <Bot aria-hidden="true" className="mt-0.5 size-4 text-purple-700" />
+        )}
+        <div>
+          <p className="font-semibold">{label}</p>
+          {result?.reason_code ? <p className="mt-1 text-xs">{result.reason_code}</p> : null}
+          {result?.validation_errors?.[0]?.message ? (
+            <p className="mt-1 text-xs">{result.validation_errors[0].message}</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -485,6 +543,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [localRejectedAction, setLocalRejectedAction] = useState<ActionRejectedResponse | null>(null);
   const [acceptedEvents, setAcceptedEvents] = useState<AcceptedEvent[]>([]);
   const [pendingActionType, setPendingActionType] = useState<string | null>(null);
+  const [aiStepResult, setAiStepResult] = useState<AiStepResponse | null>(null);
+  const [autoStepAi, setAutoStepAi] = useState(false);
+  const [lastAutoStepKey, setLastAutoStepKey] = useState<string | null>(null);
 
   const gameQuery = useQuery({
     queryKey: ["game", gameId],
@@ -613,6 +674,44 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
   });
 
+  const invalidateGameplayData = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["game", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["game-state", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["rejected-actions", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["contracts", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["obligations", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["negotiations", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["negotiation-messages", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["deals", gameId] }),
+    ]);
+
+  const aiStep = useMutation({
+    mutationFn: (mode: "manual" | "auto") =>
+      submitAiStep({
+        gameId,
+        baseUrl,
+        input: {
+          player_id: currentPlayer?.id ?? "",
+          decision_type: "action_decision",
+          mandatory: true,
+          request_context: { mode },
+        },
+      }),
+    onMutate: () => {
+      setAiStepResult(null);
+    },
+    onSuccess: (result) => {
+      setAiStepResult(result);
+      if (result.accepted_events.length > 0) {
+        setAcceptedEvents(result.accepted_events);
+      }
+      void invalidateGameplayData();
+    },
+  });
+
   const legalActions = legalActionsQuery.data?.legal_actions ?? [];
   const auctionLegalActions = useMemo(
     () =>
@@ -643,13 +742,42 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading || legalActionsQuery.isFetching;
-  const controlsDisabled = legalActionsLoading || submitAction.isPending;
+  const controlsDisabled = legalActionsLoading || submitAction.isPending || aiStep.isPending;
+  const activeAiPlayer = currentPlayer?.controller_type === "ai" ? currentPlayer : null;
+  const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
   const auctionControlsDisabled =
     controlsDisabled || (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
 
   function handleSubmit(action: LegalAction) {
     submitAction.mutate(action);
   }
+
+  function handleAiStep(mode: "manual" | "auto") {
+    if (!activeAiPlayer || aiStep.isPending) {
+      return;
+    }
+    aiStep.mutate(mode);
+  }
+
+  useEffect(() => {
+    if (!autoStepAi || !activeAiPlayer || !autoStepKey || aiStep.isPending || submitAction.isPending) {
+      return;
+    }
+    if (stateQuery.isFetching || gameQuery.isFetching || lastAutoStepKey === autoStepKey) {
+      return;
+    }
+    setLastAutoStepKey(autoStepKey);
+    handleAiStep("auto");
+  }, [
+    activeAiPlayer,
+    aiStep.isPending,
+    autoStepAi,
+    autoStepKey,
+    gameQuery.isFetching,
+    lastAutoStepKey,
+    stateQuery.isFetching,
+    submitAction.isPending,
+  ]);
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
@@ -697,6 +825,31 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           {legalActionsQuery.isError ? (
             <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               Legal actions unavailable.
+            </div>
+          ) : null}
+
+          {activeAiPlayer ? (
+            <div className="mt-4 grid gap-3 rounded-md border border-purple-200 bg-purple-50 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button onClick={() => handleAiStep("manual")} disabled={aiStep.isPending}>
+                  {aiStep.isPending ? (
+                    <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+                  ) : (
+                    <Bot aria-hidden="true" className="size-4" />
+                  )}
+                  Step AI
+                </Button>
+                <label className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-900">
+                  <input
+                    type="checkbox"
+                    checked={autoStepAi}
+                    onChange={(event) => setAutoStepAi(event.target.checked)}
+                    className="size-4 accent-purple-700"
+                  />
+                  Auto-step AI
+                </label>
+              </div>
+              <AiStepStatusPanel isThinking={aiStep.isPending} result={aiStepResult} />
             </div>
           ) : null}
 

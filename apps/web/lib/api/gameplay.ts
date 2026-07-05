@@ -69,6 +69,43 @@ export const ActionSubmissionResultSchema = z.discriminatedUnion("status", [
   ActionRejectedResponseSchema,
 ]);
 
+export const AiDecisionTypeSchema = z.enum([
+  "action_decision",
+  "negotiation_message",
+  "deal_proposal",
+  "counteroffer",
+  "accept_reject",
+]);
+
+export const AiStepResponseSchema = z.object({
+  status: z.enum(["accepted", "rejected", "blocked", "done"]),
+  game_id: z.string().min(1),
+  player_id: z.string().min(1),
+  decision_type: AiDecisionTypeSchema,
+  negotiation_id: z.string().min(1).nullable(),
+  ai_decision_id: z.string().min(1),
+  accepted_events: z.array(AcceptedEventSchema).default([]),
+  accepted_event_id: z.string().min(1).nullable(),
+  rejected_action_id: z.string().min(1).nullable(),
+  game_status: z.string().min(1).nullable(),
+  consumed_response_opportunity: z.boolean().default(false),
+  consumed_negotiation_opportunity: z.record(z.string(), z.unknown()).nullable(),
+  outcome: z.record(z.string(), z.unknown()).default({}),
+  reason_code: z.string().min(1).nullable().optional(),
+  validation_errors: z
+    .array(
+      z.object({
+        code: z.string().min(1),
+        message: z.string().min(1),
+        field: z.string().nullable().optional(),
+      }),
+    )
+    .default([]),
+  negotiation: z.record(z.string(), z.unknown()).nullable().optional(),
+  message: z.record(z.string(), z.unknown()).nullable().optional(),
+  deal: z.record(z.string(), z.unknown()).nullable().optional(),
+});
+
 export type GameStateResponse = z.infer<typeof GameStateResponseSchema>;
 export type LegalAction = z.infer<typeof LegalActionSchema>;
 export type LegalActionsResponse = z.infer<typeof LegalActionsResponseSchema>;
@@ -76,6 +113,8 @@ export type AcceptedEvent = z.infer<typeof AcceptedEventSchema>;
 export type ActionAcceptedResponse = z.infer<typeof ActionAcceptedResponseSchema>;
 export type ActionRejectedResponse = z.infer<typeof ActionRejectedResponseSchema>;
 export type ActionSubmissionResult = z.infer<typeof ActionSubmissionResultSchema>;
+export type AiDecisionType = z.infer<typeof AiDecisionTypeSchema>;
+export type AiStepResponse = z.infer<typeof AiStepResponseSchema>;
 
 type ApiFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -96,6 +135,22 @@ type SubmitGameActionOptions = {
   gameId: string;
   action: LegalAction;
   idempotencyKey: string;
+  baseUrl?: string;
+  fetcher?: ApiFetcher;
+};
+
+type SubmitAiStepInput = {
+  player_id: string;
+  decision_type?: AiDecisionType;
+  negotiation_id?: string | null;
+  mandatory?: boolean;
+  mode?: string;
+  request_context?: Record<string, unknown>;
+};
+
+type SubmitAiStepOptions = {
+  gameId: string;
+  input: SubmitAiStepInput;
   baseUrl?: string;
   fetcher?: ApiFetcher;
 };
@@ -206,6 +261,25 @@ export async function submitGameAction({
   });
   const payload = await readJson(response, "Submit action");
   return parseOrThrow(ActionSubmissionResultSchema, payload, "action submission");
+}
+
+export async function submitAiStep({
+  gameId,
+  input,
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: SubmitAiStepOptions): Promise<AiStepResponse> {
+  const response = await fetcher(gameResourceUrl(baseUrl, gameId, "/ai/step"), {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const payload = await readJson(response, "Submit AI step");
+  return parseOrThrow(AiStepResponseSchema, payload, "AI step");
 }
 
 export function eventsStreamUrl(gameId: string, baseUrl = getDefaultBackendBaseUrl()): string {

@@ -251,46 +251,57 @@
         "title": "AiDecisionAttemptRequest",
         "type": "object"
       },
-      "AiStepNotImplementedResponse": {
-        "properties": {
-          "game_id": {
-            "format": "uuid",
-            "title": "Game Id",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "player_id": {
-            "format": "uuid",
-            "title": "Player Id",
-            "type": "string"
-          },
-          "reason_code": {
-            "const": "ai_runtime_not_implemented",
-            "title": "Reason Code",
-            "type": "string"
-          },
-          "status": {
-            "const": "not_implemented",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "reason_code",
-          "game_id",
-          "player_id",
-          "message"
-        ],
-        "title": "AiStepNotImplementedResponse",
-        "type": "object"
-      },
       "AiStepRequest": {
         "additionalProperties": false,
         "properties": {
+          "decision_type": {
+            "default": "action_decision",
+            "enum": [
+              "action_decision",
+              "negotiation_message",
+              "deal_proposal",
+              "counteroffer",
+              "accept_reject"
+            ],
+            "title": "Decision Type",
+            "type": "string"
+          },
+          "mandatory": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mandatory"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "negotiation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negotiation Id"
+          },
           "player_id": {
             "format": "uuid",
             "title": "Player Id",
@@ -306,6 +317,181 @@
           "player_id"
         ],
         "title": "AiStepRequest",
+        "type": "object"
+      },
+      "AiStepResponse": {
+        "properties": {
+          "accepted_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Event Id"
+          },
+          "accepted_events": {
+            "items": {
+              "$ref": "#/components/schemas/AcceptedEventResponse"
+            },
+            "title": "Accepted Events",
+            "type": "array"
+          },
+          "ai_decision_id": {
+            "format": "uuid",
+            "title": "Ai Decision Id",
+            "type": "string"
+          },
+          "consumed_negotiation_opportunity": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumed Negotiation Opportunity"
+          },
+          "consumed_response_opportunity": {
+            "title": "Consumed Response Opportunity",
+            "type": "boolean"
+          },
+          "deal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DealResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision_type": {
+            "title": "Decision Type",
+            "type": "string"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "game_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Game Status"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NegotiationMessageResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "negotiation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NegotiationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "negotiation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negotiation Id"
+          },
+          "outcome": {
+            "additionalProperties": true,
+            "title": "Outcome",
+            "type": "object"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "rejected_action_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected Action Id"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "rejected",
+              "blocked",
+              "done"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "validation_errors": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "game_id",
+          "player_id",
+          "decision_type",
+          "negotiation_id",
+          "ai_decision_id",
+          "accepted_events",
+          "accepted_event_id",
+          "rejected_action_id",
+          "game_status",
+          "consumed_response_opportunity",
+          "consumed_negotiation_opportunity",
+          "outcome"
+        ],
+        "title": "AiStepResponse",
         "type": "object"
       },
       "ContractCreationResponse": {
@@ -804,6 +990,23 @@
             "minLength": 1,
             "title": "Body",
             "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "recipient_player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Player Id"
           },
           "sender_player_id": {
             "anyOf": [
@@ -2337,6 +2540,24 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AiStepResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LifecycleRejectedResponse"
+                    }
+                  ],
+                  "title": "Response Ai Step Games  Game Id  Ai Step Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2346,16 +2567,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "501": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AiStepNotImplementedResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
           }
         },
         "summary": "Ai Step",

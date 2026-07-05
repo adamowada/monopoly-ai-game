@@ -83,6 +83,27 @@ function stateFixture(position = 0, eventSequence = 0) {
   };
 }
 
+function aiStateFixture(eventSequence = 0) {
+  return {
+    game_id: gameId,
+    state: {
+      game_id: gameId,
+      seed: "turn-controls-ai",
+      players: [
+        { id: adaId, cash: 1500, position: 0 },
+        { id: graceId, cash: 1500, position: 0 },
+      ],
+      turn: {
+        phase: "START_TURN",
+        current_player_index: 1,
+        current_player_id: graceId,
+      },
+    },
+    state_hash: `ai-state-${eventSequence}`,
+    event_sequence: eventSequence,
+  };
+}
+
 function legalAction(
   type: string,
   payload: Record<string, unknown> = {},
@@ -219,6 +240,36 @@ function rejectedRollResponse() {
       legal_actions: ["ROLL_DICE"],
     },
     submitted_action: legalAction("ROLL_DICE"),
+  };
+}
+
+function aiStepResponse(status: "accepted" | "rejected" | "blocked" | "done", patch: Record<string, unknown> = {}) {
+  return {
+    status,
+    game_id: gameId,
+    player_id: graceId,
+    decision_type: "action_decision",
+    negotiation_id: null,
+    ai_decision_id: `ai-decision-${status}`,
+    accepted_events: [],
+    accepted_event_id: null,
+    rejected_action_id: status === "rejected" || status === "blocked" ? `rejected-${status}` : null,
+    game_status: status === "blocked" ? "AI_BLOCKED" : "active",
+    consumed_response_opportunity: false,
+    consumed_negotiation_opportunity: null,
+    outcome: { kind: status === "accepted" ? "action_decision" : `ai_${status}`, status },
+    reason_code: status === "rejected" ? "illegal_action" : status === "blocked" ? "codex_exec_timeout" : null,
+    validation_errors:
+      status === "rejected" || status === "blocked"
+        ? [
+            {
+              code: status === "blocked" ? "codex_exec_timeout" : "illegal_action",
+              message: status === "blocked" ? "codex exec timed out" : "action is not legal",
+              field: null,
+            },
+          ]
+        : [],
+    ...patch,
   };
 }
 
@@ -481,5 +532,156 @@ describe("GamePlaySurface turn controls", () => {
 
     resolveAction(Response.json(acceptedRollResponse()));
     await waitFor(() => expect(rollButton).not.toHaveTextContent("Submitting"));
+  });
+
+  it("submits the Manual AI step control for the active AI player", async () => {
+    // Manual AI step control
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Step AI" }));
+
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done"));
+    const aiStepCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(aiStepCall?.[1]?.body))).toMatchObject({
+      player_id: graceId,
+      decision_type: "action_decision",
+      mandatory: true,
+      request_context: { mode: "manual" },
+    });
+  });
+
+  it("runs the Automatic AI step control while an active AI player is idle", async () => {
+    // Automatic AI step control
+    const fetchMock = baseFetchMock({
+      state: aiStateFixture(),
+      legalActions: [],
+    });
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Auto-step AI" }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done");
+  });
+
+  it("shows UI indication when AI is thinking, rejected, blocked, or done", async () => {
+    // UI indication when AI is thinking, rejected, blocked, or done
+    let resolveAiStep: (response: Response) => void = () => {};
+    let aiStepPayload = aiStepResponse("rejected");
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return jsonResponse(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return jsonResponse(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return jsonResponse({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return jsonResponse(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return jsonResponse(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          resolveAiStep = resolve;
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Step AI" }));
+    expect(await screen.findByRole("status", { name: "AI step status" })).toHaveTextContent("AI thinking");
+    resolveAiStep(Response.json(aiStepPayload));
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI rejected"));
+
+    aiStepPayload = aiStepResponse("blocked");
+    fireEvent.click(screen.getByRole("button", { name: "Step AI" }));
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI thinking"));
+    resolveAiStep(Response.json(aiStepPayload));
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI blocked"));
+
+    aiStepPayload = aiStepResponse("done");
+    fireEvent.click(screen.getByRole("button", { name: "Step AI" }));
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI thinking"));
+    resolveAiStep(Response.json(aiStepPayload));
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done"));
   });
 });

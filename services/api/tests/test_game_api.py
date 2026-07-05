@@ -377,24 +377,24 @@ async def test_negotiations_and_deals_create_minimal_durable_records(
 
 
 @pytest.mark.asyncio
-async def test_ai_step_is_explicit_not_implemented_without_fallback_mutation(
+async def test_ai_step_rejects_human_player_without_fallback_mutation(
     client: httpx.AsyncClient,
     session_factory: async_sessionmaker,
 ) -> None:
     created = await create_game(client)
     game_id = created["id"]
-    ai_player_id = created["players"][1]["id"]
+    human_player_id = created["players"][0]["id"]
     try:
         malformed = await client.post(f"/games/{game_id}/ai/step", json={})
         response = await client.post(
             f"/games/{game_id}/ai/step",
-            json={"player_id": ai_player_id, "request_context": {"mode": "manual"}},
+            json={"player_id": human_player_id, "request_context": {"mode": "manual"}},
         )
 
         assert malformed.status_code == 422
-        assert response.status_code == 501
-        assert response.json()["status"] == "not_implemented"
-        assert response.json()["reason_code"] == "ai_runtime_not_implemented"
+        assert response.status_code == 409
+        assert response.json()["status"] == "rejected"
+        assert response.json()["reason_code"] == "human_player_not_ai_controlled"
         assert await table_count(session_factory, game_events, str(game_id)) == 0
         assert await table_count(session_factory, rejected_actions, str(game_id)) == 0
     finally:
