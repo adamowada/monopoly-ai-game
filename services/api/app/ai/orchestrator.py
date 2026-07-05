@@ -460,6 +460,14 @@ async def _persist_attempt_result(
                 .returning(ai_decisions.c.id)
             )
             decision_id = result.scalar_one()
+            await _link_context_pack_retrieval_records_to_decision(
+                session,
+                decision_id=decision_id,
+                game_id=game_id,
+                player_id=player_id,
+                decision_type=request.decision_type,
+                prompt_context=prompt_context,
+            )
             await _persist_prompt_context_retrieval_records(
                 session,
                 decision_id=decision_id,
@@ -494,6 +502,84 @@ async def _persist_attempt_result(
         parsed_output=persisted_parsed_output,
         validation_result=validation_result,
         prompt_context_hash=prompt_context_hash,
+    )
+
+
+async def _link_context_pack_retrieval_records_to_decision(
+    session: AsyncSession,
+    *,
+    decision_id: UUID,
+    game_id: UUID,
+    player_id: UUID,
+    decision_type: str,
+    prompt_context: Mapping[str, Any],
+) -> None:
+    for retrieval in _rag_retrieval_references(prompt_context):
+        await session.execute(
+            retrieval_records.update()
+            .where(
+                retrieval_records.c.game_id == game_id,
+                retrieval_records.c.player_id == player_id,
+                retrieval_records.c.ai_decision_id.is_(None),
+                retrieval_records.c.source_type == retrieval["source_type"],
+                retrieval_records.c.source_id == retrieval["source_id"],
+                retrieval_records.c.query_context["source"].as_string()
+                == "build_ai_context_pack_from_db",
+                retrieval_records.c.query_context["decision_type"].as_string() == decision_type,
+                retrieval_records.c.query_context["retrieval_section"].as_string()
+                == retrieval["retrieval_section"],
+            )
+            .values(ai_decision_id=decision_id)
+        )
+
+
+def _rag_retrieval_references(
+    prompt_context: Mapping[str, Any],
+) -> tuple[dict[str, str], ...]:
+    references: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for snippet in _context_snippets(prompt_context, "memory"):
+        metadata = snippet.get("metadata")
+        if isinstance(metadata, Mapping):
+            _append_rag_retrieval_reference(
+                references,
+                seen,
+                retrieval=metadata.get("rag_retrieval"),
+                retrieval_section="memory",
+            )
+    for snippet in _context_snippets(prompt_context, "rules"):
+        _append_rag_retrieval_reference(
+            references,
+            seen,
+            retrieval=snippet.get("rag_retrieval"),
+            retrieval_section="rules",
+        )
+    return tuple(references)
+
+
+def _append_rag_retrieval_reference(
+    references: list[dict[str, str]],
+    seen: set[tuple[str, str, str]],
+    *,
+    retrieval: object,
+    retrieval_section: str,
+) -> None:
+    if not isinstance(retrieval, Mapping):
+        return
+    source_type = _string_value(retrieval.get("source_type"))
+    source_id = _string_value(retrieval.get("source_id"))
+    if source_type is None or source_id is None:
+        return
+    key = (retrieval_section, source_type, source_id)
+    if key in seen:
+        return
+    seen.add(key)
+    references.append(
+        {
+            "retrieval_section": retrieval_section,
+            "source_type": source_type,
+            "source_id": source_id,
+        }
     )
 
 

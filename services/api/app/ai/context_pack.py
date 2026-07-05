@@ -131,7 +131,7 @@ async def build_ai_context_pack_from_db(
     max_memory_snippets: int = 12,
     retrieval_query_text: str | None = None,
     max_retrieval_snippets: int = 6,
-    audit_retrieval: bool = False,
+    audit_retrieval: bool = True,
     memory_compaction_threshold: int = MEMORY_COMPACTION_THRESHOLD,
     max_negotiations: int = 10,
     max_negotiation_messages: int = 40,

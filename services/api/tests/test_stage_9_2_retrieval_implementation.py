@@ -223,6 +223,69 @@ async def test_stage_9_2_context_pack_includes_retrieved_rules_and_memories(
 
 
 @pytest.mark.asyncio
+async def test_stage_9_2_context_pack_audits_retrieval_by_default_for_live_ai_path(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    state = _state()
+    await _insert_retrieval_fixture(session_factory, state)
+    query_text = "Boardwalk hotel rent dark-blue monopoly plan"
+    try:
+        async with session_factory() as session:
+            pack = await build_ai_context_pack_from_db(
+                session,
+                state=state,
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                decision_type="action_decision",
+                caller_request_context={"retrieval_query": query_text},
+                max_memory_snippets=2,
+            )
+
+        rules_text = json.dumps(pack["rules"]["snippets"], sort_keys=True)
+        memory_text = json.dumps(pack["memory"]["snippets"], sort_keys=True)
+
+        assert "property_boardwalk" in rules_text
+        assert "Protect the dark-blue Boardwalk hotel plan." in memory_text
+        assert "Other AI private Boardwalk leak." not in memory_text
+
+        records = await _fetch_retrieval_records(session_factory)
+        assert {record["source_type"] for record in records} >= {"rules", "ai_memory"}
+        assert {record["query_context"]["retrieval_section"] for record in records} >= {
+            "rules",
+            "memory",
+        }
+        assert all(record["query_text"] == query_text for record in records)
+        assert any(record["memory_entry_id"] == OWN_PRIVATE_MEMORY_ID for record in records)
+        assert all(
+            record["retrieved_context"]["reason"] == "rag_retrieval_ranked_match"
+            for record in records
+        )
+        assert all("ranking" in record["retrieved_context"] for record in records)
+
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    retrieval_records.delete().where(retrieval_records.c.game_id == GAME_ID)
+                )
+
+        async with session_factory() as session:
+            await build_ai_context_pack_from_db(
+                session,
+                state=state,
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                decision_type="action_decision",
+                caller_request_context={"retrieval_query": query_text},
+                max_memory_snippets=2,
+                audit_retrieval=False,
+            )
+
+        assert await _fetch_retrieval_records(session_factory) == []
+    finally:
+        await _delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_stage_9_2_retrieval_filters_private_memory_and_persists_audit_records(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
