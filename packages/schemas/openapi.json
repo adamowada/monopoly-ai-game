@@ -1,6 +1,199 @@
 {
   "components": {
     "schemas": {
+      "AIDecisionRecordResponse": {
+        "properties": {
+          "accepted_event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Event Id"
+          },
+          "ai_decision_id": {
+            "format": "uuid",
+            "title": "Ai Decision Id",
+            "type": "string"
+          },
+          "ai_profile_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Profile Id"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "decision_type": {
+            "title": "Decision Type",
+            "type": "string"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "legal_actions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Legal Actions",
+            "type": "array"
+          },
+          "memory_entry_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Memory Entry Ids",
+            "type": "array"
+          },
+          "parsed_output": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parsed Output"
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phase"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "prompt_context": {
+            "additionalProperties": true,
+            "title": "Prompt Context",
+            "type": "object"
+          },
+          "prompt_context_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Context Hash"
+          },
+          "raw_output": {
+            "title": "Raw Output",
+            "type": "string"
+          },
+          "rejected_action_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected Action Id"
+          },
+          "retrieval_record_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Retrieval Record Ids",
+            "type": "array"
+          },
+          "state_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Hash"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "validation_errors": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssueResponse"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          },
+          "validation_result": {
+            "additionalProperties": true,
+            "title": "Validation Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "ai_decision_id",
+          "game_id",
+          "ai_profile_id",
+          "player_id",
+          "decision_type",
+          "status",
+          "phase",
+          "state_hash",
+          "prompt_context_hash",
+          "prompt_context",
+          "legal_actions",
+          "raw_output",
+          "parsed_output",
+          "validation_result",
+          "validation_errors",
+          "memory_entry_ids",
+          "retrieval_record_ids",
+          "accepted_event_id",
+          "rejected_action_id",
+          "created_at"
+        ],
+        "title": "AIDecisionRecordResponse",
+        "type": "object"
+      },
+      "AIDecisionsResponse": {
+        "properties": {
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/AIDecisionRecordResponse"
+            },
+            "title": "Decisions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "decisions"
+        ],
+        "title": "AIDecisionsResponse",
+        "type": "object"
+      },
       "AIMemoryRecordResponse": {
         "properties": {
           "ai_profile_id": {
@@ -274,6 +467,280 @@
           "profiles"
         ],
         "title": "AIProfilesResponse",
+        "type": "object"
+      },
+      "AIRejectedOutputResponse": {
+        "properties": {
+          "ai_decision_id": {
+            "format": "uuid",
+            "title": "Ai Decision Id",
+            "type": "string"
+          },
+          "ai_profile_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Profile Id"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "parsed_output": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parsed Output"
+          },
+          "player_id": {
+            "format": "uuid",
+            "title": "Player Id",
+            "type": "string"
+          },
+          "raw_output": {
+            "title": "Raw Output",
+            "type": "string"
+          },
+          "rejected_action_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejected Action Id"
+          },
+          "rejected_output_id": {
+            "format": "uuid",
+            "title": "Rejected Output Id",
+            "type": "string"
+          },
+          "source_ai_decision_id": {
+            "format": "uuid",
+            "title": "Source Ai Decision Id",
+            "type": "string"
+          },
+          "state_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Hash"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "validation_errors": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssueResponse"
+            },
+            "title": "Validation Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rejected_output_id",
+          "game_id",
+          "ai_decision_id",
+          "source_ai_decision_id",
+          "ai_profile_id",
+          "player_id",
+          "state_hash",
+          "status",
+          "raw_output",
+          "parsed_output",
+          "validation_errors",
+          "rejected_action_id",
+          "created_at"
+        ],
+        "title": "AIRejectedOutputResponse",
+        "type": "object"
+      },
+      "AIRejectedOutputsResponse": {
+        "properties": {
+          "rejected_outputs": {
+            "items": {
+              "$ref": "#/components/schemas/AIRejectedOutputResponse"
+            },
+            "title": "Rejected Outputs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rejected_outputs"
+        ],
+        "title": "AIRejectedOutputsResponse",
+        "type": "object"
+      },
+      "AIRetrievalRecordResponse": {
+        "properties": {
+          "ai_decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Decision Id"
+          },
+          "ai_profile_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Profile Id"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At"
+          },
+          "game_id": {
+            "format": "uuid",
+            "title": "Game Id",
+            "type": "string"
+          },
+          "memory_entry_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Entry Id"
+          },
+          "player_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Player Id"
+          },
+          "query_context": {
+            "additionalProperties": true,
+            "title": "Query Context",
+            "type": "object"
+          },
+          "query_text": {
+            "title": "Query Text",
+            "type": "string"
+          },
+          "retrieval_record_id": {
+            "format": "uuid",
+            "title": "Retrieval Record Id",
+            "type": "string"
+          },
+          "retrieved_context": {
+            "additionalProperties": true,
+            "title": "Retrieved Context",
+            "type": "object"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type"
+          }
+        },
+        "required": [
+          "retrieval_record_id",
+          "game_id",
+          "player_id",
+          "ai_decision_id",
+          "ai_profile_id",
+          "memory_entry_id",
+          "source_type",
+          "source_id",
+          "query_text",
+          "query_context",
+          "retrieved_context",
+          "score",
+          "content",
+          "created_at"
+        ],
+        "title": "AIRetrievalRecordResponse",
+        "type": "object"
+      },
+      "AIRetrievalRecordsResponse": {
+        "properties": {
+          "retrieval_records": {
+            "items": {
+              "$ref": "#/components/schemas/AIRetrievalRecordResponse"
+            },
+            "title": "Retrieval Records",
+            "type": "array"
+          }
+        },
+        "required": [
+          "retrieval_records"
+        ],
+        "title": "AIRetrievalRecordsResponse",
         "type": "object"
       },
       "AISelfDialogueRecordResponse": {
@@ -2733,6 +3200,49 @@
         ]
       }
     },
+    "/games/{game_id}/ai/decisions": {
+      "get": {
+        "operationId": "get_ai_decisions_games__game_id__ai_decisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIDecisionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Decisions",
+        "tags": [
+          "games"
+        ]
+      }
+    },
     "/games/{game_id}/ai/memory": {
       "get": {
         "operationId": "get_ai_memory_games__game_id__ai_memory_get",
@@ -2814,6 +3324,92 @@
           }
         },
         "summary": "Get Ai Profiles",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/ai/rejected-outputs": {
+      "get": {
+        "operationId": "get_ai_rejected_outputs_games__game_id__ai_rejected_outputs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIRejectedOutputsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Rejected Outputs",
+        "tags": [
+          "games"
+        ]
+      }
+    },
+    "/games/{game_id}/ai/retrieval-records": {
+      "get": {
+        "operationId": "get_ai_retrieval_records_games__game_id__ai_retrieval_records_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIRetrievalRecordsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Retrieval Records",
         "tags": [
           "games"
         ]

@@ -127,7 +127,7 @@ function InlineMeta({ label, value }: Readonly<{ label: string; value: string | 
 }
 
 function StatusBadge({ status }: Readonly<{ status: AiDecision["status"] }>) {
-  const accepted = status === "accepted";
+  const accepted = status === "accepted" || status === "validated";
   return (
     <span
       className={cn(
@@ -269,7 +269,7 @@ function LinkedRetrievals({
               <span className="font-medium text-neutral-950">retrieval_record_id {record.retrieval_record_id}</span>
               <span className="block">
                 Linked decision {record.ai_decision_id} · source {record.source_type}:{record.source_id} · score{" "}
-                {record.score.toFixed(2)}
+                {record.score === null ? "n/a" : record.score.toFixed(2)}
               </span>
               <span className="block">{record.content}</span>
             </li>
@@ -335,6 +335,8 @@ function RejectedOutputList({ records }: Readonly<{ records: AiRejectedOutput[] 
               <div className="flex flex-wrap gap-2">
                 <InlineMeta label="rejected_output_id" value={record.rejected_output_id} />
                 <InlineMeta label="state_hash" value={record.state_hash} />
+                <InlineMeta label="status" value={record.status} />
+                <InlineMeta label="rejected_action_id" value={record.rejected_action_id} />
               </div>
               <p className="mt-2 font-medium text-neutral-950">Validation errors</p>
               <p>{validationText(record.validation_errors)}</p>

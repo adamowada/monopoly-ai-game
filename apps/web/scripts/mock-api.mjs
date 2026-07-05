@@ -444,11 +444,22 @@ function configureAiAuditSeed(game) {
     {
       retrieval_record_id: retrievalRecordId,
       game_id: game.id,
+      player_id: player.id,
       ai_decision_id: decisionId,
       ai_profile_id: profile.ai_profile_id,
       memory_entry_id: memoryEntryId,
       source_type: "memory",
       source_id: memoryEntryId,
+      query_text: "prompt_context.memory.snippets",
+      query_context: {
+        prompt_context_hash: "mock-ai-audit-prompt-context-hash",
+        decision_type: "action_decision",
+        source_path: "memory.snippets",
+      },
+      retrieved_context: {
+        id: memoryEntryId,
+        content: "Retrieved context records show Ada usually rejects deals that drain her reserve below $200.",
+      },
       score: 0.93,
       content: "Retrieved context records show Ada usually rejects deals that drain her reserve below $200.",
       created_at: retrievalAt,
@@ -461,7 +472,10 @@ function configureAiAuditSeed(game) {
       game_id: game.id,
       ai_profile_id: profile.ai_profile_id,
       player_id: player.id,
+      decision_type: "action_decision",
+      phase: "START_TURN",
       state_hash: currentStateHash,
+      prompt_context_hash: "mock-ai-audit-prompt-context-hash",
       legal_actions: [
         legalAction(game, "ROLL_DICE", {}, player.id),
         legalAction(game, "DECLARE_BANKRUPTCY", { reason: "insolvent" }, player.id),
@@ -473,16 +487,25 @@ function configureAiAuditSeed(game) {
         legal_action_count: 2,
         note: "Private local research view; codex exec runtime is scheduled for Phase 7.",
       },
-      raw_output: "{\"action\":\"ROLL_DICE\",\"rationale\":\"Only tempo-preserving legal move.\"}",
+      raw_output:
+        "{\"type\":\"session_configured\",\"model\":\"codex\"}\n" +
+        "{\"type\":\"item_completed\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"action\\\":\\\"ROLL_DICE\\\",\\\"rationale\\\":\\\"Only tempo-preserving legal move.\\\"}\"}]}}",
       parsed_output: {
         action: "ROLL_DICE",
         confidence: 0.81,
         rationale: "Only tempo-preserving legal move.",
       },
       validation_errors: [],
+      validation_result: {
+        status: "accepted",
+        raw_output_format: "codex_exec_jsonl",
+        final_assistant_output: "{\"action\":\"ROLL_DICE\",\"rationale\":\"Only tempo-preserving legal move.\"}",
+      },
       memory_entry_ids: [memoryEntryId],
       retrieval_record_ids: [retrievalRecordId],
       status: "accepted",
+      accepted_event_id: "mock-event-ai-audit-1",
+      rejected_action_id: null,
       created_at: decisionAt,
     },
   ];
@@ -531,10 +554,14 @@ function configureAiAuditSeed(game) {
       rejected_output_id: `${game.id}-rejected-ai-output-1`,
       game_id: game.id,
       ai_decision_id: decisionId,
+      source_ai_decision_id: decisionId,
       ai_profile_id: profile.ai_profile_id,
       player_id: player.id,
       state_hash: currentStateHash,
-      raw_output: "{\"action\":\"BUY_PROPERTY\",\"property_id\":\"property_boardwalk\"}",
+      status: "rejected",
+      raw_output:
+        "{\"type\":\"session_configured\",\"model\":\"codex\"}\n" +
+        "{\"type\":\"item_completed\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"action\\\":\\\"BUY_PROPERTY\\\",\\\"property_id\\\":\\\"property_boardwalk\\\"}\"}]}}",
       parsed_output: {
         action: "BUY_PROPERTY",
         property_id: "property_boardwalk",
@@ -546,6 +573,7 @@ function configureAiAuditSeed(game) {
           field: "parsed_output.action",
         },
       ],
+      rejected_action_id: `${game.id}-rejected-action-ai-output-1`,
       created_at: rejectedAt,
     },
   ];

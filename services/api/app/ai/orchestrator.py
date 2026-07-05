@@ -31,7 +31,7 @@ from app.ai.memory import (
     compact_memory_after_scheduled_decision_if_due,
     persist_memory_updates_for_trusted_output,
 )
-from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue
+from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue, retrieval_records
 
 
 DEFAULT_AI_SCHEMA_FILE = Path(__file__).resolve().parent / "schemas" / "agent_decision.schema.json"
@@ -340,6 +340,15 @@ async def request_codex_ai_decision(
 
     final_output = _read_last_message(output_last_message_path) or parsed_events.final_assistant_output
     if final_output is None:
+        validation_result = _with_jsonl_audit_metadata(
+            _failure_validation_result(
+                reason_code="malformed_ai_output",
+                message="codex exec did not produce a final assistant output",
+            ),
+            raw_stdout=process.stdout,
+            final_assistant_output=None,
+            jsonl_event_count=len(parsed_events.events),
+        )
         rejected = rejected_ai_output(
             process.stdout,
             _malformed_error("codex exec did not produce a final assistant output"),
@@ -352,7 +361,7 @@ async def request_codex_ai_decision(
             status="rejected",
             raw_output=rejected.raw_output,
             parsed_output=None,
-            validation_result=rejected.audit_payload,
+            validation_result=validation_result,
             prompt_context=prompt_context,
             prompt_context_hash=prompt_context_hash,
         )
@@ -366,29 +375,40 @@ async def request_codex_ai_decision(
             game_id=request.game_id,
             player_id=request.player_id,
         )
+        validation_result = _with_jsonl_audit_metadata(
+            rejected.audit_payload,
+            raw_stdout=process.stdout,
+            final_assistant_output=final_output,
+            jsonl_event_count=len(parsed_events.events),
+        )
         return await _persist_attempt_result(
             session_factory,
             request=request,
             status="rejected",
-            raw_output=rejected.raw_output,
+            raw_output=process.stdout,
             parsed_output=_json_safe(rejected.parsed_output),
-            validation_result=rejected.audit_payload,
+            validation_result=validation_result,
             prompt_context=prompt_context,
             prompt_context_hash=prompt_context_hash,
         )
 
     parsed_output = validated.root.model_dump(mode="json")
-    validation_result = {
-        "status": "valid",
-        "schema": "AI_OUTPUT_SCHEMA",
-        "no_substitute_move": True,
-        "substitute_move": None,
-    }
+    validation_result = _with_jsonl_audit_metadata(
+        {
+            "status": "valid",
+            "schema": "AI_OUTPUT_SCHEMA",
+            "no_substitute_move": True,
+            "substitute_move": None,
+        },
+        raw_stdout=process.stdout,
+        final_assistant_output=final_output,
+        jsonl_event_count=len(parsed_events.events),
+    )
     return await _persist_attempt_result(
         session_factory,
         request=request,
         status="validated",
-        raw_output=final_output,
+        raw_output=process.stdout,
         parsed_output=parsed_output,
         validation_result=validation_result,
         prompt_context=prompt_context,
@@ -444,6 +464,16 @@ async def _persist_attempt_result(
                 .returning(ai_decisions.c.id)
             )
             decision_id = result.scalar_one()
+            await _persist_prompt_context_retrieval_records(
+                session,
+                decision_id=decision_id,
+                game_id=game_id,
+                player_id=player_id,
+                ai_profile_id=ai_profile_id,
+                decision_type=request.decision_type,
+                prompt_context=prompt_context,
+                prompt_context_hash=prompt_context_hash,
+            )
             content, self_dialogue_payload = _self_dialogue_content_and_payload(
                 status=status,
                 parsed_output=persisted_parsed_output,
@@ -486,6 +516,125 @@ async def _persist_attempt_result(
         validation_result=validation_result,
         prompt_context_hash=prompt_context_hash,
     )
+
+
+async def _persist_prompt_context_retrieval_records(
+    session: AsyncSession,
+    *,
+    decision_id: UUID,
+    game_id: UUID,
+    player_id: UUID,
+    ai_profile_id: UUID | None,
+    decision_type: str,
+    prompt_context: Mapping[str, Any],
+    prompt_context_hash: str,
+) -> None:
+    records = [
+        *_retrieval_records_from_snippets(
+            snippets=_context_snippets(prompt_context, "memory"),
+            source_type="memory",
+            query_text="prompt_context.memory.snippets",
+            source_path="memory.snippets",
+        ),
+        *_retrieval_records_from_snippets(
+            snippets=_context_snippets(prompt_context, "rules"),
+            source_type="rule",
+            query_text="prompt_context.rules.snippets",
+            source_path="rules.snippets",
+        ),
+    ]
+    if not records:
+        return
+
+    for rank, record in enumerate(records, start=1):
+        await session.execute(
+            retrieval_records.insert().values(
+                game_id=game_id,
+                player_id=player_id,
+                ai_decision_id=decision_id,
+                memory_entry_id=record["memory_entry_id"],
+                query_text=record["query_text"],
+                query_context={
+                    "prompt_context_hash": prompt_context_hash,
+                    "decision_type": decision_type,
+                    "source_path": record["source_path"],
+                },
+                retrieved_context=record["retrieved_context"],
+                source_type=record["source_type"],
+                source_id=record["source_id"],
+                rank=rank,
+                score=record["score"],
+            )
+        )
+
+
+def _context_snippets(prompt_context: Mapping[str, Any], key: str) -> tuple[Mapping[str, Any], ...]:
+    section = prompt_context.get(key)
+    if not isinstance(section, Mapping):
+        return ()
+    snippets = section.get("snippets")
+    if not isinstance(snippets, Sequence) or isinstance(snippets, str | bytes | bytearray):
+        return ()
+    return tuple(dict(snippet) for snippet in snippets if isinstance(snippet, Mapping))
+
+
+def _retrieval_records_from_snippets(
+    *,
+    snippets: Sequence[Mapping[str, Any]],
+    source_type: str,
+    query_text: str,
+    source_path: str,
+) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for index, snippet in enumerate(snippets, start=1):
+        source_id = _snippet_source_id(snippet, fallback=f"{source_type}-{index}")
+        records.append(
+            {
+                "memory_entry_id": _coerce_uuid_or_none(snippet.get("id"))
+                if source_type == "memory"
+                else None,
+                "query_text": query_text,
+                "retrieved_context": _json_safe(dict(snippet)),
+                "source_type": source_type,
+                "source_id": source_id,
+                "source_path": source_path,
+                "score": _snippet_score(snippet),
+            }
+        )
+    return tuple(records)
+
+
+def _snippet_source_id(snippet: Mapping[str, Any], *, fallback: str) -> str:
+    for key in ("id", "source_id", "source"):
+        value = snippet.get(key)
+        if value is not None:
+            text = str(value)
+            if text:
+                return text
+    return fallback
+
+
+def _snippet_score(snippet: Mapping[str, Any]) -> float | None:
+    score = snippet.get("context_score", snippet.get("score"))
+    if isinstance(score, bool):
+        return None
+    if isinstance(score, int | float):
+        return max(0.0, min(1.0, float(score)))
+    importance = snippet.get("importance")
+    if isinstance(importance, bool):
+        return None
+    if isinstance(importance, int | float):
+        return max(0.0, min(1.0, float(importance) / 10.0))
+    return None
+
+
+def _coerce_uuid_or_none(value: object) -> UUID | None:
+    if value is None:
+        return None
+    try:
+        return _coerce_uuid(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _self_dialogue_content_and_payload(
@@ -589,6 +738,25 @@ def _failure_validation_result(reason_code: str, message: str, **details: Any) -
         "substitute_move": None,
         **_json_safe(details),
     }
+
+
+def _with_jsonl_audit_metadata(
+    validation_result: Mapping[str, Any],
+    *,
+    raw_stdout: str,
+    final_assistant_output: str | None,
+    jsonl_event_count: int,
+) -> dict[str, Any]:
+    result = dict(_json_safe(validation_result))
+    result.update(
+        {
+            "raw_output_format": "codex_exec_jsonl",
+            "raw_output_bytes": len(raw_stdout.encode("utf-8")),
+            "jsonl_event_count": jsonl_event_count,
+            "final_assistant_output": final_assistant_output,
+        }
+    )
+    return result
 
 
 def _malformed_error(message: str, field: str | None = None) -> AIDecisionValidationError:

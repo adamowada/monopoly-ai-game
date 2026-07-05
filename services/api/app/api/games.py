@@ -50,6 +50,7 @@ from app.db.metadata import (
     obligations,
     players,
     rejected_actions,
+    retrieval_records,
 )
 from app.db.persistence import (
     AcceptedEventRecord,
@@ -625,6 +626,74 @@ class AIMemoryRecordResponse(BaseModel):
 
 class AIMemoryResponse(BaseModel):
     memory_entries: list[AIMemoryRecordResponse]
+
+
+class AIDecisionRecordResponse(BaseModel):
+    ai_decision_id: UUID
+    game_id: UUID
+    ai_profile_id: UUID | None
+    player_id: UUID
+    decision_type: str
+    status: str
+    phase: str | None
+    state_hash: str | None
+    prompt_context_hash: str | None
+    prompt_context: Mapping[str, Any]
+    legal_actions: list[Mapping[str, Any]]
+    raw_output: str
+    parsed_output: Any | None
+    validation_result: Mapping[str, Any]
+    validation_errors: list[ValidationIssueResponse]
+    memory_entry_ids: list[UUID]
+    retrieval_record_ids: list[UUID]
+    accepted_event_id: UUID | None
+    rejected_action_id: UUID | None
+    created_at: Any
+
+
+class AIDecisionsResponse(BaseModel):
+    decisions: list[AIDecisionRecordResponse]
+
+
+class AIRetrievalRecordResponse(BaseModel):
+    retrieval_record_id: UUID
+    game_id: UUID
+    player_id: UUID | None
+    ai_decision_id: UUID | None
+    ai_profile_id: UUID | None
+    memory_entry_id: UUID | None
+    source_type: str | None
+    source_id: str | None
+    query_text: str
+    query_context: Mapping[str, Any]
+    retrieved_context: Mapping[str, Any]
+    score: float | None
+    content: str
+    created_at: Any
+
+
+class AIRetrievalRecordsResponse(BaseModel):
+    retrieval_records: list[AIRetrievalRecordResponse]
+
+
+class AIRejectedOutputResponse(BaseModel):
+    rejected_output_id: UUID
+    game_id: UUID
+    ai_decision_id: UUID
+    source_ai_decision_id: UUID
+    ai_profile_id: UUID | None
+    player_id: UUID
+    state_hash: str | None
+    status: str
+    raw_output: str
+    parsed_output: Any | None
+    validation_errors: list[ValidationIssueResponse]
+    rejected_action_id: UUID | None
+    created_at: Any
+
+
+class AIRejectedOutputsResponse(BaseModel):
+    rejected_outputs: list[AIRejectedOutputResponse]
 
 
 @router.post("", response_model=GameMetadataResponse, status_code=status.HTTP_201_CREATED)
@@ -2016,6 +2085,101 @@ async def get_ai_memory(game_id: UUID, request: Request) -> AIMemoryResponse:
         rows = [dict(row) for row in result.mappings().all()]
 
     return AIMemoryResponse(memory_entries=[_ai_memory_response(row) for row in rows])
+
+
+@router.get("/{game_id}/ai/decisions", response_model=AIDecisionsResponse)
+async def get_ai_decisions(game_id: UUID, request: Request) -> AIDecisionsResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(ai_decisions)
+            .where(ai_decisions.c.game_id == game_id)
+            .order_by(ai_decisions.c.created_at.desc(), ai_decisions.c.id.desc())
+        )
+        decision_rows = [dict(row) for row in result.mappings().all()]
+        decision_ids = [row["id"] for row in decision_rows]
+        memory_ids_by_decision, retrieval_ids_by_decision = await _ai_decision_link_maps(
+            session,
+            decision_ids=decision_ids,
+        )
+
+    return AIDecisionsResponse(
+        decisions=[
+            _ai_decision_response(
+                row,
+                memory_entry_ids=memory_ids_by_decision.get(row["id"], []),
+                retrieval_record_ids=retrieval_ids_by_decision.get(row["id"], []),
+            )
+            for row in decision_rows
+        ],
+    )
+
+
+@router.get("/{game_id}/ai/retrieval-records", response_model=AIRetrievalRecordsResponse)
+async def get_ai_retrieval_records(
+    game_id: UUID,
+    request: Request,
+) -> AIRetrievalRecordsResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(
+                retrieval_records.c.id.label("retrieval_record_id"),
+                retrieval_records.c.game_id,
+                retrieval_records.c.player_id,
+                retrieval_records.c.ai_decision_id,
+                ai_decisions.c.ai_profile_id,
+                retrieval_records.c.memory_entry_id,
+                retrieval_records.c.source_type,
+                retrieval_records.c.source_id,
+                retrieval_records.c.query_text,
+                retrieval_records.c.query_context,
+                retrieval_records.c.retrieved_context,
+                retrieval_records.c.score,
+                retrieval_records.c.created_at,
+            )
+            .select_from(
+                retrieval_records.outerjoin(
+                    ai_decisions,
+                    ai_decisions.c.id == retrieval_records.c.ai_decision_id,
+                )
+            )
+            .where(retrieval_records.c.game_id == game_id)
+            .order_by(retrieval_records.c.created_at, retrieval_records.c.id)
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+
+    return AIRetrievalRecordsResponse(
+        retrieval_records=[_ai_retrieval_record_response(row) for row in rows],
+    )
+
+
+@router.get("/{game_id}/ai/rejected-outputs", response_model=AIRejectedOutputsResponse)
+async def get_ai_rejected_outputs(
+    game_id: UUID,
+    request: Request,
+) -> AIRejectedOutputsResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(ai_decisions)
+            .where(
+                ai_decisions.c.game_id == game_id,
+                sa.or_(
+                    ai_decisions.c.status.in_(("rejected", "timeout", "process_error")),
+                    ai_decisions.c.rejected_action_id.is_not(None),
+                ),
+            )
+            .order_by(ai_decisions.c.created_at.desc(), ai_decisions.c.id.desc())
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+
+    return AIRejectedOutputsResponse(
+        rejected_outputs=[_ai_rejected_output_response(row) for row in rows],
+    )
 
 
 @router.post(
@@ -5013,6 +5177,150 @@ def _ai_memory_response(row: Mapping[str, Any]) -> AIMemoryRecordResponse:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
+
+
+async def _ai_decision_link_maps(
+    session: AsyncSession,
+    *,
+    decision_ids: Sequence[UUID],
+) -> tuple[dict[UUID, list[UUID]], dict[UUID, list[UUID]]]:
+    memory_ids_by_decision: dict[UUID, list[UUID]] = {decision_id: [] for decision_id in decision_ids}
+    retrieval_ids_by_decision: dict[UUID, list[UUID]] = {decision_id: [] for decision_id in decision_ids}
+    if not decision_ids:
+        return memory_ids_by_decision, retrieval_ids_by_decision
+
+    memory_result = await session.execute(
+        sa.select(ai_memory_entries.c.source_decision_id, ai_memory_entries.c.id)
+        .where(ai_memory_entries.c.source_decision_id.in_(decision_ids))
+        .order_by(ai_memory_entries.c.created_at, ai_memory_entries.c.id)
+    )
+    for source_decision_id, memory_entry_id in memory_result.all():
+        if source_decision_id is not None:
+            _append_unique_uuid(memory_ids_by_decision.setdefault(source_decision_id, []), memory_entry_id)
+
+    retrieval_result = await session.execute(
+        sa.select(
+            retrieval_records.c.ai_decision_id,
+            retrieval_records.c.id,
+            retrieval_records.c.memory_entry_id,
+        )
+        .where(retrieval_records.c.ai_decision_id.in_(decision_ids))
+        .order_by(retrieval_records.c.created_at, retrieval_records.c.id)
+    )
+    for ai_decision_id, retrieval_record_id, memory_entry_id in retrieval_result.all():
+        if ai_decision_id is None:
+            continue
+        _append_unique_uuid(retrieval_ids_by_decision.setdefault(ai_decision_id, []), retrieval_record_id)
+        if memory_entry_id is not None:
+            _append_unique_uuid(memory_ids_by_decision.setdefault(ai_decision_id, []), memory_entry_id)
+
+    return memory_ids_by_decision, retrieval_ids_by_decision
+
+
+def _append_unique_uuid(values: list[UUID], value: UUID) -> None:
+    if value not in values:
+        values.append(value)
+
+
+def _ai_decision_response(
+    row: Mapping[str, Any],
+    *,
+    memory_entry_ids: Sequence[UUID],
+    retrieval_record_ids: Sequence[UUID],
+) -> AIDecisionRecordResponse:
+    prompt_context = _mapping_or_empty(row.get("prompt_context"))
+    validation_result = _mapping_or_empty(row.get("validation_result"))
+    return AIDecisionRecordResponse(
+        ai_decision_id=row["id"],
+        game_id=row["game_id"],
+        ai_profile_id=row["ai_profile_id"],
+        player_id=row["player_id"],
+        decision_type=str(row["decision_type"]),
+        status=str(row["status"]),
+        phase=_string_or_none(row.get("phase")),
+        state_hash=_string_or_none(row.get("state_hash")),
+        prompt_context_hash=_string_or_none(row.get("prompt_context_hash")),
+        prompt_context=prompt_context,
+        legal_actions=_legal_actions_from_prompt_context(prompt_context),
+        raw_output=row["raw_output"] if isinstance(row.get("raw_output"), str) else "",
+        parsed_output=_json_safe(row.get("parsed_output")),
+        validation_result=validation_result,
+        validation_errors=[
+            ValidationIssueResponse.model_validate(error)
+            for error in _ai_decision_validation_errors(row)
+        ],
+        memory_entry_ids=list(memory_entry_ids),
+        retrieval_record_ids=list(retrieval_record_ids),
+        accepted_event_id=row["accepted_event_id"],
+        rejected_action_id=row["rejected_action_id"],
+        created_at=row["created_at"],
+    )
+
+
+def _ai_retrieval_record_response(row: Mapping[str, Any]) -> AIRetrievalRecordResponse:
+    retrieved_context = _mapping_or_empty(row.get("retrieved_context"))
+    query_context = _mapping_or_empty(row.get("query_context"))
+    score = row.get("score")
+    return AIRetrievalRecordResponse(
+        retrieval_record_id=row["retrieval_record_id"],
+        game_id=row["game_id"],
+        player_id=row["player_id"],
+        ai_decision_id=row["ai_decision_id"],
+        ai_profile_id=row["ai_profile_id"],
+        memory_entry_id=row["memory_entry_id"],
+        source_type=_string_or_none(row.get("source_type")),
+        source_id=_string_or_none(row.get("source_id")),
+        query_text=str(row["query_text"]),
+        query_context=query_context,
+        retrieved_context=retrieved_context,
+        score=None if score is None else float(score),
+        content=_retrieved_context_text(retrieved_context),
+        created_at=row["created_at"],
+    )
+
+
+def _ai_rejected_output_response(row: Mapping[str, Any]) -> AIRejectedOutputResponse:
+    return AIRejectedOutputResponse(
+        rejected_output_id=row["id"],
+        game_id=row["game_id"],
+        ai_decision_id=row["id"],
+        source_ai_decision_id=row["id"],
+        ai_profile_id=row["ai_profile_id"],
+        player_id=row["player_id"],
+        state_hash=_string_or_none(row.get("state_hash")),
+        status=str(row["status"]),
+        raw_output=row["raw_output"] if isinstance(row.get("raw_output"), str) else "",
+        parsed_output=_json_safe(row.get("parsed_output")),
+        validation_errors=[
+            ValidationIssueResponse.model_validate(error)
+            for error in _ai_decision_validation_errors(row)
+        ],
+        rejected_action_id=row["rejected_action_id"],
+        created_at=row["created_at"],
+    )
+
+
+def _legal_actions_from_prompt_context(prompt_context: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    legal_actions = prompt_context.get("legal_actions")
+    if not isinstance(legal_actions, Sequence) or isinstance(legal_actions, (str, bytes, bytearray)):
+        return []
+    return [
+        _json_safe_mapping(action)
+        for action in legal_actions
+        if isinstance(action, Mapping)
+    ]
+
+
+def _retrieved_context_text(retrieved_context: Mapping[str, Any]) -> str:
+    for key in ("content", "text", "body"):
+        value = retrieved_context.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return json.dumps(_json_safe(retrieved_context), sort_keys=True, ensure_ascii=True)
+
+
+def _mapping_or_empty(value: object) -> dict[str, Any]:
+    return _json_safe_mapping(value) if isinstance(value, Mapping) else {}
 
 
 def _self_dialogue_payload_status(payload: Mapping[str, Any]) -> str:

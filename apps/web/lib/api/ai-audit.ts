@@ -1,12 +1,22 @@
 import { z } from "zod";
 
-import { LegalActionSchema } from "./gameplay";
-
 export const AiValidationErrorSchema = z.object({
   code: z.string().min(1),
   message: z.string().min(1),
   field: z.string().min(1).nullable().optional(),
 });
+
+export const AiAuditLegalActionSchema = z
+  .object({
+    actor_id: z.string().min(1).optional(),
+    type: z.string().min(1),
+    payload: z.record(z.string(), z.unknown()).default({}),
+    expected_state_hash: z.string().min(1).nullable().optional(),
+    expected_event_sequence: z.number().int().nonnegative().nullable().optional(),
+    description: z.string().nullable().optional(),
+    schema: z.record(z.string(), z.unknown()).optional().default({}),
+  })
+  .passthrough();
 
 export const AiProfileSchema = z.object({
   ai_profile_id: z.string().min(1),
@@ -23,17 +33,23 @@ export const AiProfileSchema = z.object({
 export const AiDecisionSchema = z.object({
   ai_decision_id: z.string().min(1),
   game_id: z.string().min(1),
-  ai_profile_id: z.string().min(1),
+  ai_profile_id: z.string().min(1).nullable(),
   player_id: z.string().min(1),
-  state_hash: z.string().min(1),
-  legal_actions: z.array(LegalActionSchema),
+  decision_type: z.string().min(1),
+  status: z.string().min(1),
+  phase: z.string().min(1).nullable(),
+  state_hash: z.string().min(1).nullable(),
+  prompt_context_hash: z.string().min(1).nullable(),
+  legal_actions: z.array(AiAuditLegalActionSchema),
   prompt_context: z.record(z.string(), z.unknown()),
-  raw_output: z.string().min(1),
-  parsed_output: z.record(z.string(), z.unknown()),
+  raw_output: z.string(),
+  parsed_output: z.unknown().nullable(),
+  validation_result: z.record(z.string(), z.unknown()),
   validation_errors: z.array(AiValidationErrorSchema),
   memory_entry_ids: z.array(z.string().min(1)),
   retrieval_record_ids: z.array(z.string().min(1)),
-  status: z.enum(["accepted", "rejected"]),
+  accepted_event_id: z.string().min(1).nullable(),
+  rejected_action_id: z.string().min(1).nullable(),
   created_at: z.coerce.string().min(1),
 });
 
@@ -75,12 +91,16 @@ export const AiMemoryEntrySchema = z.object({
 export const AiRetrievalRecordSchema = z.object({
   retrieval_record_id: z.string().min(1),
   game_id: z.string().min(1),
-  ai_decision_id: z.string().min(1),
-  ai_profile_id: z.string().min(1),
-  memory_entry_id: z.string().min(1).nullable().optional(),
-  source_type: z.string().min(1),
-  source_id: z.string().min(1),
-  score: z.number().min(0).max(1),
+  player_id: z.string().min(1).nullable(),
+  ai_decision_id: z.string().min(1).nullable(),
+  ai_profile_id: z.string().min(1).nullable(),
+  memory_entry_id: z.string().min(1).nullable(),
+  source_type: z.string().min(1).nullable(),
+  source_id: z.string().min(1).nullable(),
+  query_text: z.string().min(1),
+  query_context: z.record(z.string(), z.unknown()),
+  retrieved_context: z.record(z.string(), z.unknown()),
+  score: z.number().min(0).max(1).nullable(),
   content: z.string().min(1),
   created_at: z.coerce.string().min(1),
 });
@@ -88,13 +108,16 @@ export const AiRetrievalRecordSchema = z.object({
 export const AiRejectedOutputSchema = z.object({
   rejected_output_id: z.string().min(1),
   game_id: z.string().min(1),
-  ai_decision_id: z.string().min(1).nullable(),
-  ai_profile_id: z.string().min(1),
+  ai_decision_id: z.string().min(1),
+  source_ai_decision_id: z.string().min(1),
+  ai_profile_id: z.string().min(1).nullable(),
   player_id: z.string().min(1),
-  state_hash: z.string().min(1),
-  raw_output: z.string().min(1),
-  parsed_output: z.record(z.string(), z.unknown()).nullable(),
-  validation_errors: z.array(AiValidationErrorSchema).min(1),
+  state_hash: z.string().min(1).nullable(),
+  status: z.string().min(1),
+  raw_output: z.string(),
+  parsed_output: z.unknown().nullable(),
+  validation_errors: z.array(AiValidationErrorSchema),
+  rejected_action_id: z.string().min(1).nullable(),
   created_at: z.coerce.string().min(1),
 });
 
@@ -123,6 +146,7 @@ export const AiRejectedOutputsResponseSchema = z.object({
 });
 
 export type AiValidationError = z.infer<typeof AiValidationErrorSchema>;
+export type AiAuditLegalAction = z.infer<typeof AiAuditLegalActionSchema>;
 export type AiProfile = z.infer<typeof AiProfileSchema>;
 export type AiDecision = z.infer<typeof AiDecisionSchema>;
 export type AiSelfDialogueRecord = z.infer<typeof AiSelfDialogueRecordSchema>;

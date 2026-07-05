@@ -521,7 +521,9 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
         assert rows[0]["state_hash"] == fixture.state.state_hash()
         assert rows[0]["prompt_context"]["caller_context"] == "stage 7.3 fake subprocess request"
         assert rows[0]["prompt_context_hash"] == result.prompt_context_hash
-        assert rows[0]["raw_output"] == json.dumps(valid_action_output(fixture.state))
+        assert "session_configured" in rows[0]["raw_output"]
+        assert "item_completed" in rows[0]["raw_output"]
+        assert rows[0]["raw_output"] != json.dumps(valid_action_output(fixture.state))
         assert rows[0]["parsed_output"]["action"]["type"] == "ROLL_DICE"
         assert rows[0]["validation_result"]["status"] == "valid"
         assert rows[0]["accepted_event_id"] is None
@@ -733,7 +735,9 @@ async def test_malformed_process_output_is_rejected_without_mutating_game_state(
         assert result.validation_result["no_substitute_move"] is True
         assert result.validation_result["substitute_move"] is None
         assert rows[0]["status"] == "rejected"
-        assert rows[0]["raw_output"] == json.dumps(runner.final_output)
+        assert "session_configured" in rows[0]["raw_output"]
+        assert "item_completed" in rows[0]["raw_output"]
+        assert rows[0]["raw_output"] != json.dumps(runner.final_output)
         assert rows[0]["parsed_output"]["action"]["type"] == "ROLL_DICE"
         assert rows[0]["validation_result"]["reason_code"] == "malformed_ai_output"
         assert rows[0]["accepted_event_id"] is None
@@ -769,7 +773,9 @@ async def test_non_object_malformed_ai_output_preserves_decoded_value_without_ev
         assert result.rejected_action_id is None
         assert len(rows) == 1
         assert rows[0]["status"] == "rejected"
-        assert rows[0]["raw_output"] == json.dumps(decoded_value)
+        assert "session_configured" in rows[0]["raw_output"]
+        assert "item_completed" in rows[0]["raw_output"]
+        assert rows[0]["raw_output"] != json.dumps(decoded_value)
         assert rows[0]["parsed_output"] == decoded_value
         assert rows[0]["validation_result"]["reason_code"] == "malformed_ai_output"
         assert rows[0]["accepted_event_id"] is None
