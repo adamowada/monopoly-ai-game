@@ -716,6 +716,16 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       queryClient.invalidateQueries({ queryKey: ["deals", gameId] }),
     ]);
 
+  const invalidateAiAuditData = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["ai-profiles", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-decisions", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-self-dialogue", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-memory", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-retrieval-records", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-rejected-outputs", gameId] }),
+    ]);
+
   const aiStep = useMutation({
     mutationFn: ({ mode, playerId }: AiStepRequest) =>
       submitAiStep({
@@ -736,7 +746,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       if (result.accepted_events.length > 0) {
         setAcceptedEvents(result.accepted_events);
       }
-      void invalidateGameplayData();
+      void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
     },
   });
 

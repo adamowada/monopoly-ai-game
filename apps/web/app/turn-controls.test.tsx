@@ -148,6 +148,24 @@ function rejectedActionsFixture(records: Array<Record<string, unknown>> = []) {
   return { rejected_actions: records };
 }
 
+const aiAuditResponses = [
+  { path: "/ai/profiles", payload: { profiles: [] } },
+  { path: "/ai/decisions", payload: { decisions: [] } },
+  { path: "/ai/self-dialogue", payload: { self_dialogue: [] } },
+  { path: "/ai/memory", payload: { memory_entries: [] } },
+  { path: "/ai/retrieval-records", payload: { retrieval_records: [] } },
+  { path: "/ai/rejected-outputs", payload: { rejected_outputs: [] } },
+];
+
+function aiAuditUrl(path: string): string {
+  return `${apiBaseUrl}/games/${gameId}${path}`;
+}
+
+function aiAuditFetchCount(fetchMock: FetchMock, path: string): number {
+  const url = aiAuditUrl(path);
+  return fetchMock.mock.calls.filter(([input]) => String(input) === url).length;
+}
+
 function acceptedRollResponse() {
   return {
     status: "accepted",
@@ -600,6 +618,80 @@ describe("GamePlaySurface turn controls", () => {
       mandatory: true,
       request_context: { mode: "manual" },
     });
+  });
+
+  it("refetches AI audit records after a successful Manual AI step", async () => {
+    let resolveAiStep: (response: Response) => void = () => {};
+    const fetchMock = vi.fn<typeof fetch>((input, init) => {
+      const url = String(input);
+      const aiAuditResponse = aiAuditResponses.find((response) => url === aiAuditUrl(response.path));
+      if (aiAuditResponse) {
+        return jsonResponse(aiAuditResponse.payload);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return jsonResponse(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return jsonResponse(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return jsonResponse({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return jsonResponse(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return jsonResponse(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          resolveAiStep = resolve;
+        });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    for (const response of aiAuditResponses) {
+      await waitFor(() => expect(aiAuditFetchCount(fetchMock, response.path)).toBe(1));
+    }
+
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
+
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI thinking"));
+    for (const response of aiAuditResponses) {
+      expect(aiAuditFetchCount(fetchMock, response.path)).toBe(1);
+    }
+
+    resolveAiStep(Response.json(aiStepResponse("done")));
+
+    await waitFor(() => {
+      for (const response of aiAuditResponses) {
+        expect(aiAuditFetchCount(fetchMock, response.path)).toBe(2);
+      }
+    });
+
+    const aiStepCallIndex = fetchMock.mock.calls.findIndex(
+      ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+    );
+    for (const response of aiAuditResponses) {
+      let refetchCallIndex = -1;
+      fetchMock.mock.calls.forEach(([url], index) => {
+        if (String(url) === aiAuditUrl(response.path)) {
+          refetchCallIndex = index;
+        }
+      });
+      expect(refetchCallIndex).toBeGreaterThan(aiStepCallIndex);
+    }
   });
 
   it("Manual AI step waits for loaded turn state", async () => {
