@@ -87,7 +87,7 @@ function renderPanel(fetchMock: FetchMock) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   }
 
-  render(<NegotiationPanel apiBaseUrl={apiBaseUrl} game={gameFixture()} gameId={gameId} />, {
+  return render(<NegotiationPanel apiBaseUrl={apiBaseUrl} game={gameFixture()} gameId={gameId} />, {
     wrapper: Wrapper,
   });
 }
@@ -100,7 +100,7 @@ function negotiationFixture(patch: Partial<Negotiation> = {}): Negotiation {
     participant_player_ids: [adaId, graceId],
     topic: "Railroad package",
     context: "Ada wants a rail trade.",
-    status: "open",
+    status: "opened",
     round_number: 1,
     created_at: createdAt,
     updated_at: createdAt,
@@ -161,6 +161,7 @@ function createNegotiationFetchMock({
     negotiations: [...negotiations],
     deals: [...deals],
     messages: { ...messages },
+    aiSteps: [] as Array<Record<string, unknown>>,
   };
   let negotiationCounter = state.negotiations.length;
   let dealCounter = state.deals.length;
@@ -183,7 +184,7 @@ function createNegotiationFetchMock({
         participant_player_ids: body.participant_player_ids,
         topic: body.topic,
         context: body.context,
-        status: "open",
+        status: "opened",
         round_number: 1,
         created_at: createdAt,
         updated_at: createdAt,
@@ -193,7 +194,7 @@ function createNegotiationFetchMock({
       return Response.json({ status: "ok", negotiation });
     }
 
-    const messagesMatch = url.match(new RegExp(`${apiBaseUrl}/games/${gameId}/negotiations/([^/]+)/messages$`));
+    const messagesMatch = url.match(new RegExp(`${apiBaseUrl}/games/${gameId}/negotiations/([^/]+)/messages(?:\\?.*)?$`));
     if (messagesMatch && method === "GET") {
       return Response.json({ messages: state.messages[messagesMatch[1]] ?? [] });
     }
@@ -235,6 +236,32 @@ function createNegotiationFetchMock({
       return Response.json({ status: "ok", deal });
     }
 
+    if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && method === "POST") {
+      state.aiSteps.push(body);
+      if (body.decision_type === "open_negotiation") {
+        const negotiation: Negotiation = {
+          id: `neg-${++negotiationCounter}`,
+          game_id: gameId,
+          opened_by_player_id: body.player_id,
+          participant_player_ids: [body.player_id, adaId],
+          topic: "AI-opened negotiation",
+          context: "Linus starts a negotiation.",
+          status: "opened",
+          round_number: 1,
+          created_at: createdAt,
+          updated_at: createdAt,
+        };
+        state.negotiations.unshift(negotiation);
+        state.messages[negotiation.id] = [];
+        return Response.json({
+          ...aiStepResponse({ ...body, negotiation_id: negotiation.id }),
+          negotiation_id: negotiation.id,
+          negotiation,
+        });
+      }
+      return Response.json(aiStepResponse(body));
+    }
+
     const acceptMatch = url.match(new RegExp(`${apiBaseUrl}/games/${gameId}/deals/([^/]+)/accept$`));
     if (acceptMatch && method === "POST") {
       state.deals = state.deals.map((deal) =>
@@ -268,6 +295,26 @@ function createNegotiationFetchMock({
   });
 
   return { fetchMock, state };
+}
+
+function aiStepResponse(body: Record<string, unknown>) {
+  return {
+    status: "done",
+    game_id: gameId,
+    player_id: body.player_id,
+    decision_type: body.decision_type,
+    negotiation_id: body.negotiation_id ?? null,
+    ai_decision_id: `ai-${String(body.decision_type)}`,
+    accepted_events: [],
+    accepted_event_id: null,
+    rejected_action_id: null,
+    game_status: "active",
+    consumed_response_opportunity: false,
+    consumed_negotiation_opportunity: null,
+    outcome: { kind: body.decision_type, status: "done" },
+    reason_code: null,
+    validation_errors: [],
+  };
 }
 
 afterEach(() => {
@@ -368,35 +415,228 @@ describe("NegotiationPanel", () => {
     expect(within(counterDeal).queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
   });
 
-  it("shows rejected and expired records as closed and removes executable controls", async () => {
-    const rejectNegotiation = negotiationFixture({ id: "neg-reject", topic: "Reject test" });
-    const expireNegotiation = negotiationFixture({ id: "neg-expire", topic: "Expire test" });
-    const { fetchMock } = createNegotiationFetchMock({
-      negotiations: [rejectNegotiation, expireNegotiation],
-      deals: [
-        dealFixture({ id: "deal-reject", negotiation_id: "neg-reject" }),
-        dealFixture({ id: "deal-expire", negotiation_id: "neg-expire" }),
-      ],
-      messages: {
-        "neg-reject": [],
-        "neg-expire": [],
-      },
+  it("lets AI open a negotiation without selected thread id", async () => {
+    const { fetchMock, state } = createNegotiationFetchMock();
+    renderPanel(fetchMock);
+
+    expect(await screen.findByRole("region", { name: "Negotiation thread" })).toHaveTextContent(
+      "No negotiation selected",
+    );
+
+    const aiOpenControls = screen.getByRole("region", { name: "AI open negotiation controls" });
+    expect(aiOpenControls).toHaveTextContent("Linus");
+    fireEvent.click(within(aiOpenControls).getByRole("button", { name: "Ask AI open negotiation" }));
+
+    await waitFor(() => expect(state.aiSteps.length).toBe(1));
+    expect(state.aiSteps[0]).toMatchObject({
+      player_id: linusId,
+      decision_type: "open_negotiation",
+      mandatory: false,
+    });
+    expect(state.aiSteps[0]).not.toHaveProperty("negotiation_id");
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("AI-opened negotiation"),
+    );
+  });
+
+  it("adds AI participation in negotiation windows message and offer controls", async () => {
+    // AI participation in negotiation windows; AI ability to propose complex deals
+    const negotiation = negotiationFixture({
+      participant_player_ids: [adaId, linusId],
+      topic: "AI railroad package",
+    });
+    const { fetchMock, state } = createNegotiationFetchMock({
+      negotiations: [negotiation],
+      messages: { [negotiation.id]: [messageFixture()] },
     });
     renderPanel(fetchMock);
 
-    const dealToReject = await screen.findByRole("region", { name: "Deal v1" });
-    fireEvent.click(within(dealToReject).getByRole("button", { name: "Reject" }));
+    const aiControls = await screen.findByRole("region", { name: "AI negotiation controls" });
+    expect(aiControls).toHaveTextContent("Linus");
+    fireEvent.click(within(aiControls).getByRole("button", { name: "Ask AI message" }));
+    fireEvent.click(within(aiControls).getByRole("button", { name: "Ask AI offer" }));
 
-    await waitFor(() => expect(dealToReject).toHaveTextContent("Rejected"));
-    expect(within(dealToReject).queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
-    expect(within(dealToReject).queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    await waitFor(() => expect(state.aiSteps.length).toBe(2));
+    expect(state.aiSteps).toEqual([
+      expect.objectContaining({
+        player_id: linusId,
+        decision_type: "negotiation_message",
+        negotiation_id: "neg-1",
+        mandatory: false,
+      }),
+      expect.objectContaining({
+        player_id: linusId,
+        decision_type: "deal_proposal",
+        negotiation_id: "neg-1",
+        mandatory: false,
+      }),
+    ]);
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: /Expire test/ }));
-    await waitFor(() => expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("Expire test"));
-    fireEvent.click(screen.getByRole("button", { name: "Expire negotiation" }));
+  it("AI negotiation controls stay enabled for backend active statuses", async () => {
+    const activeStatuses = ["opened", "active", "countered"] as const;
 
-    await waitFor(() => expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("Expired"));
-    expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("visibly closed");
-    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    for (const status of activeStatuses) {
+      const noDealNegotiation = negotiationFixture({
+        id: `neg-${status}-no-deal`,
+        participant_player_ids: [adaId, linusId],
+        status,
+        topic: `${status} AI no deal`,
+      });
+      const noDealMock = createNegotiationFetchMock({
+        negotiations: [noDealNegotiation],
+        messages: { [noDealNegotiation.id]: [messageFixture({ negotiation_id: noDealNegotiation.id })] },
+      });
+      const noDealRender = renderPanel(noDealMock.fetchMock);
+
+      const noDealControls = await screen.findByRole("region", { name: "AI negotiation controls" });
+      expect(within(noDealControls).getByRole("button", { name: "Ask AI message" })).toBeEnabled();
+      expect(within(noDealControls).getByRole("button", { name: "Ask AI offer" })).toBeEnabled();
+      expect(within(noDealControls).getByRole("button", { name: "Ask AI counteroffer" })).toBeDisabled();
+      expect(within(noDealControls).getByRole("button", { name: "Ask AI accept/reject" })).toBeDisabled();
+
+      fireEvent.click(within(noDealControls).getByRole("button", { name: "Ask AI message" }));
+      fireEvent.click(within(noDealControls).getByRole("button", { name: "Ask AI offer" }));
+      await waitFor(() => expect(noDealMock.state.aiSteps.length).toBe(2));
+      expect(noDealMock.state.aiSteps).toEqual([
+        expect.objectContaining({ decision_type: "negotiation_message", negotiation_id: noDealNegotiation.id }),
+        expect.objectContaining({ decision_type: "deal_proposal", negotiation_id: noDealNegotiation.id }),
+      ]);
+
+      noDealRender.unmount();
+      vi.unstubAllGlobals();
+
+      const proposalNegotiation = negotiationFixture({
+        id: `neg-${status}-proposal`,
+        participant_player_ids: [adaId, linusId],
+        status,
+        topic: `${status} AI proposal`,
+      });
+      const proposedDeal = dealFixture({
+        id: `deal-${status}`,
+        negotiation_id: proposalNegotiation.id,
+        participant_player_ids: [adaId, linusId],
+        proposer_player_id: adaId,
+      });
+      const proposalMock = createNegotiationFetchMock({
+        negotiations: [proposalNegotiation],
+        deals: [proposedDeal],
+        messages: { [proposalNegotiation.id]: [messageFixture({ negotiation_id: proposalNegotiation.id })] },
+      });
+      const proposalRender = renderPanel(proposalMock.fetchMock);
+
+      const proposalControls = await screen.findByRole("region", { name: "AI negotiation controls" });
+      expect(within(proposalControls).getByRole("button", { name: "Ask AI message" })).toBeEnabled();
+      expect(within(proposalControls).getByRole("button", { name: "Ask AI offer" })).toBeDisabled();
+      expect(within(proposalControls).getByRole("button", { name: "Ask AI counteroffer" })).toBeEnabled();
+      expect(within(proposalControls).getByRole("button", { name: "Ask AI accept/reject" })).toBeEnabled();
+
+      fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI message" }));
+      fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI offer" }));
+      fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI counteroffer" }));
+      fireEvent.click(within(proposalControls).getByRole("button", { name: "Ask AI accept/reject" }));
+      await waitFor(() => expect(proposalMock.state.aiSteps.length).toBe(3));
+      expect(proposalMock.state.aiSteps).toEqual([
+        expect.objectContaining({ decision_type: "negotiation_message", negotiation_id: proposalNegotiation.id }),
+        expect.objectContaining({ decision_type: "counteroffer", negotiation_id: proposalNegotiation.id }),
+        expect.objectContaining({ decision_type: "accept_reject", negotiation_id: proposalNegotiation.id }),
+      ]);
+      expect(proposalMock.state.aiSteps).not.toContainEqual(
+        expect.objectContaining({ decision_type: "deal_proposal", negotiation_id: proposalNegotiation.id }),
+      );
+
+      proposalRender.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("adds AI response to offers counteroffer and accept reject controls", async () => {
+    // AI response to offers
+    const negotiation = negotiationFixture({
+      participant_player_ids: [adaId, linusId],
+      topic: "AI response request",
+    });
+    const deal = dealFixture({
+      participant_player_ids: [adaId, linusId],
+      proposer_player_id: adaId,
+    });
+    const { fetchMock, state } = createNegotiationFetchMock({
+      negotiations: [negotiation],
+      deals: [deal],
+      messages: { [negotiation.id]: [messageFixture()] },
+    });
+    renderPanel(fetchMock);
+
+    const aiControls = await screen.findByRole("region", { name: "AI negotiation controls" });
+    fireEvent.click(within(aiControls).getByRole("button", { name: "Ask AI counteroffer" }));
+    fireEvent.click(within(aiControls).getByRole("button", { name: "Ask AI accept/reject" }));
+
+    await waitFor(() => expect(state.aiSteps.length).toBe(2));
+    expect(state.aiSteps).toEqual([
+      expect.objectContaining({
+        player_id: linusId,
+        decision_type: "counteroffer",
+        negotiation_id: "neg-1",
+        mandatory: false,
+      }),
+      expect.objectContaining({
+        player_id: linusId,
+        decision_type: "accept_reject",
+        negotiation_id: "neg-1",
+        mandatory: false,
+      }),
+    ]);
+  });
+
+  it("shows backend terminal negotiation records as closed and removes executable controls", async () => {
+    const terminalStatuses = ["accepted", "rejected", "expired", "executed"] as const;
+    const terminalNegotiations = terminalStatuses.map((status) =>
+      negotiationFixture({
+        id: `neg-${status}`,
+        participant_player_ids: [adaId, linusId],
+        status,
+        topic: `${status} terminal test`,
+      }),
+    );
+    const { fetchMock } = createNegotiationFetchMock({
+      negotiations: terminalNegotiations,
+      deals: terminalStatuses.map((status) =>
+        dealFixture({
+          id: `deal-${status}`,
+          negotiation_id: `neg-${status}`,
+          participant_player_ids: [adaId, linusId],
+          proposer_player_id: adaId,
+        }),
+      ),
+      messages: Object.fromEntries(terminalStatuses.map((status) => [`neg-${status}`, []])),
+    });
+    renderPanel(fetchMock);
+
+    await screen.findByRole("button", { name: /accepted terminal test/i });
+
+    for (const status of terminalStatuses) {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`${status} terminal test`, "i") }));
+      const thread = await screen.findByRole("region", { name: "Negotiation thread" });
+      await waitFor(() => expect(thread).toHaveTextContent(`${status} terminal test`));
+      expect(thread).toHaveTextContent(status);
+
+      const aiControls = within(thread).getByRole("region", { name: "AI negotiation controls" });
+      expect(within(aiControls).getByRole("button", { name: "Ask AI message" })).toBeDisabled();
+      expect(within(aiControls).getByRole("button", { name: "Ask AI offer" })).toBeDisabled();
+      expect(within(aiControls).getByRole("button", { name: "Ask AI counteroffer" })).toBeDisabled();
+      expect(within(aiControls).getByRole("button", { name: "Ask AI accept/reject" })).toBeDisabled();
+
+      fireEvent.change(screen.getByLabelText("Freeform message"), {
+        target: { value: `Blocked message for ${status}.` },
+      });
+      expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Add sample complex instruments" })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Expire negotiation" })).not.toBeInTheDocument();
+
+      const deal = within(thread).getByRole("region", { name: "Deal v1" });
+      expect(within(deal).queryByRole("button", { name: "Counteroffer" })).not.toBeInTheDocument();
+      expect(within(deal).queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+      expect(within(deal).queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    }
   });
 });

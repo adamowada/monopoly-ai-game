@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const NegotiationStatusSchema = z.enum(["open", "closed", "expired"]);
+export const NegotiationStatusSchema = z.enum(["opened", "active", "countered", "accepted", "rejected", "expired", "executed"]);
 export const DealStatusSchema = z.enum(["proposed", "accepted", "rejected", "expired"]);
 export const DealTermKindSchema = z.enum([
   "cash_transfer",
@@ -146,6 +146,7 @@ export type CreateDealInput = {
 
 type NegotiationScopedOptions = GameApiOptions & {
   negotiationId: string;
+  viewerPlayerId?: string | null;
 };
 
 type DealScopedOptions = GameApiOptions & {
@@ -230,11 +231,13 @@ export async function createNegotiation({
 export async function readNegotiationMessages({
   gameId,
   negotiationId,
+  viewerPlayerId = null,
   baseUrl = getDefaultBackendBaseUrl(),
   fetcher = fetch,
 }: NegotiationScopedOptions): Promise<NegotiationMessage[]> {
+  const query = viewerPlayerId ? `?viewer_player_id=${encodeURIComponent(viewerPlayerId)}` : "";
   const response = await fetcher(
-    gameUrl(baseUrl, gameId, `/negotiations/${encodeURIComponent(negotiationId)}/messages`),
+    gameUrl(baseUrl, gameId, `/negotiations/${encodeURIComponent(negotiationId)}/messages${query}`),
     {
       cache: "no-store",
       headers: { accept: "application/json" },

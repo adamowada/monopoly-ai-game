@@ -45,18 +45,6 @@ def check_required_files() -> None:
 
 def check_no_future_stage_artifacts() -> None:
     future_stage_artifacts = {
-        "apps/web/app/game": "Phase 5 frontend game surface",
-        "apps/web/app/games": "Phase 5 frontend game surface",
-        "apps/web/components/board": "Phase 5 frontend board surface",
-        "apps/web/components/game": "Phase 5 frontend game surface",
-        "apps/web/lib/game": "Phase 5 frontend game client",
-        "services/api/app/contracts": "Phase 6 contracts",
-        "services/api/app/deals": "Phase 6 deal primitives",
-        "services/api/app/negotiations": "Phase 6 negotiations",
-        "apps/web/components/contracts": "Phase 6 frontend contract surface",
-        "apps/web/components/negotiations": "Phase 6 frontend negotiation surface",
-        "services/api/app/ai": "Phase 7 AI runtime",
-        "apps/web/components/ai": "Phase 7 frontend AI surface",
         "services/api/app/memory": "Phase 8 AI memory",
         "apps/web/components/ai-audit": "Phase 8 frontend AI audit surface",
         "services/api/app/rag": "Phase 9 RAG",
@@ -82,6 +70,11 @@ def check_compose_contract() -> None:
         "DATABASE_URL",
         "INTERNAL_API_BASE_URL",
         "NEXT_PUBLIC_API_BASE_URL",
+        "CODEX_HOME",
+        "CODEX_AI_EXECUTABLE",
+        "CODEX_HOST_HOME",
+        "codex-auth",
+        "/root/.codex",
     ]:
         require(marker in compose, f"docker-compose.yml missing marker: {marker}")
 
@@ -95,6 +88,8 @@ def check_env_contract() -> None:
         "DATABASE_URL",
         "NEXT_PUBLIC_API_BASE_URL",
         "INTERNAL_API_BASE_URL",
+        "CODEX_HOST_HOME",
+        "CODEX_AI_EXECUTABLE",
     ]:
         require(key in env_values, f".env.example missing {key}")
     require(
@@ -109,6 +104,14 @@ def check_env_contract() -> None:
         env_values["NEXT_PUBLIC_API_BASE_URL"] == "http://localhost:8000",
         "NEXT_PUBLIC_API_BASE_URL must use the browser-facing local API URL",
     )
+    require(
+        env_values["CODEX_HOST_HOME"] == "C:/Users/adams/.codex",
+        "CODEX_HOST_HOME must document this machine's host Codex auth directory",
+    )
+    require(
+        env_values["CODEX_AI_EXECUTABLE"] == "codex",
+        "CODEX_AI_EXECUTABLE must default to the packaged codex executable",
+    )
 
 
 def check_dockerfiles() -> None:
@@ -117,6 +120,15 @@ def check_dockerfiles() -> None:
         "python:3.14.6-slim" in api_dockerfile,
         "services/api/Dockerfile must use python:3.14.6-slim",
     )
+    for marker in [
+        "NODE_MAJOR=24",
+        "CODEX_CLI_VERSION=0.133.0",
+        "nodejs",
+        "@openai/codex@${CODEX_CLI_VERSION}",
+        "codex --version",
+        "CODEX_HOME=/root/.codex",
+    ]:
+        require(marker in api_dockerfile, f"services/api/Dockerfile missing Codex marker: {marker}")
     require("uv sync" in api_dockerfile, "services/api/Dockerfile must install with uv")
     require("app.main:app" in api_dockerfile, "services/api/Dockerfile must start the FastAPI app")
 
@@ -156,6 +168,27 @@ def check_compose_config_if_available() -> None:
     services = config.get("services", {})
     for service in ["postgres", "api", "web"]:
         require(service in services, f"compose config missing service: {service}")
+    api_service = services["api"]
+    api_environment = api_service.get("environment", {})
+    require(
+        api_environment.get("CODEX_HOME") == "/root/.codex",
+        "compose config API service must set CODEX_HOME=/root/.codex",
+    )
+    require(
+        api_environment.get("CODEX_AI_EXECUTABLE") == "codex",
+        "compose config API service must default CODEX_AI_EXECUTABLE=codex",
+    )
+    api_volumes = api_service.get("volumes", [])
+    require(
+        any(
+            isinstance(volume, dict)
+            and volume.get("type") == "bind"
+            and volume.get("target") == "/root/.codex"
+            and volume.get("read_only") is True
+            for volume in api_volumes
+        ),
+        "compose config API service must bind-mount Codex auth to /root/.codex read-only",
+    )
     volumes = config.get("volumes", {})
     require(
         "monopoly-postgres-data" in volumes,

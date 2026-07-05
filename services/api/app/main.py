@@ -16,6 +16,7 @@ from starlette.requests import Request
 
 from app.api.games import _missing_idempotency_key_payload, router as games_router
 from app.core.config import Settings
+from app.core.codex_runtime import codex_runtime_required, verify_codex_runtime
 from app.core.logging import configure_logging
 from app.db.session import create_database_engine, create_session_factory
 
@@ -42,6 +43,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings = resolved_settings
         app.state.database_engine = engine
         app.state.database_session_factory = session_factory
+        if codex_runtime_required(resolved_settings):
+            codex_runtime = verify_codex_runtime(resolved_settings)
+            app.state.codex_runtime = codex_runtime
+            app.state.codex_ai_executable = codex_runtime.executable
+            app.state.codex_home = codex_runtime.codex_home
         LOGGER.info("api startup complete")
         try:
             yield
@@ -58,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved_settings
     app.state.database_engine = engine
     app.state.database_session_factory = session_factory
+    app.state.codex_ai_executable = resolved_settings.codex_ai_executable
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_settings.cors_origin_list,

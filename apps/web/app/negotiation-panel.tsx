@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeDollarSign,
+  Bot,
   CheckCircle2,
   Clock3,
   FileText,
@@ -17,6 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../components/ui/button";
+import { submitAiStep, type AiDecisionType, type AiStepResponse } from "../lib/api/gameplay";
 import {
   acceptDeal,
   createDeal,
@@ -55,6 +57,17 @@ type TermDraft = {
   summary: string;
 };
 
+type NegotiationWithCurrentDealId = Negotiation & {
+  current_deal_id?: string | null;
+};
+
+type AiNegotiationStepRequest = {
+  decisionType: AiDecisionType;
+  playerId: string;
+  negotiationId?: string | null;
+  selectedDealId?: string | null;
+};
+
 const termKinds: DealTermKind[] = [
   "cash_transfer",
   "property_transfer",
@@ -77,6 +90,10 @@ function playerNames(game: GameMetadata, playerIds: string[]): string {
 
 function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function isActiveNegotiationWindow(status: Negotiation["status"] | null | undefined): boolean {
+  return status === "opened" || status === "active" || status === "countered";
 }
 
 function readString(value: unknown): string | null {
@@ -264,6 +281,18 @@ function isRejectedMutation(
   return result.status === "rejected";
 }
 
+function negotiationIdFromAiStepResponse(result: AiStepResponse): string | null {
+  const responseNegotiationId = readString(result.negotiation_id);
+  if (responseNegotiationId) {
+    return responseNegotiationId;
+  }
+
+  if (result.negotiation && typeof result.negotiation === "object" && !Array.isArray(result.negotiation)) {
+    return readString((result.negotiation as Record<string, unknown>).id);
+  }
+  return null;
+}
+
 export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelProps) {
   const queryClient = useQueryClient();
   const [selectedNegotiationId, setSelectedNegotiationId] = useState<string | null>(null);
@@ -281,6 +310,11 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   const [draftTerms, setDraftTerms] = useState<DealTerm[]>([]);
   const [termDraft, setTermDraft] = useState(() => defaultTermDraft(game, participantPlayerIds));
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [selectedAiPlayerId, setSelectedAiPlayerId] = useState("");
+  const [selectedOpenAiPlayerId, setSelectedOpenAiPlayerId] = useState(
+    () => game.players.find((player) => player.controller_type === "ai")?.id ?? "",
+  );
+  const [aiNegotiationResult, setAiNegotiationResult] = useState<AiStepResponse | null>(null);
 
   const negotiationsQuery = useQuery({
     queryKey: ["negotiations", gameId],
@@ -292,9 +326,16 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   });
 
   const negotiations = useMemo(() => sortNegotiations(negotiationsQuery.data ?? []), [negotiationsQuery.data]);
+  const aiPlayerIds = useMemo(
+    () => game.players.filter((player) => player.controller_type === "ai").map((player) => player.id),
+    [game.players],
+  );
   const selectedNegotiation = selectedNegotiationId
     ? negotiations.find((negotiation) => negotiation.id === selectedNegotiationId) ?? null
     : negotiations[0] ?? null;
+  const messageViewerPlayerId = selectedNegotiation?.participant_player_ids.includes(messageAuthorId)
+    ? messageAuthorId
+    : selectedNegotiation?.participant_player_ids[0] ?? "";
 
   useEffect(() => {
     if (!selectedNegotiationId && negotiations[0]) {
@@ -315,6 +356,23 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   }, [negotiations, negotiationsQuery.isFetching, selectedNegotiationId]);
 
   useEffect(() => {
+    const participantIds = selectedNegotiation?.participant_player_ids ?? [];
+    if (participantIds.length > 0 && !participantIds.includes(messageAuthorId)) {
+      setMessageAuthorId(participantIds[0] ?? "");
+    }
+  }, [messageAuthorId, selectedNegotiation?.participant_player_ids]);
+
+  useEffect(() => {
+    if (aiPlayerIds.length === 0) {
+      setSelectedOpenAiPlayerId("");
+      return;
+    }
+    if (!aiPlayerIds.includes(selectedOpenAiPlayerId)) {
+      setSelectedOpenAiPlayerId(aiPlayerIds[0] ?? "");
+    }
+  }, [aiPlayerIds, selectedOpenAiPlayerId]);
+
+  useEffect(() => {
     const nextParticipants = selectedNegotiation?.participant_player_ids ?? participantPlayerIds;
     setTermDraft((current) => ({
       ...current,
@@ -328,14 +386,15 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   }, [participantPlayerIds, selectedNegotiation]);
 
   const messagesQuery = useQuery({
-    queryKey: ["negotiation-messages", gameId, selectedNegotiation?.id],
+    queryKey: ["negotiation-messages", gameId, selectedNegotiation?.id, messageViewerPlayerId],
     queryFn: () =>
       readNegotiationMessages({
         gameId,
         negotiationId: selectedNegotiation?.id ?? "",
+        viewerPlayerId: messageViewerPlayerId,
         baseUrl: apiBaseUrl,
       }),
-    enabled: Boolean(selectedNegotiation?.id),
+    enabled: Boolean(selectedNegotiation?.id && messageViewerPlayerId),
   });
 
   const selectedDeals = useMemo(
@@ -343,13 +402,29 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
     [dealsQuery.data, selectedNegotiation?.id],
   );
   const selectedDeal = selectedDeals.find((deal) => deal.id === selectedDealId) ?? selectedDeals.at(-1) ?? null;
+  const aiParticipants = useMemo(
+    () =>
+      (selectedNegotiation?.participant_player_ids ?? []).filter(
+        (playerId) => game.players.find((player) => player.id === playerId)?.controller_type === "ai",
+      ),
+    [game.players, selectedNegotiation?.participant_player_ids],
+  );
+  useEffect(() => {
+    if (aiParticipants.length === 0) {
+      setSelectedAiPlayerId("");
+      return;
+    }
+    if (!aiParticipants.includes(selectedAiPlayerId)) {
+      setSelectedAiPlayerId(aiParticipants[0] ?? "");
+    }
+  }, [aiParticipants, selectedAiPlayerId]);
   const previewTerms = draftTerms.length > 0 ? draftTerms : selectedDeal?.terms ?? [];
   const previewParticipants =
     selectedNegotiation?.participant_player_ids ?? selectedDeal?.participant_player_ids ?? participantPlayerIds;
-  const isNegotiationOpen = selectedNegotiation?.status === "open";
+  const isNegotiationOpen = isActiveNegotiationWindow(selectedNegotiation?.status);
   const hasDraftReady = Boolean(selectedNegotiation && draftTerms.length > 0 && proposerPlayerId);
 
-  async function invalidateNegotiationData(negotiationId = selectedNegotiation?.id) {
+  async function invalidateNegotiationData(negotiationId: string | null | undefined = selectedNegotiation?.id) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["negotiations", gameId] }),
       queryClient.invalidateQueries({ queryKey: ["deals", gameId] }),
@@ -473,6 +548,43 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
     },
   });
 
+  const requestAiNegotiationStep = useMutation({
+    mutationFn: (request: AiNegotiationStepRequest) => {
+      const attachNegotiationId = request.decisionType !== "open_negotiation";
+      return submitAiStep({
+        gameId,
+        baseUrl: apiBaseUrl,
+        input: {
+          player_id: request.playerId,
+          decision_type: request.decisionType,
+          ...(attachNegotiationId ? { negotiation_id: request.negotiationId ?? null } : {}),
+          mandatory: false,
+          request_context: {
+            mode: "negotiation",
+            selected_deal_id: request.selectedDealId ?? null,
+          },
+        },
+      });
+    },
+    onSuccess: async (result, request) => {
+      setAiNegotiationResult(result);
+      if (result.status === "rejected" || result.status === "blocked") {
+        setValidationErrors(result.validation_errors);
+      } else {
+        setValidationErrors([]);
+      }
+      const responseNegotiationId = negotiationIdFromAiStepResponse(result);
+      if (request.decisionType === "open_negotiation" && responseNegotiationId) {
+        setSelectedNegotiationId(responseNegotiationId);
+        setSelectedDealId(null);
+        setParentDealId(null);
+      }
+      const fallbackNegotiationId =
+        request.decisionType === "open_negotiation" ? null : request.negotiationId ?? selectedNegotiation?.id ?? null;
+      await invalidateNegotiationData(responseNegotiationId ?? fallbackNegotiationId);
+    },
+  });
+
   function toggleParticipant(playerId: string) {
     setParticipantPlayerIds((current) => {
       if (current.includes(playerId)) {
@@ -504,13 +616,38 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
     setTermDraft((current) => ({ ...current, ...patch }));
   }
 
+  function requestOpenAiNegotiationStep() {
+    requestAiNegotiationStep.mutate({
+      decisionType: "open_negotiation",
+      playerId: selectedOpenAiPlayerId,
+      selectedDealId: null,
+    });
+  }
+
+  function requestThreadAiNegotiationStep(decisionType: AiDecisionType) {
+    requestAiNegotiationStep.mutate({
+      decisionType,
+      playerId: selectedAiPlayerId || aiParticipants[0] || "",
+      negotiationId: selectedNegotiation?.id ?? null,
+      selectedDealId: selectedDeal?.id ?? null,
+    });
+  }
+
   const busy =
     startNegotiation.isPending ||
     sendMessage.isPending ||
     proposeDeal.isPending ||
     acceptDealMutation.isPending ||
     rejectDealMutation.isPending ||
-    expireNegotiationMutation.isPending;
+    expireNegotiationMutation.isPending ||
+    requestAiNegotiationStep.isPending;
+  const selectedNegotiationCurrentDealId =
+    (selectedNegotiation as NegotiationWithCurrentDealId | null)?.current_deal_id ?? null;
+  const hasSelectedOrCurrentDeal = Boolean(selectedDeal || selectedNegotiationCurrentDealId);
+  const canAskAiMessage = isNegotiationOpen && Boolean(selectedAiPlayerId);
+  const canAskAiOffer = canAskAiMessage && !hasSelectedOrCurrentDeal;
+  const canAskAiDealResponse = canAskAiMessage && Boolean(selectedDeal);
+  const canAskAiOpenNegotiation = Boolean(selectedOpenAiPlayerId);
 
   return (
     <section aria-label="Negotiation inbox" className="rounded-md border border-neutral-200 bg-white p-4 shadow-sm">
@@ -595,6 +732,44 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
           </Button>
         </form>
 
+        {aiPlayerIds.length > 0 ? (
+          <section aria-label="AI open negotiation controls" className="rounded-md border border-purple-200 bg-purple-50 p-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <label className="grid gap-1 text-sm font-medium text-purple-950">
+                AI opener
+                <select
+                  value={selectedOpenAiPlayerId}
+                  onChange={(event) => setSelectedOpenAiPlayerId(event.target.value)}
+                  className="rounded-md border border-purple-200 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-purple-700 focus:ring-2 focus:ring-purple-700/20"
+                >
+                  {aiPlayerIds.map((playerId) => (
+                    <option key={playerId} value={playerId}>
+                      {playerName(game, playerId)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                onClick={requestOpenAiNegotiationStep}
+                disabled={busy || !canAskAiOpenNegotiation}
+                className="w-fit bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+              >
+                {requestAiNegotiationStep.isPending ? (
+                  <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+                ) : (
+                  <Bot aria-hidden="true" className="size-4" />
+                )}
+                Ask AI open negotiation
+              </Button>
+            </div>
+            {aiNegotiationResult?.decision_type === "open_negotiation" ? (
+              <p className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
+                AI response {aiNegotiationResult.status}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
         <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
           <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <h3 className="text-sm font-semibold text-neutral-950">Threads</h3>
@@ -648,7 +823,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                 <span
                   className={cn(
                     "inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset",
-                    selectedNegotiation.status === "open"
+                    isActiveNegotiationWindow(selectedNegotiation.status)
                       ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
                       : "bg-neutral-100 text-neutral-700 ring-neutral-200",
                   )}
@@ -689,6 +864,73 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                   <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm font-medium text-neutral-700">
                     Expired negotiation is visibly closed and cannot execute accept controls.
                   </p>
+                ) : null}
+
+                {aiParticipants.length > 0 ? (
+                  <section aria-label="AI negotiation controls" className="rounded-md border border-purple-200 bg-purple-50 p-3">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                      <label className="grid gap-1 text-sm font-medium text-purple-950">
+                        AI participant
+                        <select
+                          value={selectedAiPlayerId}
+                          onChange={(event) => setSelectedAiPlayerId(event.target.value)}
+                          className="rounded-md border border-purple-200 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-purple-700 focus:ring-2 focus:ring-purple-700/20"
+                        >
+                          {aiParticipants.map((playerId) => (
+                            <option key={playerId} value={playerId}>
+                              {playerName(game, playerId)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => requestThreadAiNegotiationStep("negotiation_message")}
+                          disabled={busy || !canAskAiMessage}
+                        >
+                          {requestAiNegotiationStep.isPending ? (
+                            <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+                          ) : (
+                            <Bot aria-hidden="true" className="size-4" />
+                          )}
+                          Ask AI message
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            if (canAskAiOffer) {
+                              requestThreadAiNegotiationStep("deal_proposal");
+                            }
+                          }}
+                          disabled={busy || !canAskAiOffer}
+                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                        >
+                          <BadgeDollarSign aria-hidden="true" className="size-4" />
+                          Ask AI offer
+                        </Button>
+                        <Button
+                          onClick={() => requestThreadAiNegotiationStep("counteroffer")}
+                          disabled={busy || !canAskAiDealResponse}
+                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                        >
+                          <RefreshCw aria-hidden="true" className="size-4" />
+                          Ask AI counteroffer
+                        </Button>
+                        <Button
+                          onClick={() => requestThreadAiNegotiationStep("accept_reject")}
+                          disabled={busy || !canAskAiDealResponse}
+                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                        >
+                          <CheckCircle2 aria-hidden="true" className="size-4" />
+                          Ask AI accept/reject
+                        </Button>
+                      </div>
+                    </div>
+                    {aiNegotiationResult ? (
+                      <p className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
+                        AI response {aiNegotiationResult.status}
+                      </p>
+                    ) : null}
+                  </section>
                 ) : null}
 
                 <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">

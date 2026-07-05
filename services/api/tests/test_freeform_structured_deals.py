@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -67,7 +67,7 @@ async def create_game(client: httpx.AsyncClient) -> dict[str, Any]:
             "players": [
                 {"name": "Ada", "kind": "human"},
                 {"name": "Grace", "kind": "human"},
-                {"name": "Linus", "kind": "ai"},
+                {"name": "Linus", "kind": "human"},
             ],
         },
     )
@@ -160,6 +160,26 @@ async def get_negotiation(
     return response.json()
 
 
+async def create_freeform_message(
+    client: httpx.AsyncClient,
+    game_id: str,
+    negotiation_id: str,
+    sender_player_id: str,
+    body: str,
+    *,
+    recipient_player_id: str | None = None,
+) -> dict[str, Any]:
+    payload = {"sender_player_id": sender_player_id, "body": body}
+    if recipient_player_id is not None:
+        payload["recipient_player_id"] = recipient_player_id
+    response = await client.post(
+        f"/games/{game_id}/negotiations/{negotiation_id}/messages",
+        json=payload,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["message"]
+
+
 async def table_count(
     session_factory: async_sessionmaker,
     table: sa.Table,
@@ -232,6 +252,183 @@ async def test_freeform_message_persists_without_state_mutation(
         messages = await audit_messages(session_factory, game_id)
         assert any(item["message_type"] == "freeform_message" for item in messages)
         assert any(item["message_type"] == "NEGOTIATION_MESSAGE_SENT" for item in messages)
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_addressed_message_visibility_omitted_viewer_lists_only_public_messages(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    player_ids = [player["id"] for player in created["players"]]
+    try:
+        negotiation = await create_negotiation(client, game_id, player_ids)
+        public_message = await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[0],
+            "Public note for the whole table.",
+        )
+        await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[0],
+            "Private offer for Grace.",
+            recipient_player_id=player_ids[1],
+        )
+
+        listed = await client.get(f"/games/{game_id}/negotiations/{negotiation['id']}/messages")
+
+        assert listed.status_code == 200, listed.text
+        assert [message["id"] for message in listed.json()["messages"]] == [public_message["id"]]
+        assert [message["recipient_player_id"] for message in listed.json()["messages"]] == [None]
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_addressed_message_visibility_viewer_sees_public_sent_and_received_messages(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    player_ids = [player["id"] for player in created["players"]]
+    try:
+        negotiation = await create_negotiation(client, game_id, player_ids)
+        public_message = await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[0],
+            "Public note for the whole table.",
+        )
+        sent_by_viewer = await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[0],
+            "Private offer from Ada to Grace.",
+            recipient_player_id=player_ids[1],
+        )
+        received_by_viewer = await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[1],
+            "Private counter from Grace to Ada.",
+            recipient_player_id=player_ids[0],
+        )
+        await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[1],
+            "Private side note from Grace to Linus.",
+            recipient_player_id=player_ids[2],
+        )
+
+        listed = await client.get(
+            f"/games/{game_id}/negotiations/{negotiation['id']}/messages",
+            params={"viewer_player_id": player_ids[0]},
+        )
+
+        assert listed.status_code == 200, listed.text
+        assert [message["id"] for message in listed.json()["messages"]] == [
+            public_message["id"],
+            sent_by_viewer["id"],
+            received_by_viewer["id"],
+        ]
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_addressed_message_visibility_other_participant_cannot_see_messages_between_two_other_players(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    player_ids = [player["id"] for player in created["players"]]
+    try:
+        negotiation = await create_negotiation(client, game_id, player_ids)
+        public_message = await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[0],
+            "Public note for the whole table.",
+        )
+        hidden_sent_message = await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[0],
+            "Private offer from Ada to Grace.",
+            recipient_player_id=player_ids[1],
+        )
+        hidden_received_message = await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[1],
+            "Private counter from Grace to Ada.",
+            recipient_player_id=player_ids[0],
+        )
+
+        listed = await client.get(
+            f"/games/{game_id}/negotiations/{negotiation['id']}/messages",
+            params={"viewer_player_id": player_ids[2]},
+        )
+
+        visible_ids = [message["id"] for message in listed.json()["messages"]]
+        assert listed.status_code == 200, listed.text
+        assert visible_ids == [public_message["id"]]
+        assert hidden_sent_message["id"] not in visible_ids
+        assert hidden_received_message["id"] not in visible_ids
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
+async def test_addressed_message_visibility_rejects_non_participant_viewer(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    player_ids = [player["id"] for player in created["players"]]
+    try:
+        negotiation = await create_negotiation(client, game_id, player_ids)
+        await create_freeform_message(
+            client,
+            game_id,
+            negotiation["id"],
+            player_ids[0],
+            "Public note for the whole table.",
+        )
+
+        listed = await client.get(
+            f"/games/{game_id}/negotiations/{negotiation['id']}/messages",
+            params={"viewer_player_id": str(uuid4())},
+        )
+
+        assert listed.status_code == 422, listed.text
+        assert listed.json()["status"] == "rejected"
+        assert listed.json()["reason_code"] == "viewer_not_participant"
+        assert listed.json()["validation_errors"] == [
+            {
+                "code": "viewer_not_participant",
+                "message": "viewer_player_id must be a negotiation participant",
+                "field": "viewer_player_id",
+            }
+        ]
     finally:
         await delete_game(session_factory, game_id)
 

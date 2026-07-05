@@ -91,6 +91,7 @@ function profilesFixture(): AiProfile[] {
       traits: ["risk-aware", "rent-focused"],
       personality: "Careful analyst",
       play_style: "Builds cash buffers before auctions.",
+      persona_summary: "Grace is a careful analyst who keeps liquidity before pressing for monopolies.",
       created_at: "2026-07-04T00:01:00.000Z",
     },
     {
@@ -101,6 +102,7 @@ function profilesFixture(): AiProfile[] {
       traits: ["opportunistic"],
       personality: "Fast negotiator",
       play_style: "Prefers short-term cash pressure.",
+      persona_summary: "Linus is an opportunistic negotiator who turns leverage into quick deals.",
       created_at: "2026-07-04T00:01:00.000Z",
     },
   ];
@@ -267,6 +269,7 @@ afterEach(() => {
 
 describe("AiAuditPanel", () => {
   it("renders profiles, decision traceability, memory, retrievals, dialogue, and rejected outputs from server data", async () => {
+    // Persona summary visible in audit UI
     renderPanel(createAiAuditFetchMock());
 
     const panel = await screen.findByRole("region", { name: "AI audit" });
@@ -281,6 +284,8 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("Careful analyst");
     expect(panel).toHaveTextContent("Play style");
     expect(panel).toHaveTextContent("Builds cash buffers before auctions.");
+    expect(panel).toHaveTextContent("Persona summary");
+    expect(panel).toHaveTextContent("Grace is a careful analyst who keeps liquidity before pressing for monopolies.");
 
     expect(panel).toHaveTextContent("Decision history");
     expect(panel).toHaveTextContent("ai_decision_id decision-grace-1");

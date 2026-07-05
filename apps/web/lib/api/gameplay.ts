@@ -69,6 +69,49 @@ export const ActionSubmissionResultSchema = z.discriminatedUnion("status", [
   ActionRejectedResponseSchema,
 ]);
 
+export const AiDecisionTypeSchema = z.enum([
+  "action_decision",
+  "open_negotiation",
+  "negotiation_message",
+  "deal_proposal",
+  "counteroffer",
+  "accept_reject",
+]);
+
+const AiStepValidationErrorSchema = z.object({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  field: z.string().nullable().optional(),
+});
+
+export const AiStepResponseSchema = z.object({
+  status: z.enum(["accepted", "rejected", "blocked", "done"]),
+  game_id: z.string().min(1),
+  player_id: z.string().min(1),
+  decision_type: AiDecisionTypeSchema,
+  negotiation_id: z.string().min(1).nullable(),
+  ai_decision_id: z.string().min(1).nullable(),
+  accepted_events: z.array(AcceptedEventSchema).default([]),
+  accepted_event_id: z.string().min(1).nullable(),
+  rejected_action_id: z.string().min(1).nullable(),
+  game_status: z.string().min(1).nullable(),
+  consumed_response_opportunity: z.boolean().default(false),
+  consumed_negotiation_opportunity: z.record(z.string(), z.unknown()).nullable(),
+  outcome: z.record(z.string(), z.unknown()).default({}),
+  reason_code: z.string().min(1).nullable().optional(),
+  validation_errors: z.array(AiStepValidationErrorSchema).default([]),
+  negotiation: z.record(z.string(), z.unknown()).nullable().optional(),
+  message: z.record(z.string(), z.unknown()).nullable().optional(),
+  deal: z.record(z.string(), z.unknown()).nullable().optional(),
+});
+
+const AiStepLifecycleRejectedResponseSchema = z.object({
+  status: z.literal("rejected"),
+  reason_code: z.string().min(1),
+  validation_errors: z.array(AiStepValidationErrorSchema),
+  ai_decision_id: z.undefined().optional(),
+});
+
 export type GameStateResponse = z.infer<typeof GameStateResponseSchema>;
 export type LegalAction = z.infer<typeof LegalActionSchema>;
 export type LegalActionsResponse = z.infer<typeof LegalActionsResponseSchema>;
@@ -76,6 +119,8 @@ export type AcceptedEvent = z.infer<typeof AcceptedEventSchema>;
 export type ActionAcceptedResponse = z.infer<typeof ActionAcceptedResponseSchema>;
 export type ActionRejectedResponse = z.infer<typeof ActionRejectedResponseSchema>;
 export type ActionSubmissionResult = z.infer<typeof ActionSubmissionResultSchema>;
+export type AiDecisionType = z.infer<typeof AiDecisionTypeSchema>;
+export type AiStepResponse = z.infer<typeof AiStepResponseSchema>;
 
 type ApiFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -96,6 +141,22 @@ type SubmitGameActionOptions = {
   gameId: string;
   action: LegalAction;
   idempotencyKey: string;
+  baseUrl?: string;
+  fetcher?: ApiFetcher;
+};
+
+type SubmitAiStepInput = {
+  player_id: string;
+  decision_type?: AiDecisionType;
+  negotiation_id?: string | null;
+  mandatory?: boolean;
+  mode?: string;
+  request_context?: Record<string, unknown>;
+};
+
+type SubmitAiStepOptions = {
+  gameId: string;
+  input: SubmitAiStepInput;
   baseUrl?: string;
   fetcher?: ApiFetcher;
 };
@@ -144,6 +205,36 @@ function parseOrThrow<T>(schema: z.ZodType<T>, payload: unknown, action: string)
     throw new Error(`Invalid ${action} response: ${parsed.error.message}`);
   }
   return parsed.data;
+}
+
+function parseAiStepResponse(payload: unknown, gameId: string, input: SubmitAiStepInput): AiStepResponse {
+  const full = AiStepResponseSchema.safeParse(payload);
+  if (full.success) {
+    return full.data;
+  }
+
+  const lifecycleRejected = AiStepLifecycleRejectedResponseSchema.safeParse(payload);
+  if (lifecycleRejected.success) {
+    return {
+      status: "rejected",
+      game_id: gameId,
+      player_id: input.player_id,
+      decision_type: input.decision_type ?? "action_decision",
+      negotiation_id: input.negotiation_id ?? null,
+      ai_decision_id: null,
+      accepted_events: [],
+      accepted_event_id: null,
+      rejected_action_id: null,
+      game_status: null,
+      consumed_response_opportunity: false,
+      consumed_negotiation_opportunity: null,
+      outcome: {},
+      reason_code: lifecycleRejected.data.reason_code,
+      validation_errors: lifecycleRejected.data.validation_errors,
+    };
+  }
+
+  throw new Error(`Invalid AI step response: ${full.error.message}`);
 }
 
 export async function readGameState({
@@ -206,6 +297,25 @@ export async function submitGameAction({
   });
   const payload = await readJson(response, "Submit action");
   return parseOrThrow(ActionSubmissionResultSchema, payload, "action submission");
+}
+
+export async function submitAiStep({
+  gameId,
+  input,
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: SubmitAiStepOptions): Promise<AiStepResponse> {
+  const response = await fetcher(gameResourceUrl(baseUrl, gameId, "/ai/step"), {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const payload = await readJson(response, "Submit AI step");
+  return parseAiStepResponse(payload, gameId, input);
 }
 
 export function eventsStreamUrl(gameId: string, baseUrl = getDefaultBackendBaseUrl()): string {

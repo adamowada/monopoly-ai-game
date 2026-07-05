@@ -72,7 +72,7 @@ async def create_game(client: httpx.AsyncClient, *, player_count: int = 3) -> di
         json={
             "seed": "phase-6-stage-6-1-negotiations",
             "players": [
-                {"name": player_names[index], "kind": "human" if index < 2 else "ai"}
+                {"name": player_names[index], "kind": "human"}
                 for index in range(player_count)
             ],
         },

@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/games/{game_id}/ai/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ai Profiles */
+        get: operations["get_ai_profiles_games__game_id__ai_profiles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/games/{game_id}/ai/step": {
         parameters: {
             query?: never;
@@ -452,6 +469,65 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIProfileResponse */
+        AIProfileResponse: {
+            /** Aggressiveness */
+            aggressiveness: number;
+            /**
+             * Ai Profile Id
+             * Format: uuid
+             */
+            ai_profile_id: string;
+            /** Cooperation */
+            cooperation: number;
+            /** Created At */
+            created_at: unknown;
+            /** Debt Appetite */
+            debt_appetite: number;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Liquidity Preference */
+            liquidity_preference: number;
+            /** Monopoly Focus */
+            monopoly_focus: number;
+            /** Negotiation Creativity */
+            negotiation_creativity: number;
+            /** Persona Name */
+            persona_name: string;
+            /** Persona Summary */
+            persona_summary: string;
+            /** Personality */
+            personality: string;
+            /** Play Style */
+            play_style: string;
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Risk Tolerance */
+            risk_tolerance: number;
+            /** Strategy Profile */
+            strategy_profile: {
+                [key: string]: unknown;
+            };
+            /** Traits */
+            traits: string[];
+            /** Trust */
+            trust: number;
+            /** Updated At */
+            updated_at: unknown;
+        };
+        /** AIProfilesResponse */
+        AIProfilesResponse: {
+            /** Profiles */
+            profiles: components["schemas"]["AIProfileResponse"][];
+        };
         /** AcceptedEventResponse */
         AcceptedEventResponse: {
             /** Actor Player Id */
@@ -507,33 +583,20 @@ export interface components {
             /** Player Id */
             player_id?: string | null;
         };
-        /** AiStepNotImplementedResponse */
-        AiStepNotImplementedResponse: {
-            /**
-             * Game Id
-             * Format: uuid
-             */
-            game_id: string;
-            /** Message */
-            message: string;
-            /**
-             * Player Id
-             * Format: uuid
-             */
-            player_id: string;
-            /**
-             * Reason Code
-             * @constant
-             */
-            reason_code: "ai_runtime_not_implemented";
-            /**
-             * Status
-             * @constant
-             */
-            status: "not_implemented";
-        };
         /** AiStepRequest */
         AiStepRequest: {
+            /**
+             * Decision Type
+             * @default action_decision
+             * @enum {string}
+             */
+            decision_type: "action_decision" | "open_negotiation" | "negotiation_message" | "deal_proposal" | "counteroffer" | "accept_reject";
+            /** Mandatory */
+            mandatory?: boolean | null;
+            /** Mode */
+            mode?: string | null;
+            /** Negotiation Id */
+            negotiation_id?: string | null;
             /**
              * Player Id
              * Format: uuid
@@ -543,6 +606,63 @@ export interface components {
             request_context?: {
                 [key: string]: unknown;
             };
+        };
+        /** AiStepResponse */
+        AiStepResponse: {
+            /** Accepted Event Id */
+            accepted_event_id: string | null;
+            /** Accepted Events */
+            accepted_events: components["schemas"]["AcceptedEventResponse"][];
+            /**
+             * Ai Decision Id
+             * Format: uuid
+             */
+            ai_decision_id: string;
+            /** Consumed Negotiation Opportunity */
+            consumed_negotiation_opportunity: {
+                [key: string]: unknown;
+            } | null;
+            /** Consumed Response Opportunity */
+            consumed_response_opportunity: boolean;
+            deal?: components["schemas"]["DealResponse"] | null;
+            /** Decision Type */
+            decision_type: string;
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Game Status */
+            game_status: string | null;
+            message?: components["schemas"]["NegotiationMessageResponse"] | null;
+            negotiation?: components["schemas"]["NegotiationResponse"] | null;
+            /** Negotiation Id */
+            negotiation_id: string | null;
+            /** Outcome */
+            outcome: {
+                [key: string]: unknown;
+            };
+            /**
+             * Player Id
+             * Format: uuid
+             */
+            player_id: string;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Rejected Action Id */
+            rejected_action_id: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "rejected" | "blocked" | "done";
+            /**
+             * Validation Errors
+             * @default []
+             */
+            validation_errors: {
+                [key: string]: unknown;
+            }[];
         };
         /** ContractCreationResponse */
         ContractCreationResponse: {
@@ -721,6 +841,12 @@ export interface components {
             author_player_id?: string | null;
             /** Body */
             body: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Recipient Player Id */
+            recipient_player_id?: string | null;
             /** Sender Player Id */
             sender_player_id?: string | null;
         };
@@ -1320,6 +1446,37 @@ export interface operations {
             };
         };
     };
+    get_ai_profiles_games__game_id__ai_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIProfilesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ai_step_games__game_id__ai_step_post: {
         parameters: {
             query?: never;
@@ -1335,6 +1492,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiStepResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1342,15 +1508,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Successful Response */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AiStepNotImplementedResponse"];
                 };
             };
         };
@@ -1809,7 +1966,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NegotiationResponse"];
+                    "application/json": components["schemas"]["NegotiationResponse"] | components["schemas"]["LifecycleRejectedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1921,7 +2078,9 @@ export interface operations {
     };
     list_negotiation_messages_games__game_id__negotiations__negotiation_id__messages_get: {
         parameters: {
-            query?: never;
+            query?: {
+                viewer_player_id?: string | null;
+            };
             header?: never;
             path: {
                 game_id: string;

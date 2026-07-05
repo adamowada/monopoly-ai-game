@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -15,6 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette import status
 
+from app.ai.profiles import (
+    AIProfile,
+    AIProfileGameNotFoundError,
+    ensure_ai_profiles_for_game,
+)
 from app.contracts.execution import (
     ContractCreationResult,
     ContractExecutionError,
@@ -32,6 +38,7 @@ from app.contracts.settlement_engine import (
 )
 from app.db.metadata import (
     action_idempotency_keys,
+    ai_decisions,
     contracts,
     deals,
     games,
@@ -76,6 +83,14 @@ NEGOTIATION_TERMINAL_STATUSES = frozenset(
         NEGOTIATION_STATUS_EXECUTED,
     }
 )
+AI_NEGOTIATION_DECISION_TYPES = frozenset(
+    {"negotiation_message", "deal_proposal", "counteroffer", "accept_reject"}
+)
+AI_STEP_IN_FLIGHT_REASON_CODE = "ai_step_in_flight"
+AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE = "ai_response_opportunity_consumed"
+AI_BLOCKED_STATUS = "AI_BLOCKED"
+GAME_AI_BLOCKED_REASON_CODE = "game_ai_blocked"
+AI_PLAYER_REQUIRES_CODEX_REASON_CODE = "ai_player_requires_codex"
 
 DEAL_STATUS_PROPOSED = "proposed"
 DEAL_STATUS_ACCEPTED = "accepted"
@@ -110,6 +125,19 @@ CUTOFF_MAX_PROPOSALS_PER_PLAYER = "negotiation_cutoff_max_proposals_per_player"
 CUTOFF_MAX_ACTIVE_SECONDS = "negotiation_cutoff_max_active_seconds"
 CUTOFF_MAX_AI_DECISION_ATTEMPTS = "negotiation_cutoff_max_ai_decision_attempts"
 CUTOFF_MAX_PENDING_OFFERS_PER_PLAYER = "negotiation_cutoff_max_pending_offers_per_player"
+
+
+@dataclass(frozen=True)
+class AiNegotiationLifecycleContext:
+    game_id: UUID
+    player_id: UUID
+    ai_decision_id: UUID
+
+
+_AI_NEGOTIATION_LIFECYCLE_CONTEXT: ContextVar[AiNegotiationLifecycleContext | None] = ContextVar(
+    "ai_negotiation_lifecycle_context",
+    default=None,
+)
 
 
 class PlayerCreateRequest(BaseModel):
@@ -305,7 +333,9 @@ class CreateNegotiationMessageRequest(BaseModel):
 
     sender_player_id: UUID | None = None
     author_player_id: UUID | None = None
+    recipient_player_id: UUID | None = None
     body: str = Field(min_length=1, max_length=4000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_sender_alias(self) -> "CreateNegotiationMessageRequest":
@@ -489,15 +519,66 @@ class AiStepRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: UUID
+    decision_type: Literal[
+        "action_decision",
+        "open_negotiation",
+        "negotiation_message",
+        "deal_proposal",
+        "counteroffer",
+        "accept_reject",
+    ] = "action_decision"
+    negotiation_id: UUID | None = None
+    mandatory: bool | None = None
+    mode: str | None = Field(default=None, min_length=1, max_length=80)
     request_context: dict[str, Any] = Field(default_factory=dict)
 
 
-class AiStepNotImplementedResponse(BaseModel):
-    status: Literal["not_implemented"]
-    reason_code: Literal["ai_runtime_not_implemented"]
+class AiStepResponse(BaseModel):
+    status: Literal["accepted", "rejected", "blocked", "done"]
     game_id: UUID
     player_id: UUID
-    message: str
+    decision_type: str
+    negotiation_id: UUID | None
+    ai_decision_id: UUID
+    accepted_events: list[AcceptedEventResponse]
+    accepted_event_id: UUID | None
+    rejected_action_id: UUID | None
+    game_status: str | None
+    consumed_response_opportunity: bool
+    consumed_negotiation_opportunity: Mapping[str, Any] | None
+    outcome: Mapping[str, Any]
+    reason_code: str | None = None
+    validation_errors: Sequence[Mapping[str, Any]] = ()
+    negotiation: NegotiationResponse | None = None
+    message: NegotiationMessageResponse | None = None
+    deal: DealResponse | None = None
+
+
+class AIProfileResponse(BaseModel):
+    ai_profile_id: UUID
+    game_id: UUID
+    player_id: UUID
+    display_name: str
+    persona_name: str
+    strategy_profile: Mapping[str, Any]
+    persona_summary: str
+    traits: list[str]
+    personality: str
+    play_style: str
+    risk_tolerance: float
+    liquidity_preference: float
+    debt_appetite: float
+    aggressiveness: float
+    cooperation: float
+    negotiation_creativity: float
+    trust: float
+    monopoly_focus: float
+    created_at: Any
+    updated_at: Any
+
+
+class AIProfilesResponse(BaseModel):
+    profiles: list[AIProfileResponse]
 
 
 @router.post("", response_model=GameMetadataResponse, status_code=status.HTTP_201_CREATED)
@@ -537,6 +618,7 @@ async def create_game(request: Request, payload: CreateGameRequest) -> GameMetad
                         state=player_state.model_dump(mode="json"),
                     )
                 )
+            await ensure_ai_profiles_for_game(session, game_id=game_id)
 
     return await _load_game_metadata(session_factory, game_id)
 
@@ -641,6 +723,58 @@ async def submit_action(
                     validation_errors=_pydantic_errors(exc),
                 )
 
+            if await _game_status_in_session(session, game_id) == AI_BLOCKED_STATUS:
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[_game_ai_blocked_validation_error()],
+                )
+
+            if (
+                submission.expected_event_sequence != state.event_sequence
+                or submission.expected_state_hash != state.state_hash()
+            ):
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[_stale_action_validation_error()],
+                )
+
+            if (
+                await _resolve_actor_controller_type_in_session(
+                    session=session,
+                    game_id=game_id,
+                    actor_id=submission.actor_id,
+                )
+                == "ai"
+            ):
+                return await _persist_idempotent_rejection_response(
+                    session=session,
+                    game_id=game_id,
+                    state=state,
+                    idempotency_key=normalized_idempotency_key,
+                    request_hash=request_hash,
+                    raw_payload=submission.model_dump(mode="json"),
+                    actor_id=submission.actor_id,
+                    action_type=submission.type,
+                    submitted_payload=submission.payload,
+                    validation_errors=[_ai_player_requires_codex_validation_error()],
+                )
+
             action = GameAction(
                 actor_id=submission.actor_id,
                 type=submission.type,
@@ -689,13 +823,7 @@ async def submit_action(
                     actor_id=submission.actor_id,
                     action_type=submission.type,
                     submitted_payload=submission.payload,
-                    validation_errors=[
-                        {
-                            "code": "stale_action",
-                            "message": "action expected state no longer matches current state",
-                            "field": "expected_state_hash",
-                        }
-                    ],
+                    validation_errors=[_stale_action_validation_error()],
                 )
 
             response_payload = ActionAcceptedResponse(
@@ -927,7 +1055,8 @@ async def list_negotiation_messages(
     game_id: UUID,
     negotiation_id: UUID,
     request: Request,
-) -> NegotiationMessagesResponse:
+    viewer_player_id: UUID | None = Query(default=None),
+) -> NegotiationMessagesResponse | JSONResponse:
     session_factory = _session_factory(request)
     await _ensure_game_exists(session_factory, game_id)
     async with session_factory() as session:
@@ -938,12 +1067,27 @@ async def list_negotiation_messages(
         )
         if negotiation_row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="negotiation not found")
+        context = _normalized_negotiation_context(negotiation_row)
+        if viewer_player_id is not None and str(viewer_player_id) not in context["participant_player_ids"]:
+            return _lifecycle_rejection_response(
+                "viewer_not_participant",
+                "viewer_player_id must be a negotiation participant",
+                field="viewer_player_id",
+            )
+        visibility_filter = negotiation_messages.c.recipient_player_id.is_(None)
+        if viewer_player_id is not None:
+            visibility_filter = sa.or_(
+                visibility_filter,
+                negotiation_messages.c.sender_player_id == viewer_player_id,
+                negotiation_messages.c.recipient_player_id == viewer_player_id,
+            )
         result = await session.execute(
             sa.select(negotiation_messages)
             .where(
                 negotiation_messages.c.game_id == game_id,
                 negotiation_messages.c.negotiation_id == negotiation_id,
                 negotiation_messages.c.message_type == MESSAGE_TYPE_FREEFORM,
+                visibility_filter,
             )
             .order_by(negotiation_messages.c.created_at, negotiation_messages.c.id)
         )
@@ -966,6 +1110,14 @@ async def create_negotiation_message(
     await _ensure_game_exists(session_factory, game_id)
     sender_player_id = _message_sender_player_id(payload)
     await _ensure_player_in_game(session_factory, game_id, sender_player_id)
+    ai_actor_response = await _reject_direct_ai_negotiation_actor(
+        session_factory=session_factory,
+        game_id=game_id,
+        actor_player_id=sender_player_id,
+        actor_field="sender_player_id",
+    )
+    if ai_actor_response is not None:
+        return ai_actor_response
 
     async with session_factory() as session:
         async with session.begin():
@@ -996,6 +1148,15 @@ async def create_negotiation_message(
                     "sender_player_id must be a negotiation participant",
                     field="sender_player_id",
                 )
+            if (
+                payload.recipient_player_id is not None
+                and str(payload.recipient_player_id) not in context["participant_player_ids"]
+            ):
+                return _lifecycle_rejection_response(
+                    "recipient_not_participant",
+                    "recipient_player_id must be a negotiation participant",
+                    field="recipient_player_id",
+                )
 
             result = await session.execute(
                 negotiation_messages.insert()
@@ -1003,12 +1164,16 @@ async def create_negotiation_message(
                     game_id=game_id,
                     negotiation_id=negotiation_id,
                     sender_player_id=sender_player_id,
-                    recipient_player_id=None,
+                    recipient_player_id=payload.recipient_player_id,
                     message_type=MESSAGE_TYPE_FREEFORM,
                     body=payload.body.strip(),
                     payload={
                         "message_type": MESSAGE_TYPE_FREEFORM,
                         "sender_player_id": str(sender_player_id),
+                        "recipient_player_id": None
+                        if payload.recipient_player_id is None
+                        else str(payload.recipient_player_id),
+                        "metadata": dict(payload.metadata),
                     },
                 )
                 .returning(negotiation_messages)
@@ -1043,14 +1208,14 @@ async def create_negotiation_message(
 
 @router.post(
     "/{game_id}/negotiations",
-    response_model=NegotiationResponse,
+    response_model=NegotiationResponse | LifecycleRejectedResponse,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_negotiation(
     game_id: UUID,
     request: Request,
     payload: CreateNegotiationRequest,
-) -> NegotiationResponse:
+) -> NegotiationResponse | JSONResponse:
     session_factory = _session_factory(request)
     game_settings = await _load_game_settings(session_factory, game_id)
     await _ensure_player_ids_in_game(
@@ -1058,6 +1223,14 @@ async def create_negotiation(
         game_id,
         [payload.opened_by_player_id, *payload.participant_player_ids],
     )
+    ai_actor_response = await _reject_direct_ai_negotiation_actor(
+        session_factory=session_factory,
+        game_id=game_id,
+        actor_player_id=payload.opened_by_player_id,
+        actor_field="opened_by_player_id",
+    )
+    if ai_actor_response is not None:
+        return ai_actor_response
     state = await _load_replayed_state(session_factory, game_id)
 
     stored_context = _initial_negotiation_context(
@@ -1097,6 +1270,14 @@ async def create_deal(
     proposed_by_player_id = _deal_proposed_by_player_id(payload)
     await _ensure_game_exists(session_factory, game_id)
     await _ensure_player_in_game(session_factory, game_id, proposed_by_player_id)
+    ai_actor_response = await _reject_direct_ai_negotiation_actor(
+        session_factory=session_factory,
+        game_id=game_id,
+        actor_player_id=proposed_by_player_id,
+        actor_field="proposed_by_player_id",
+    )
+    if ai_actor_response is not None:
+        return ai_actor_response
     if payload.participant_player_ids:
         await _ensure_player_ids_in_game(session_factory, game_id, payload.participant_player_ids)
 
@@ -1704,26 +1885,1112 @@ async def record_negotiation_ai_decision_attempt(
     return _negotiation_response(updated)
 
 
+@router.get("/{game_id}/ai/profiles", response_model=AIProfilesResponse)
+async def get_ai_profiles(game_id: UUID, request: Request) -> AIProfilesResponse:
+    session_factory = _session_factory(request)
+    try:
+        async with session_factory() as session:
+            async with session.begin():
+                profile_records = await ensure_ai_profiles_for_game(session, game_id=game_id)
+    except AIProfileGameNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
+
+    return AIProfilesResponse(profiles=[_ai_profile_response(profile) for profile in profile_records])
+
+
 @router.post(
     "/{game_id}/ai/step",
-    response_model=AiStepNotImplementedResponse,
-    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+    response_model=AiStepResponse | LifecycleRejectedResponse,
 )
 async def ai_step(
     game_id: UUID,
     request: Request,
     payload: AiStepRequest,
-) -> AiStepNotImplementedResponse:
+) -> AiStepResponse | JSONResponse:
     session_factory = _session_factory(request)
     await _ensure_game_exists(session_factory, game_id)
-    await _ensure_player_in_game(session_factory, game_id, payload.player_id)
-    return AiStepNotImplementedResponse(
-        status="not_implemented",
-        reason_code="ai_runtime_not_implemented",
+    if await _game_status(session_factory, game_id) == AI_BLOCKED_STATUS:
+        return _game_ai_blocked_lifecycle_response()
+
+    ai_profile_id_or_response = await _ai_step_profile_id_or_rejection(
+        session_factory,
         game_id=game_id,
         player_id=payload.player_id,
-        message="The Codex AI runtime is scheduled for Phase 7 and is not implemented in Stage 4.4.",
     )
+    if isinstance(ai_profile_id_or_response, JSONResponse):
+        return ai_profile_id_or_response
+    if payload.decision_type in AI_NEGOTIATION_DECISION_TYPES and payload.negotiation_id is None:
+        return _lifecycle_rejection_response(
+            "negotiation_id_required",
+            "negotiation_id is required for AI negotiation decisions",
+            field="negotiation_id",
+        )
+    if payload.decision_type == "open_negotiation" and payload.negotiation_id is not None:
+        return _lifecycle_rejection_response(
+            "negotiation_id_forbidden",
+            "open_negotiation creates a new negotiation and cannot target an existing negotiation_id",
+            field="negotiation_id",
+        )
+    if payload.decision_type == "action_decision" and payload.mandatory is False:
+        return _lifecycle_rejection_response(
+            "action_decision_mandatory_required",
+            "action_decision AI step requests cannot set mandatory to false",
+            field="mandatory",
+        )
+    mandatory = payload.mandatory if payload.mandatory is not None else payload.decision_type == "action_decision"
+    if payload.negotiation_id is not None:
+        if payload.decision_type != "action_decision":
+            preflight_rejection = await _ai_negotiation_preflight_rejection(
+                session_factory=session_factory,
+                game_id=game_id,
+                player_id=payload.player_id,
+                negotiation_id=payload.negotiation_id,
+            )
+            if preflight_rejection is not None:
+                return preflight_rejection
+        else:
+            await _ensure_negotiation_in_game(session_factory, game_id, payload.negotiation_id)
+        consumed_rejection = await _ai_consumed_response_opportunity_rejection(
+            session_factory=session_factory,
+            game_id=game_id,
+            payload=payload,
+            mandatory=mandatory,
+        )
+        if consumed_rejection is not None:
+            return consumed_rejection
+
+    request_context = dict(payload.request_context)
+    if payload.mode is not None:
+        request_context["mode"] = payload.mode
+
+    guard_key = _ai_step_in_flight_guard_key(game_id=game_id)
+
+    guard_session = session_factory()
+    guard_acquired = False
+    try:
+        guard_acquired = await _try_acquire_ai_step_in_flight_guard(guard_session, guard_key)
+        if not guard_acquired:
+            return _lifecycle_rejection_response(
+                AI_STEP_IN_FLIGHT_REASON_CODE,
+                "AI step is already in flight for this game state",
+                field="ai_step",
+            )
+
+        from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
+
+        enforcement_kwargs = _ai_enforcement_kwargs(request)
+        enforcement_result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=game_id,
+                player_id=payload.player_id,
+                ai_profile_id=ai_profile_id_or_response,
+                decision_type=payload.decision_type,
+                negotiation_id=payload.negotiation_id,
+                mandatory=mandatory,
+                request_context=request_context,
+            ),
+            **enforcement_kwargs,
+        )
+
+        return await _ai_step_response_from_enforcement(
+            session_factory=session_factory,
+            request=request,
+            game_id=game_id,
+            payload=payload,
+            enforcement_result=enforcement_result,
+        )
+    finally:
+        if guard_acquired:
+            await _release_ai_step_in_flight_guard(guard_session, guard_key)
+        await guard_session.close()
+
+
+@dataclass(frozen=True)
+class AiNegotiationApplication:
+    status: Literal["done", "rejected"]
+    outcome: Mapping[str, Any]
+    reason_code: str | None = None
+    validation_errors: tuple[Mapping[str, Any], ...] = ()
+    negotiation: NegotiationResponse | None = None
+    message: NegotiationMessageResponse | None = None
+    deal: DealResponse | None = None
+
+
+@dataclass(frozen=True)
+class AiLifecycleRejectionPersistence:
+    rejected_action_id: UUID
+    consumed_response_opportunity: bool
+    consumed_negotiation_opportunity: Mapping[str, Any] | None
+    game_status: str | None
+
+
+async def _ai_step_profile_id_or_rejection(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    game_id: UUID,
+    player_id: UUID,
+) -> UUID | JSONResponse:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(players).where(players.c.game_id == game_id, players.c.id == player_id)
+        )
+        player_row = result.mappings().first()
+    if player_row is None:
+        raise HTTPException(status_code=422, detail=f"unknown player for game: {player_id}")
+    if player_row["controller_type"] != "ai":
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "status": "rejected",
+                "reason_code": "human_player_not_ai_controlled",
+                "validation_errors": [
+                    {
+                        "code": "human_player_not_ai_controlled",
+                        "message": "AI step requests require an AI-controlled player",
+                        "field": "player_id",
+                    }
+                ],
+            },
+        )
+
+    async with session_factory() as session:
+        async with session.begin():
+            profile_records = await ensure_ai_profiles_for_game(session, game_id=game_id)
+    for profile in profile_records:
+        if profile.player_id == player_id:
+            return profile.id
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "status": "rejected",
+            "reason_code": "ai_profile_missing",
+            "validation_errors": [
+                {
+                    "code": "ai_profile_missing",
+                    "message": "AI-controlled player has no AI profile",
+                    "field": "player_id",
+                }
+            ],
+        },
+    )
+
+
+def _ai_enforcement_kwargs(request: Request) -> dict[str, Any]:
+    app_state = request.app.state
+    kwargs: dict[str, Any] = {}
+    runner = getattr(app_state, "codex_ai_runner", None) or getattr(
+        app_state,
+        "ai_decision_runner",
+        None,
+    )
+    if runner is not None:
+        kwargs["runner"] = runner
+    codex_executable = getattr(app_state, "codex_ai_executable", None)
+    if codex_executable is not None:
+        kwargs["codex_executable"] = codex_executable
+    codex_home = getattr(app_state, "codex_home", None)
+    if codex_home is not None:
+        kwargs["codex_home"] = codex_home
+    schema_file = getattr(app_state, "codex_ai_schema_file", None)
+    if schema_file is not None:
+        kwargs["schema_file"] = schema_file
+    sandbox_dir = getattr(app_state, "codex_ai_sandbox_dir", None)
+    if sandbox_dir is not None:
+        kwargs["sandbox_dir"] = sandbox_dir
+    work_dir = getattr(app_state, "codex_ai_work_dir", None)
+    if work_dir is not None:
+        kwargs["work_dir"] = work_dir
+    return kwargs
+
+
+def _ai_step_in_flight_guard_key(
+    *,
+    game_id: UUID,
+) -> int:
+    guard_payload = {
+        "scope": "ai_step",
+        "game_id": str(game_id),
+    }
+    serialized = json.dumps(guard_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return int.from_bytes(hashlib.blake2b(serialized, digest_size=8).digest(), "big", signed=True)
+
+
+async def _try_acquire_ai_step_in_flight_guard(
+    session: AsyncSession,
+    guard_key: int,
+) -> bool:
+    statement = sa.text("SELECT pg_try_advisory_lock(:guard_key)").bindparams(
+        sa.bindparam("guard_key", type_=sa.BigInteger)
+    )
+    result = await session.execute(statement, {"guard_key": guard_key})
+    return bool(result.scalar_one())
+
+
+async def _release_ai_step_in_flight_guard(
+    session: AsyncSession,
+    guard_key: int,
+) -> None:
+    statement = sa.text("SELECT pg_advisory_unlock(:guard_key)").bindparams(
+        sa.bindparam("guard_key", type_=sa.BigInteger)
+    )
+    await session.execute(statement, {"guard_key": guard_key})
+
+
+async def _ai_negotiation_preflight_rejection(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    player_id: UUID,
+    negotiation_id: UUID,
+) -> JSONResponse | None:
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(negotiations.c.status, negotiations.c.context).where(
+                negotiations.c.game_id == game_id,
+                negotiations.c.id == negotiation_id,
+            )
+        )
+        negotiation_row = result.mappings().first()
+
+    if negotiation_row is None:
+        raise HTTPException(
+            status_code=422,
+            detail="negotiation does not belong to game",
+        )
+
+    terminal_response = _reject_if_negotiation_terminal(str(negotiation_row["status"]))
+    if terminal_response is not None:
+        return terminal_response
+    if str(negotiation_row["status"]) == NEGOTIATION_STATUS_ACCEPTED:
+        return _lifecycle_rejection_response(
+            "negotiation_already_accepted",
+            "accepted negotiations can only execute or expire",
+            field="status",
+        )
+
+    context = _normalized_negotiation_context({"context": negotiation_row["context"]})
+    if str(player_id) not in context["participant_player_ids"]:
+        return _lifecycle_rejection_response(
+            "player_not_participant",
+            "AI player must be a negotiation participant",
+            field="player_id",
+        )
+    return None
+
+
+async def _ai_consumed_response_opportunity_rejection(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    payload: AiStepRequest,
+    mandatory: bool,
+) -> AiStepResponse | None:
+    if mandatory or payload.negotiation_id is None or payload.decision_type not in AI_NEGOTIATION_DECISION_TYPES:
+        return None
+
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(negotiations.c.round_number, negotiations.c.context).where(
+                negotiations.c.game_id == game_id,
+                negotiations.c.id == payload.negotiation_id,
+            )
+        )
+        negotiation_row = result.mappings().first()
+        if negotiation_row is None:
+            return None
+
+        context = _normalized_negotiation_context({"context": negotiation_row["context"]})
+        round_number = int(negotiation_row["round_number"])
+        key = f"round:{round_number}:player:{payload.player_id}"
+        consumed = context.get("ai_response_opportunities_consumed")
+        if not isinstance(consumed, Mapping) or key not in consumed:
+            return None
+
+        consumed_marker = consumed.get(key)
+        if not isinstance(consumed_marker, Mapping):
+            return None
+        ai_decision_id = UUID(str(consumed_marker["ai_decision_id"]))
+        consumed_payload = _consumed_negotiation_opportunity_payload(context)
+        game_status = await _game_status_in_session(session, game_id)
+
+    validation_error = {
+        "code": AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE,
+        "message": "AI response opportunity for this negotiation round has already been consumed",
+        "field": "ai_response_opportunities_consumed",
+    }
+    return AiStepResponse(
+        status="rejected",
+        game_id=game_id,
+        player_id=payload.player_id,
+        decision_type=payload.decision_type,
+        negotiation_id=payload.negotiation_id,
+        ai_decision_id=ai_decision_id,
+        accepted_events=[],
+        accepted_event_id=None,
+        rejected_action_id=None,
+        game_status=game_status,
+        consumed_response_opportunity=True,
+        consumed_negotiation_opportunity=consumed_payload,
+        outcome={
+            "kind": "ai_rejected",
+            "status": "rejected",
+            "reason_code": AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE,
+        },
+        reason_code=AI_RESPONSE_OPPORTUNITY_CONSUMED_REASON_CODE,
+        validation_errors=(validation_error,),
+    )
+
+
+async def _ai_step_response_from_enforcement(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    request: Request,
+    game_id: UUID,
+    payload: AiStepRequest,
+    enforcement_result: Any,
+) -> AiStepResponse | JSONResponse:
+    ai_decision = await _load_ai_decision_row(session_factory, enforcement_result.ai_decision_id)
+    validation_errors = _ai_decision_validation_errors(ai_decision)
+    reason_code = _ai_decision_reason_code(ai_decision, validation_errors)
+    consumed_opportunity = await _consumed_negotiation_opportunity(
+        session_factory,
+        game_id=game_id,
+        negotiation_id=payload.negotiation_id,
+    )
+
+    if enforcement_result.status == "accepted":
+        return AiStepResponse(
+            status="accepted",
+            game_id=game_id,
+            player_id=payload.player_id,
+            decision_type=payload.decision_type,
+            negotiation_id=payload.negotiation_id,
+            ai_decision_id=enforcement_result.ai_decision_id,
+            accepted_events=[_event_response(record) for record in enforcement_result.accepted_events],
+            accepted_event_id=enforcement_result.accepted_event_id,
+            rejected_action_id=enforcement_result.rejected_action_id,
+            game_status=enforcement_result.game_status,
+            consumed_response_opportunity=enforcement_result.consumed_response_opportunity,
+            consumed_negotiation_opportunity=consumed_opportunity,
+            outcome={"kind": "action_decision", "status": "accepted"},
+            reason_code=None,
+            validation_errors=(),
+        )
+
+    if enforcement_result.status == "rejected":
+        response_status: Literal["rejected", "blocked"] = (
+            "blocked" if enforcement_result.game_status == "AI_BLOCKED" else "rejected"
+        )
+        return AiStepResponse(
+            status=response_status,
+            game_id=game_id,
+            player_id=payload.player_id,
+            decision_type=payload.decision_type,
+            negotiation_id=payload.negotiation_id,
+            ai_decision_id=enforcement_result.ai_decision_id,
+            accepted_events=[],
+            accepted_event_id=None,
+            rejected_action_id=enforcement_result.rejected_action_id,
+            game_status=enforcement_result.game_status,
+            consumed_response_opportunity=enforcement_result.consumed_response_opportunity,
+            consumed_negotiation_opportunity=consumed_opportunity,
+            outcome={
+                "kind": "ai_blocked" if response_status == "blocked" else "ai_rejected",
+                "status": response_status,
+                "reason_code": reason_code,
+            },
+            reason_code=reason_code,
+            validation_errors=validation_errors,
+        )
+
+    if payload.decision_type in {
+        "open_negotiation",
+        "negotiation_message",
+        "deal_proposal",
+        "counteroffer",
+        "accept_reject",
+    }:
+        application = await _apply_ai_negotiation_output(
+            request=request,
+            session_factory=session_factory,
+            game_id=game_id,
+            player_id=payload.player_id,
+            ai_decision_id=enforcement_result.ai_decision_id,
+            parsed_output=ai_decision.get("parsed_output"),
+        )
+        if application.status == "rejected":
+            mandatory = payload.mandatory if payload.mandatory is not None else payload.decision_type == "action_decision"
+            persisted_rejection = await _persist_ai_negotiation_application_rejection(
+                session_factory=session_factory,
+                game_id=game_id,
+                player_id=payload.player_id,
+                negotiation_id=payload.negotiation_id,
+                decision_type=payload.decision_type,
+                mandatory=mandatory,
+                ai_decision=ai_decision,
+                application=application,
+            )
+            application_response_status: Literal["rejected", "blocked"] = (
+                "blocked" if persisted_rejection.game_status == AI_BLOCKED_STATUS else "rejected"
+            )
+            application_reason_code = application.reason_code or _reason_code(
+                _application_validation_errors(application)
+            )
+            return AiStepResponse(
+                status=application_response_status,
+                game_id=game_id,
+                player_id=payload.player_id,
+                decision_type=payload.decision_type,
+                negotiation_id=payload.negotiation_id,
+                ai_decision_id=enforcement_result.ai_decision_id,
+                accepted_events=[],
+                accepted_event_id=None,
+                rejected_action_id=persisted_rejection.rejected_action_id,
+                game_status=persisted_rejection.game_status,
+                consumed_response_opportunity=(
+                    enforcement_result.consumed_response_opportunity
+                    or persisted_rejection.consumed_response_opportunity
+                ),
+                consumed_negotiation_opportunity=persisted_rejection.consumed_negotiation_opportunity,
+                outcome=_ai_lifecycle_rejection_response_outcome(
+                    application=application,
+                    response_status=application_response_status,
+                    reason_code=application_reason_code,
+                ),
+                reason_code=application_reason_code,
+                validation_errors=application.validation_errors,
+            )
+
+        game_status = await _game_status(session_factory, game_id)
+        response_negotiation_id = (
+            application.negotiation.id
+            if payload.decision_type == "open_negotiation" and application.negotiation is not None
+            else payload.negotiation_id
+        )
+        return AiStepResponse(
+            status="done",
+            game_id=game_id,
+            player_id=payload.player_id,
+            decision_type=payload.decision_type,
+            negotiation_id=response_negotiation_id,
+            ai_decision_id=enforcement_result.ai_decision_id,
+            accepted_events=[],
+            accepted_event_id=None,
+            rejected_action_id=None,
+            game_status=game_status,
+            consumed_response_opportunity=enforcement_result.consumed_response_opportunity,
+            consumed_negotiation_opportunity=await _consumed_negotiation_opportunity(
+                session_factory,
+                game_id=game_id,
+                negotiation_id=payload.negotiation_id,
+            ),
+            outcome=application.outcome,
+            reason_code=None,
+            validation_errors=(),
+            negotiation=application.negotiation,
+            message=application.message,
+            deal=application.deal,
+        )
+
+    game_status = await _game_status(session_factory, game_id)
+    return AiStepResponse(
+        status="done",
+        game_id=game_id,
+        player_id=payload.player_id,
+        decision_type=payload.decision_type,
+        negotiation_id=payload.negotiation_id,
+        ai_decision_id=enforcement_result.ai_decision_id,
+        accepted_events=[],
+        accepted_event_id=None,
+        rejected_action_id=None,
+        game_status=game_status,
+        consumed_response_opportunity=enforcement_result.consumed_response_opportunity,
+        consumed_negotiation_opportunity=consumed_opportunity,
+        outcome={"kind": payload.decision_type, "status": "done"},
+        reason_code=None,
+        validation_errors=(),
+    )
+
+
+async def _apply_ai_negotiation_output(
+    *,
+    request: Request,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    player_id: UUID,
+    ai_decision_id: UUID,
+    parsed_output: object,
+) -> AiNegotiationApplication:
+    if not isinstance(parsed_output, Mapping):
+        return AiNegotiationApplication(
+            status="rejected",
+            outcome={"kind": "ai_negotiation_application", "status": "rejected"},
+            reason_code="missing_ai_output",
+            validation_errors=(
+                {
+                    "code": "missing_ai_output",
+                    "message": "validated AI decision had no parsed output to apply",
+                    "field": "parsed_output",
+                },
+            ),
+        )
+
+    lifecycle_context = AiNegotiationLifecycleContext(
+        game_id=game_id,
+        player_id=player_id,
+        ai_decision_id=ai_decision_id,
+    )
+    lifecycle_token = _AI_NEGOTIATION_LIFECYCLE_CONTEXT.set(lifecycle_context)
+    try:
+        return await _apply_ai_negotiation_output_with_lifecycle_context(
+            request=request,
+            session_factory=session_factory,
+            game_id=game_id,
+            player_id=player_id,
+            ai_decision_id=ai_decision_id,
+            parsed_output=parsed_output,
+        )
+    finally:
+        _AI_NEGOTIATION_LIFECYCLE_CONTEXT.reset(lifecycle_token)
+
+
+async def _apply_ai_negotiation_output_with_lifecycle_context(
+    *,
+    request: Request,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    player_id: UUID,
+    ai_decision_id: UUID,
+    parsed_output: Mapping[str, Any],
+) -> AiNegotiationApplication:
+    decision_type = str(parsed_output["decision_type"])
+    if decision_type == "open_negotiation":
+        negotiation_payload = parsed_output["negotiation"]
+        result = await create_negotiation(
+            game_id,
+            request,
+            CreateNegotiationRequest(
+                opened_by_player_id=player_id,
+                participant_player_ids=[
+                    UUID(str(participant_id))
+                    for participant_id in negotiation_payload["participant_player_ids"]
+                ],
+                context=dict(negotiation_payload.get("context") or {}),
+            ),
+        )
+        if isinstance(result, JSONResponse):
+            return _ai_negotiation_application_rejection(result)
+        outcome = {
+            "kind": "open_negotiation",
+            "status": "done",
+            "negotiation_id": str(result.id),
+        }
+        await _mark_ai_decision_lifecycle_done(
+            session_factory,
+            ai_decision_id,
+            outcome,
+            negotiation_id=result.id,
+        )
+        return AiNegotiationApplication(
+            status="done",
+            outcome=outcome,
+            negotiation=result,
+        )
+
+    negotiation_id = UUID(str(parsed_output["negotiation_id"]))
+    if decision_type == "negotiation_message":
+        message_payload = parsed_output["message"]
+        result = await create_negotiation_message(
+            game_id,
+            negotiation_id,
+            request,
+            CreateNegotiationMessageRequest(
+                sender_player_id=player_id,
+                recipient_player_id=_uuid_or_none(message_payload.get("recipient_player_id")),
+                body=str(message_payload["body"]),
+                metadata=dict(message_payload.get("metadata") or {}),
+            ),
+        )
+        if isinstance(result, JSONResponse):
+            return _ai_negotiation_application_rejection(result)
+        negotiation = _negotiation_response(await _load_negotiation_in_game(session_factory, game_id, negotiation_id))
+        outcome = {
+            "kind": "negotiation_message",
+            "status": "done",
+            "message_id": str(result.message.id),
+            "negotiation_id": str(negotiation_id),
+        }
+        await _mark_ai_decision_lifecycle_done(session_factory, ai_decision_id, outcome)
+        return AiNegotiationApplication(
+            status="done",
+            outcome=outcome,
+            negotiation=negotiation,
+            message=result.message,
+        )
+
+    if decision_type in {"deal_proposal", "counteroffer"}:
+        raw_deal = parsed_output["deal"] if decision_type == "deal_proposal" else parsed_output["counteroffer"]
+        parent_deal_id = (
+            None if decision_type == "deal_proposal" else UUID(str(raw_deal["responds_to_deal_id"]))
+        )
+        result = await create_deal(
+            game_id,
+            request,
+            CreateDealRequest(
+                proposed_by_player_id=player_id,
+                negotiation_id=negotiation_id,
+                parent_deal_id=parent_deal_id,
+                terms=dict(raw_deal["terms"]),
+            ),
+        )
+        if isinstance(result, JSONResponse):
+            return _ai_negotiation_application_rejection(result)
+        negotiation = _negotiation_response(await _load_negotiation_in_game(session_factory, game_id, negotiation_id))
+        outcome = {
+            "kind": decision_type,
+            "status": "done",
+            "deal_id": str(result.id),
+            "negotiation_id": str(negotiation_id),
+            "parent_deal_id": None if parent_deal_id is None else str(parent_deal_id),
+        }
+        await _mark_ai_decision_lifecycle_done(session_factory, ai_decision_id, outcome)
+        return AiNegotiationApplication(
+            status="done",
+            outcome=outcome,
+            negotiation=negotiation,
+            deal=result,
+        )
+
+    if decision_type == "accept_reject":
+        accept_reject = parsed_output["accept_reject"]
+        decision = str(accept_reject["decision"])
+        result = await _record_deal_acceptance_or_rejection(
+            game_id=game_id,
+            deal_id=UUID(str(accept_reject["deal_id"])),
+            request=request,
+            payload=DealDecisionRequest(player_id=player_id),
+            decision="accept" if decision == "accept" else "reject",
+        )
+        if isinstance(result, JSONResponse):
+            return _ai_negotiation_application_rejection(result)
+        negotiation = _negotiation_response(await _load_negotiation_in_game(session_factory, game_id, negotiation_id))
+        outcome = {
+            "kind": "accept_reject",
+            "status": "done",
+            "deal_id": str(result.id),
+            "negotiation_id": str(negotiation_id),
+            "decision": decision,
+        }
+        await _mark_ai_decision_lifecycle_done(session_factory, ai_decision_id, outcome)
+        return AiNegotiationApplication(
+            status="done",
+            outcome=outcome,
+            negotiation=negotiation,
+            deal=result,
+        )
+
+    return AiNegotiationApplication(
+        status="rejected",
+        outcome={"kind": decision_type, "status": "rejected"},
+        reason_code="unsupported_ai_decision_type",
+        validation_errors=(
+            {
+                "code": "unsupported_ai_decision_type",
+                "message": "AI step cannot apply this decision type",
+                "field": "decision_type",
+            },
+        ),
+    )
+
+
+def _ai_negotiation_application_rejection(response: JSONResponse) -> AiNegotiationApplication:
+    content = _json_response_content(response)
+    raw_errors = content.get("validation_errors", [])
+    validation_errors = tuple(
+        dict(error) for error in raw_errors if isinstance(error, Mapping)
+    )
+    reason_code = content.get("reason_code")
+    return AiNegotiationApplication(
+        status="rejected",
+        outcome={
+            "kind": "ai_negotiation_application",
+            "status": "rejected",
+            "response": content,
+        },
+        reason_code=reason_code if isinstance(reason_code, str) else "ai_negotiation_application_rejected",
+        validation_errors=validation_errors,
+    )
+
+
+def _json_response_content(response: JSONResponse) -> dict[str, Any]:
+    raw_body = response.body
+    if isinstance(raw_body, bytes) and raw_body:
+        decoded = json.loads(raw_body.decode("utf-8"))
+        if isinstance(decoded, Mapping):
+            return dict(decoded)
+    return {}
+
+
+async def _mark_ai_decision_lifecycle_done(
+    session_factory: async_sessionmaker[AsyncSession],
+    ai_decision_id: UUID,
+    outcome: Mapping[str, Any],
+    negotiation_id: UUID | None = None,
+) -> None:
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(
+                sa.select(ai_decisions.c.validation_result).where(ai_decisions.c.id == ai_decision_id)
+            )
+            validation_result = result.scalar_one_or_none()
+            if not isinstance(validation_result, Mapping):
+                validation_result = {}
+            updated_validation = dict(validation_result)
+            updated_validation["lifecycle_result"] = _json_safe_mapping(outcome)
+            update_values: dict[str, Any] = {
+                "status": "accepted",
+                "validation_result": updated_validation,
+            }
+            if negotiation_id is not None:
+                update_values["negotiation_id"] = negotiation_id
+            await session.execute(
+                ai_decisions.update()
+                .where(ai_decisions.c.id == ai_decision_id)
+                .values(**update_values)
+            )
+
+
+async def _persist_ai_negotiation_application_rejection(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    player_id: UUID,
+    negotiation_id: UUID | None,
+    decision_type: str,
+    mandatory: bool,
+    ai_decision: Mapping[str, Any],
+    application: AiNegotiationApplication,
+) -> AiLifecycleRejectionPersistence:
+    validation_errors = _application_validation_errors(application)
+    reason_code = application.reason_code or _reason_code(validation_errors)
+    state = await _load_replayed_state(session_factory, game_id)
+    legal_action_context = _legal_action_context(state, str(player_id))
+    payload = _ai_lifecycle_rejection_payload(
+        ai_decision=ai_decision,
+        application=application,
+        validation_errors=validation_errors,
+        reason_code=reason_code,
+    )
+    consumed_response_opportunity = False
+    consumed_negotiation_opportunity: Mapping[str, Any] | None = None
+
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(
+                sa.select(ai_decisions.c.validation_result)
+                .where(ai_decisions.c.id == ai_decision["id"])
+                .with_for_update()
+            )
+            existing_validation = result.scalar_one_or_none()
+            if not isinstance(existing_validation, Mapping):
+                existing_validation = {}
+
+            rejected_row = await _persist_rejected_action_in_session(
+                session=session,
+                game_id=game_id,
+                actor_player_id=player_id,
+                action_type=f"AI_{decision_type.upper()}",
+                payload=payload,
+                reason_code=reason_code,
+                validation_errors=validation_errors,
+                legal_action_context=legal_action_context,
+                phase=state.turn.phase.value,
+                state_hash=state.state_hash(),
+            )
+            updated_validation = _ai_lifecycle_rejected_validation_result(
+                existing_validation,
+                application=application,
+                reason_code=reason_code,
+                validation_errors=validation_errors,
+            )
+            await session.execute(
+                ai_decisions.update()
+                .where(ai_decisions.c.id == ai_decision["id"])
+                .values(
+                    status="rejected",
+                    accepted_event_id=None,
+                    rejected_action_id=rejected_row["id"],
+                    validation_result=updated_validation,
+                )
+            )
+
+            if mandatory:
+                await session.execute(
+                    games.update()
+                    .where(games.c.id == game_id)
+                    .values(status=AI_BLOCKED_STATUS, updated_at=sa.func.now())
+                )
+            elif negotiation_id is not None:
+                consumed_response_opportunity = await _consume_ai_lifecycle_response_opportunity_in_session(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_id=negotiation_id,
+                    player_id=player_id,
+                    ai_decision_id=ai_decision["id"],
+                    reason_code=reason_code,
+                )
+                consumed_negotiation_opportunity = await _consumed_negotiation_opportunity_in_session(
+                    session=session,
+                    game_id=game_id,
+                    negotiation_id=negotiation_id,
+                )
+
+            game_status = await _game_status_in_session(session, game_id)
+
+    return AiLifecycleRejectionPersistence(
+        rejected_action_id=rejected_row["id"],
+        consumed_response_opportunity=consumed_response_opportunity,
+        consumed_negotiation_opportunity=consumed_negotiation_opportunity,
+        game_status=game_status,
+    )
+
+
+def _ai_lifecycle_rejection_response_outcome(
+    *,
+    application: AiNegotiationApplication,
+    response_status: Literal["rejected", "blocked"],
+    reason_code: str,
+) -> Mapping[str, Any]:
+    if response_status != "blocked":
+        return application.outcome
+    return {
+        "kind": "ai_blocked",
+        "status": "blocked",
+        "reason_code": reason_code,
+        "lifecycle_outcome": _json_safe_mapping(application.outcome),
+    }
+
+
+def _application_validation_errors(
+    application: AiNegotiationApplication,
+) -> tuple[Mapping[str, Any], ...]:
+    if application.validation_errors:
+        return application.validation_errors
+    reason_code = application.reason_code or "ai_negotiation_application_rejected"
+    return (
+        {
+            "code": reason_code,
+            "message": "AI negotiation output was rejected during lifecycle application",
+            "field": None,
+        },
+    )
+
+
+def _ai_lifecycle_rejection_payload(
+    *,
+    ai_decision: Mapping[str, Any],
+    application: AiNegotiationApplication,
+    validation_errors: Sequence[Mapping[str, Any]],
+    reason_code: str,
+) -> dict[str, Any]:
+    return {
+        "ai_decision_id": str(ai_decision["id"]),
+        "ai_output": _json_safe(ai_decision.get("parsed_output")),
+        "raw_output": ai_decision.get("raw_output"),
+        "ai_decision_status": ai_decision.get("status"),
+        "lifecycle_result": _ai_lifecycle_result_payload(
+            application=application,
+            reason_code=reason_code,
+            validation_errors=validation_errors,
+        ),
+        "no_substitute_move": True,
+        "substitute_move": None,
+    }
+
+
+def _ai_lifecycle_rejected_validation_result(
+    existing: Mapping[str, Any],
+    *,
+    application: AiNegotiationApplication,
+    reason_code: str,
+    validation_errors: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    result = dict(existing)
+    result.update(
+        {
+            "status": "rejected",
+            "reason_code": reason_code,
+            "validation_errors": [dict(error) for error in validation_errors],
+            "lifecycle_result": _ai_lifecycle_result_payload(
+                application=application,
+                reason_code=reason_code,
+                validation_errors=validation_errors,
+            ),
+            "rejected_ai_output_records": True,
+            "no_substitute_move": True,
+            "substitute_move": None,
+        }
+    )
+    return result
+
+
+def _ai_lifecycle_result_payload(
+    *,
+    application: AiNegotiationApplication,
+    reason_code: str,
+    validation_errors: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    return _json_safe_mapping(
+        {
+            "status": "rejected",
+            "reason_code": reason_code,
+            "validation_errors": [dict(error) for error in validation_errors],
+            "outcome": dict(application.outcome),
+        }
+    )
+
+
+async def _consume_ai_lifecycle_response_opportunity_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID,
+    player_id: UUID,
+    ai_decision_id: UUID,
+    reason_code: str,
+) -> bool:
+    negotiation_row = await _load_negotiation_row_for_update(
+        session=session,
+        game_id=game_id,
+        negotiation_id=negotiation_id,
+    )
+    if negotiation_row is None:
+        return False
+
+    context = _normalized_negotiation_context(negotiation_row)
+    round_number = int(negotiation_row["round_number"])
+    key = f"round:{round_number}:player:{player_id}"
+
+    consumed = context.setdefault("ai_response_opportunities_consumed", {})
+    if not isinstance(consumed, dict):
+        consumed = {}
+        context["ai_response_opportunities_consumed"] = consumed
+    consumed[key] = {
+        "player_id": str(player_id),
+        "round_number": round_number,
+        "ai_decision_id": str(ai_decision_id),
+        "reason_code": reason_code,
+        "no_substitute_move": True,
+        "substitute_move": None,
+    }
+
+    attempt_counts = context.setdefault("ai_decision_attempts_by_message_id", {})
+    if not isinstance(attempt_counts, dict):
+        attempt_counts = {}
+        context["ai_decision_attempts_by_message_id"] = attempt_counts
+    attempt_counts[key] = int(attempt_counts.get(key, 0)) + 1
+
+    await session.execute(
+        negotiations.update()
+        .where(negotiations.c.id == negotiation_id)
+        .values(context=context, updated_at=sa.func.now())
+    )
+    return True
+
+
+async def _load_ai_decision_row(
+    session_factory: async_sessionmaker[AsyncSession],
+    ai_decision_id: UUID,
+) -> dict[str, Any]:
+    async with session_factory() as session:
+        result = await session.execute(sa.select(ai_decisions).where(ai_decisions.c.id == ai_decision_id))
+        row = result.mappings().first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI decision not found")
+    return dict(row)
+
+
+def _ai_decision_validation_errors(ai_decision: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    validation_result = ai_decision.get("validation_result")
+    if not isinstance(validation_result, Mapping):
+        return ()
+    raw_errors = validation_result.get("validation_errors")
+    if not isinstance(raw_errors, Sequence) or isinstance(raw_errors, (str, bytes, bytearray)):
+        return ()
+    return tuple(dict(error) for error in raw_errors if isinstance(error, Mapping))
+
+
+def _ai_decision_reason_code(
+    ai_decision: Mapping[str, Any],
+    validation_errors: Sequence[Mapping[str, Any]],
+) -> str | None:
+    validation_result = ai_decision.get("validation_result")
+    if isinstance(validation_result, Mapping):
+        reason_code = validation_result.get("reason_code")
+        if isinstance(reason_code, str) and reason_code:
+            return reason_code
+    if validation_errors:
+        code = validation_errors[0].get("code")
+        if isinstance(code, str) and code:
+            return code
+    return None
+
+
+async def _consumed_negotiation_opportunity(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    game_id: UUID,
+    negotiation_id: UUID | None,
+) -> Mapping[str, Any] | None:
+    if negotiation_id is None:
+        return None
+    async with session_factory() as session:
+        return await _consumed_negotiation_opportunity_in_session(
+            session=session,
+            game_id=game_id,
+            negotiation_id=negotiation_id,
+        )
+
+
+async def _consumed_negotiation_opportunity_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    negotiation_id: UUID,
+) -> Mapping[str, Any] | None:
+    result = await session.execute(
+        sa.select(negotiations)
+        .where(negotiations.c.game_id == game_id, negotiations.c.id == negotiation_id)
+    )
+    row = result.mappings().first()
+    if row is None:
+        return None
+    context = _normalized_negotiation_context(dict(row))
+    return _consumed_negotiation_opportunity_payload(context)
+
+
+def _consumed_negotiation_opportunity_payload(
+    context: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    consumed = context.get("ai_response_opportunities_consumed")
+    if not isinstance(consumed, Mapping):
+        return None
+    return _json_safe_mapping({"ai_response_opportunities_consumed": dict(consumed)})
+
+
+async def _game_status(
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+) -> str | None:
+    async with session_factory() as session:
+        return await _game_status_in_session(session, game_id)
+
+
+async def _game_status_in_session(session: AsyncSession, game_id: UUID) -> str | None:
+    result = await session.execute(sa.select(games.c.status).where(games.c.id == game_id))
+    value = result.scalar_one_or_none()
+    return None if value is None else str(value)
 
 
 @router.get(
@@ -2637,6 +3904,106 @@ def _lifecycle_rejection_response(
     )
 
 
+def _game_ai_blocked_validation_error() -> dict[str, str]:
+    return {
+        "code": GAME_AI_BLOCKED_REASON_CODE,
+        "message": "AI_BLOCKED games reject mutating actions and AI step requests",
+        "field": "game_status",
+    }
+
+
+def _ai_player_requires_codex_validation_error(*, field: str = "actor_id") -> dict[str, str]:
+    return {
+        "code": AI_PLAYER_REQUIRES_CODEX_REASON_CODE,
+        "message": "AI-controlled players must submit actions through the Codex AI step endpoint",
+        "field": field,
+    }
+
+
+def _ai_player_requires_codex_lifecycle_response(*, field: str) -> JSONResponse:
+    validation_error = _ai_player_requires_codex_validation_error(field=field)
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "status": "rejected",
+            "reason_code": AI_PLAYER_REQUIRES_CODEX_REASON_CODE,
+            "validation_errors": [validation_error],
+        },
+    )
+
+
+def _ai_negotiation_lifecycle_context_allows(
+    *,
+    game_id: UUID,
+    actor_player_id: UUID | str,
+) -> bool:
+    lifecycle_context = _AI_NEGOTIATION_LIFECYCLE_CONTEXT.get()
+    return (
+        lifecycle_context is not None
+        and lifecycle_context.game_id == game_id
+        and str(lifecycle_context.player_id) == str(actor_player_id)
+        and lifecycle_context.ai_decision_id is not None
+    )
+
+
+async def _reject_direct_ai_negotiation_actor(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    game_id: UUID,
+    actor_player_id: UUID | str,
+    actor_field: str,
+) -> JSONResponse | None:
+    async with session_factory() as session:
+        return await _reject_direct_ai_negotiation_actor_in_session(
+            session=session,
+            game_id=game_id,
+            actor_player_id=actor_player_id,
+            actor_field=actor_field,
+        )
+
+
+async def _reject_direct_ai_negotiation_actor_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    actor_player_id: UUID | str,
+    actor_field: str,
+) -> JSONResponse | None:
+    if _ai_negotiation_lifecycle_context_allows(
+        game_id=game_id,
+        actor_player_id=actor_player_id,
+    ):
+        return None
+    controller_type = await _resolve_actor_controller_type_in_session(
+        session=session,
+        game_id=game_id,
+        actor_id=str(actor_player_id),
+    )
+    if controller_type == "ai":
+        return _ai_player_requires_codex_lifecycle_response(field=actor_field)
+    return None
+
+
+def _stale_action_validation_error() -> dict[str, str]:
+    return {
+        "code": "stale_action",
+        "message": "action expected state no longer matches current state",
+        "field": "expected_state_hash",
+    }
+
+
+def _game_ai_blocked_lifecycle_response() -> JSONResponse:
+    validation_error = _game_ai_blocked_validation_error()
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "status": "rejected",
+            "reason_code": GAME_AI_BLOCKED_REASON_CODE,
+            "validation_errors": [validation_error],
+        },
+    )
+
+
 def _lifecycle_rejection_response_from_errors(
     reason_code: str,
     validation_errors: Sequence[Mapping[str, Any]],
@@ -2735,6 +4102,28 @@ async def _record_deal_acceptance_or_rejection(
                 )
 
             context = _normalized_negotiation_context(negotiation_row)
+            actor_player_id = _decision_player_id(payload, context, deal_row)
+            if actor_player_id is None:
+                return _lifecycle_rejection_response(
+                    "player_id_required",
+                    "player_id is required when more than one participant could respond",
+                    field="player_id",
+                )
+            if actor_player_id not in context["participant_player_ids"]:
+                return _lifecycle_rejection_response(
+                    "player_not_participant",
+                    "player_id must be a negotiation participant",
+                    field="player_id",
+                )
+            ai_actor_response = await _reject_direct_ai_negotiation_actor_in_session(
+                session=session,
+                game_id=game_id,
+                actor_player_id=actor_player_id,
+                actor_field="player_id",
+            )
+            if ai_actor_response is not None:
+                return ai_actor_response
+
             cutoff_response = await _expire_if_active_time_cutoff(
                 session=session,
                 game_id=game_id,
@@ -2766,20 +4155,6 @@ async def _record_deal_acceptance_or_rejection(
                     f"deal_{deal_row['status']}",
                     "only proposed current deals can be accepted or rejected",
                     field="status",
-                )
-
-            actor_player_id = _decision_player_id(payload, context, deal_row)
-            if actor_player_id is None:
-                return _lifecycle_rejection_response(
-                    "player_id_required",
-                    "player_id is required when more than one participant could respond",
-                    field="player_id",
-                )
-            if actor_player_id not in context["participant_player_ids"]:
-                return _lifecycle_rejection_response(
-                    "player_not_participant",
-                    "player_id must be a negotiation participant",
-                    field="player_id",
                 )
 
             if decision == "reject":
@@ -3270,6 +4645,29 @@ async def _resolve_actor_player_id_in_session(
     return result.scalar_one_or_none()
 
 
+async def _resolve_actor_controller_type_in_session(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    actor_id: str | None,
+) -> str | None:
+    if actor_id is None:
+        return None
+    try:
+        normalized_actor_id = UUID(str(actor_id))
+    except ValueError:
+        return None
+
+    result = await session.execute(
+        sa.select(players.c.controller_type).where(
+            players.c.game_id == game_id,
+            players.c.id == normalized_actor_id,
+        )
+    )
+    controller_type = result.scalar_one_or_none()
+    return controller_type if isinstance(controller_type, str) else None
+
+
 def _request_payload_from_body(raw_body: bytes) -> tuple[object, list[dict[str, str]]]:
     try:
         payload: object = json.loads(raw_body)
@@ -3392,6 +4790,31 @@ def _state_payload(state: GameState) -> dict[str, Any]:
 
 def _event_response(record: AcceptedEventRecord) -> AcceptedEventResponse:
     return AcceptedEventResponse.model_validate(record.model_dump())
+
+
+def _ai_profile_response(profile: AIProfile) -> AIProfileResponse:
+    return AIProfileResponse(
+        ai_profile_id=profile.id,
+        game_id=profile.game_id,
+        player_id=profile.player_id,
+        display_name=profile.display_name,
+        persona_name=profile.persona_name,
+        strategy_profile=profile.strategy_profile,
+        persona_summary=profile.persona_summary,
+        traits=list(profile.traits),
+        personality=profile.personality,
+        play_style=profile.play_style,
+        risk_tolerance=profile.risk_tolerance,
+        liquidity_preference=profile.liquidity_preference,
+        debt_appetite=profile.debt_appetite,
+        aggressiveness=profile.aggressiveness,
+        cooperation=profile.cooperation,
+        negotiation_creativity=profile.negotiation_creativity,
+        trust=profile.trust,
+        monopoly_focus=profile.monopoly_focus,
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
+    )
 
 
 def _rejected_response(record: RejectedActionRecord) -> RejectedActionResponse:
@@ -3634,7 +5057,13 @@ def _reason_code(validation_errors: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _status_code_for_reason(reason_code: str) -> int:
-    if reason_code in {"stale_action", "mistimed_action", "idempotency_key_conflict"}:
+    if reason_code in {
+        "stale_action",
+        "mistimed_action",
+        "idempotency_key_conflict",
+        GAME_AI_BLOCKED_REASON_CODE,
+        AI_PLAYER_REQUIRES_CODEX_REASON_CODE,
+    }:
         return status.HTTP_409_CONFLICT
     if reason_code == "missing_idempotency_key":
         return status.HTTP_400_BAD_REQUEST

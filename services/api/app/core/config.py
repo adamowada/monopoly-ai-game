@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from pydantic import Field, field_validator
@@ -27,6 +28,10 @@ def _parse_cors_origins(value: object) -> list[str]:
     return origins
 
 
+def _default_codex_home() -> str:
+    return str(Path.home() / ".codex")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         case_sensitive=False,
@@ -42,6 +47,8 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
     database_url: str = Field(default=DEFAULT_DATABASE_URL)
     cors_origins: str = Field(default=DEFAULT_CORS_ORIGINS)
+    codex_ai_executable: str = Field(default="codex")
+    codex_home: str = Field(default_factory=_default_codex_home)
 
     @field_validator("database_url")
     @classmethod

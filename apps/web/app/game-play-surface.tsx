@@ -27,8 +27,10 @@ import {
   readGameState,
   readLegalActions,
   submitGameAction,
+  submitAiStep,
   type AcceptedEvent,
   type ActionRejectedResponse,
+  type AiStepResponse,
   type GameStateResponse,
   type LegalAction,
 } from "../lib/api/gameplay";
@@ -46,6 +48,13 @@ type GamePlaySurfaceProps = {
   gameId: string;
   initialGame: GameMetadata;
   apiBaseUrl?: string;
+};
+
+type AiStepMode = "manual" | "auto" | "auction_ai_bidder";
+
+type AiStepRequest = {
+  mode: AiStepMode;
+  playerId: string;
 };
 
 type NegotiationCutoffs = {
@@ -116,9 +125,16 @@ function activePhase(game: GameMetadata, snapshot: GameStateResponse | undefined
   return typeof phase === "string" && phase ? phase : (game.current_phase ?? "Unassigned");
 }
 
-function activePlayer(game: GameMetadata, snapshot: GameStateResponse | undefined): GameMetadata["players"][number] | null {
+function activePlayerFromState(
+  game: GameMetadata,
+  snapshot: GameStateResponse | undefined,
+): GameMetadata["players"][number] | null {
   const turn = turnRecord(snapshot);
-  const playerId = typeof turn?.current_player_id === "string" ? turn.current_player_id : null;
+  if (!turn) {
+    return null;
+  }
+
+  const playerId = typeof turn.current_player_id === "string" ? turn.current_player_id : null;
   if (playerId) {
     const byId = game.players.find((player) => player.id === playerId);
     if (byId) {
@@ -126,6 +142,21 @@ function activePlayer(game: GameMetadata, snapshot: GameStateResponse | undefine
     }
   }
 
+  const playerIndex = typeof turn.current_player_index === "number" ? turn.current_player_index : null;
+  if (playerIndex !== null) {
+    return game.players.find((player) => player.seat_order === playerIndex) ?? null;
+  }
+
+  return null;
+}
+
+function activePlayer(game: GameMetadata, snapshot: GameStateResponse | undefined): GameMetadata["players"][number] | null {
+  const statePlayer = activePlayerFromState(game, snapshot);
+  if (statePlayer) {
+    return statePlayer;
+  }
+
+  const turn = turnRecord(snapshot);
   const playerIndex = typeof turn?.current_player_index === "number" ? turn.current_player_index : 0;
   return game.players.find((player) => player.seat_order === playerIndex) ?? game.players[0] ?? null;
 }
@@ -211,6 +242,62 @@ function RejectedActionAlert({
         </div>
       </div>
     </section>
+  );
+}
+
+function aiStepStatusLabel(result: AiStepResponse | null, isThinking: boolean): string {
+  if (isThinking) {
+    return "AI thinking";
+  }
+  if (!result) {
+    return "AI idle";
+  }
+  if (result.status === "blocked") {
+    return "AI blocked";
+  }
+  if (result.status === "rejected") {
+    return "AI rejected";
+  }
+  return "AI done";
+}
+
+function AiStepStatusPanel({
+  result,
+  isThinking,
+}: Readonly<{
+  result: AiStepResponse | null;
+  isThinking: boolean;
+}>) {
+  const label = aiStepStatusLabel(result, isThinking);
+  const isProblem = label === "AI blocked" || label === "AI rejected";
+  return (
+    <div
+      aria-label="AI step status"
+      role="status"
+      className={cn(
+        "rounded-md border px-3 py-2 text-sm",
+        isProblem
+          ? "border-rose-200 bg-rose-50 text-rose-800"
+          : "border-neutral-200 bg-neutral-50 text-neutral-700",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        {isThinking ? (
+          <Loader2 aria-hidden="true" className="mt-0.5 size-4 animate-spin text-neutral-600" />
+        ) : isProblem ? (
+          <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 text-rose-700" />
+        ) : (
+          <Bot aria-hidden="true" className="mt-0.5 size-4 text-purple-700" />
+        )}
+        <div>
+          <p className="font-semibold">{label}</p>
+          {result?.reason_code ? <p className="mt-1 text-xs">{result.reason_code}</p> : null}
+          {result?.validation_errors?.[0]?.message ? (
+            <p className="mt-1 text-xs">{result.validation_errors[0].message}</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -485,6 +572,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [localRejectedAction, setLocalRejectedAction] = useState<ActionRejectedResponse | null>(null);
   const [acceptedEvents, setAcceptedEvents] = useState<AcceptedEvent[]>([]);
   const [pendingActionType, setPendingActionType] = useState<string | null>(null);
+  const [aiStepResult, setAiStepResult] = useState<AiStepResponse | null>(null);
+  const [autoStepAi, setAutoStepAi] = useState(false);
+  const [lastAutoStepKey, setLastAutoStepKey] = useState<string | null>(null);
 
   const gameQuery = useQuery({
     queryKey: ["game", gameId],
@@ -498,7 +588,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   });
 
   const game = gameQuery.data;
-  const currentPlayer = activePlayer(game, stateQuery.data);
+  const stateActivePlayer = activePlayerFromState(game, stateQuery.data);
+  const currentPlayer = stateActivePlayer ?? activePlayer(game, stateQuery.data);
   const phase = activePhase(game, stateQuery.data);
   const stateHash = stateQuery.data?.state_hash ?? "pending-state";
   const eventSequence = stateQuery.data?.event_sequence ?? "pending-sequence";
@@ -613,6 +704,54 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
   });
 
+  const invalidateGameplayData = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["game", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["game-state", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["rejected-actions", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["contracts", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["obligations", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["negotiations", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["negotiation-messages", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["deals", gameId] }),
+    ]);
+
+  const invalidateAiAuditData = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["ai-profiles", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-decisions", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-self-dialogue", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-memory", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-retrieval-records", gameId] }),
+      queryClient.invalidateQueries({ queryKey: ["ai-rejected-outputs", gameId] }),
+    ]);
+
+  const aiStep = useMutation({
+    mutationFn: ({ mode, playerId }: AiStepRequest) =>
+      submitAiStep({
+        gameId,
+        baseUrl,
+        input: {
+          player_id: playerId,
+          decision_type: "action_decision",
+          mandatory: true,
+          request_context: { mode },
+        },
+      }),
+    onMutate: () => {
+      setAiStepResult(null);
+    },
+    onSuccess: (result) => {
+      setAiStepResult(result);
+      if (result.accepted_events.length > 0) {
+        setAcceptedEvents(result.accepted_events);
+      }
+      void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
+    },
+  });
+
   const legalActions = legalActionsQuery.data?.legal_actions ?? [];
   const auctionLegalActions = useMemo(
     () =>
@@ -622,6 +761,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       ]),
     [auctionLegalActionsQueries, legalActions],
   );
+  const playersById = useMemo(() => new Map(game.players.map((player) => [player.id, player])), [game.players]);
   const actionsByGroup = useMemo(() => {
     const grouped: Record<ActionGroup, LegalAction[]> = {
       turn: [],
@@ -643,20 +783,80 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading || legalActionsQuery.isFetching;
-  const controlsDisabled = legalActionsLoading || submitAction.isPending;
-  const auctionControlsDisabled =
-    controlsDisabled || (Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching));
+  const gameAiBlocked = game.status === "AI_BLOCKED";
+  const controlsDisabled = gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending;
+  const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
+  const directActionControlsDisabled = controlsDisabled || Boolean(activeAiPlayer);
+  const aiStepStateBlocked = gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
+  const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
+  const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
+  const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
+  const auctionActionsLoading =
+    Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching);
+  const auctionControlsDisabled = controlsDisabled || auctionActionsLoading;
+
+  function isAiControlledActor(action: LegalAction): boolean {
+    return playersById.get(action.actor_id)?.controller_type === "ai";
+  }
+
+  function isAuctionActionDisabled(action: LegalAction): boolean {
+    if (action.type === "START_AUCTION") {
+      return Boolean(activeAiPlayer) || isAiControlledActor(action);
+    }
+    return isAiControlledActor(action);
+  }
+
+  function canSubmitDirectAction(action: LegalAction): boolean {
+    if (controlsDisabled || isAiControlledActor(action)) {
+      return false;
+    }
+    if (isAuctionAction(action) && action.type !== "START_AUCTION") {
+      return true;
+    }
+    return !activeAiPlayer;
+  }
 
   function handleSubmit(action: LegalAction) {
+    if (!canSubmitDirectAction(action)) {
+      return;
+    }
     submitAction.mutate(action);
   }
+
+  function handleAiStep(mode: AiStepMode, playerId = activeAiPlayer?.id) {
+    if (!playerId || aiStepStateBlocked || gameAiBlocked) {
+      return;
+    }
+    aiStep.mutate({ mode, playerId });
+  }
+
+  useEffect(() => {
+    if (gameAiBlocked || !autoStepAi || !activeAiPlayer || !autoStepKey || aiStep.isPending || submitAction.isPending) {
+      return;
+    }
+    if (stateQuery.isFetching || gameQuery.isFetching || lastAutoStepKey === autoStepKey) {
+      return;
+    }
+    setLastAutoStepKey(autoStepKey);
+    handleAiStep("auto");
+  }, [
+    activeAiPlayer,
+    aiStep.isPending,
+    autoStepAi,
+    autoStepKey,
+    gameQuery.isFetching,
+    gameAiBlocked,
+    lastAutoStepKey,
+    stateQuery.isFetching,
+    submitAction.isPending,
+  ]);
 
   return (
     <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
       <div className="grid content-start gap-4">
         <ClassicGameBoard game={game} />
         <PropertyManagementPanel
-          controlsDisabled={controlsDisabled}
+          controlsDisabled={directActionControlsDisabled}
           game={game}
           legalActions={legalActions}
           onSubmit={handleSubmit}
@@ -674,7 +874,12 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           controlsDisabled={auctionControlsDisabled}
           events={visibleEvents}
           game={game}
+          activeAiPlayerId={activeAiPlayer?.id ?? null}
+          aiStepDisabled={aiStepStateBlocked}
+          aiStepPending={aiStep.isPending}
+          isActionDisabled={isAuctionActionDisabled}
           legalActions={auctionLegalActions}
+          onStepAiBidder={(playerId) => handleAiStep("auction_ai_bidder", playerId)}
           onSubmit={handleSubmit}
           pendingActionType={pendingActionType}
           snapshot={stateQuery.data}
@@ -700,11 +905,37 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
             </div>
           ) : null}
 
+          {activeAiPlayer ? (
+            <div className="mt-4 grid gap-3 rounded-md border border-purple-200 bg-purple-50 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button onClick={() => handleAiStep("manual")} disabled={manualAiStepDisabled}>
+                  {aiStep.isPending ? (
+                    <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+                  ) : (
+                    <Bot aria-hidden="true" className="size-4" />
+                  )}
+                  Step AI
+                </Button>
+                <label className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-900">
+                  <input
+                    type="checkbox"
+                    checked={autoStepAi}
+                    disabled={gameAiBlocked}
+                    onChange={(event) => setAutoStepAi(event.target.checked)}
+                    className="size-4 accent-purple-700"
+                  />
+                  Auto-step AI
+                </label>
+              </div>
+              <AiStepStatusPanel isThinking={aiStep.isPending} result={aiStepResult} />
+            </div>
+          ) : null}
+
           <div className="mt-4 grid gap-3">
             <ActionGroupPanel
               title={groupTitles.turn}
               actions={actionsByGroup.turn}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />
@@ -713,7 +944,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
               <div className="mt-2 flex flex-wrap gap-2">
                 <EndTurnControl
                   endTurnAction={endTurnAction}
-                  disabled={controlsDisabled}
+                  disabled={directActionControlsDisabled}
                   pendingActionType={pendingActionType}
                   onSubmit={handleSubmit}
                 />
@@ -723,21 +954,21 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
             <ActionGroupPanel
               title={groupTitles.purchase}
               actions={actionsByGroup.purchase}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />
             <ActionGroupPanel
               title={groupTitles.payment}
               actions={actionsByGroup.payment}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />
             <ActionGroupPanel
               title={groupTitles.jail}
               actions={actionsByGroup.jail}
-              disabled={controlsDisabled}
+              disabled={directActionControlsDisabled}
               pendingActionType={pendingActionType}
               onSubmit={handleSubmit}
             />
