@@ -16,7 +16,13 @@ from app.rules.debt import (
     settle_debt_with_cash,
 )
 from app.rules.event_capture import capture_rule_events, record_rule_event
-from app.rules.events import ActivePaymentSetPayload, DiceRolledPayload, GameEvent, TurnStateSetPayload
+from app.rules.events import (
+    ActivePaymentSetPayload,
+    CardDrawnPayload,
+    DiceRolledPayload,
+    GameEvent,
+    TurnStateSetPayload,
+)
 from app.rules.mechanics import (
     JAIL_FINE,
     IllegalRuleActionError,
@@ -688,7 +694,9 @@ def _draw_apply_and_resolve_card(
     )
     record_rule_event(draw_event)
     state = apply_event(state, draw_event)
-    card = _card_data(cast(str, draw_event.payload.card_id))
+    if not isinstance(draw_event.payload, CardDrawnPayload):
+        raise TypeError("card draw event payload must be CardDrawnPayload")
+    card = _card_data(draw_event.payload.card_id)
     effect_type = card.effect.get("type")
 
     state = apply_card_effect(

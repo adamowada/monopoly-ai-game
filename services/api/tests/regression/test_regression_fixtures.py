@@ -16,7 +16,7 @@ from app.rules.actions import (
     validate_action,
 )
 from app.rules.debt import outstanding_debt_amount
-from app.rules.events import GameEvent
+from app.rules.events import GameEvent, TurnStateSetPayload
 from app.rules.reducer import replay_events
 from app.rules.state import GameState, PlayerSetup
 
@@ -94,7 +94,11 @@ def _assert_stage10_end_turn_phase_graph(fixture: Mapping[str, Any], state: Game
         )
 
         assert [event.type for event in execution.events] == ["TURN_STATE_SET", "TURN_STATE_SET"]
-        assert [event.payload.phase for event in execution.events] == assertions["legal_end_turn_phases"]
+        turn_payloads: list[TurnStateSetPayload] = []
+        for event in execution.events:
+            assert isinstance(event.payload, TurnStateSetPayload)
+            turn_payloads.append(event.payload)
+        assert [payload.phase for payload in turn_payloads] == assertions["legal_end_turn_phases"]
         assert execution.state.turn.current_player_id == assertions["next_current_player_id"]
         assert execution.state.turn.turn_number == assertions["next_turn_number"]
         assert (

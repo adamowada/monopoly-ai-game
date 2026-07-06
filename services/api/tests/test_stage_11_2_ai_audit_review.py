@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -47,15 +46,12 @@ from app.main import create_app
 TEST_DATABASE_URL = "postgresql+asyncpg://monopoly:monopoly@127.0.0.1:5432/monopoly_ai_game"
 
 
-@dataclass
 class Stage112Runner(CodexExecRunner):
-    outputs: Sequence[Mapping[str, Any] | str]
-
     def __init__(
         self,
-        outputs: Sequence[Mapping[str, Any] | str] = (),
+        queued_outputs: Sequence[Mapping[str, Any] | str] = (),
     ) -> None:
-        self.outputs = list(outputs)
+        self.outputs: list[Mapping[str, Any] | str] = list(queued_outputs)
         self.calls: list[dict[str, Any]] = []
 
     def run(

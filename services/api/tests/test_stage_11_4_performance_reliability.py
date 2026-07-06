@@ -8,6 +8,7 @@ import time
 import tracemalloc
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
@@ -478,7 +479,7 @@ async def _create_persisted_game(
 async def _fetch_snapshots(
     session_factory: async_sessionmaker,
     game_id: UUID,
-) -> list[Mapping[str, object]]:
+) -> list[Mapping[str, Any]]:
     async with session_factory() as session:
         result = await session.execute(
             sa.select(game_snapshots)
