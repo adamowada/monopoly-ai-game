@@ -243,7 +243,7 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
 
     if state.active_auction is not None:
         auction = state.active_auction
-        if actor_id not in auction.passed_player_ids:
+        if actor_id not in auction.passed_player_ids and actor_id != auction.high_bidder_id:
             minimum_bid = _minimum_auction_bid(state)
             if player.cash >= minimum_bid:
                 add(
@@ -750,6 +750,8 @@ def _validate_auction_bid_action(state: GameState, actor: PlayerState, payload: 
 
     if actor.id in auction.passed_player_ids:
         _raise_issue("illegal_action", f"{actor.id} has already passed this auction", "actor_id")
+    if actor.id == auction.high_bidder_id:
+        _raise_issue("illegal_action", f"{actor.id} cannot increase their own high bid", "actor_id")
 
     amount = _required_int(payload, "amount")
     minimum_bid = _minimum_auction_bid(state)
@@ -769,6 +771,8 @@ def _validate_auction_pass_action(state: GameState, actor: PlayerState, payload:
         _raise_issue("illegal_action", f"auction is for {auction.property_id}", "payload.property_id")
     if actor.id in auction.passed_player_ids:
         _raise_issue("illegal_action", f"{actor.id} has already passed this auction", "actor_id")
+    if actor.id == auction.high_bidder_id:
+        _raise_issue("illegal_action", f"{actor.id} cannot pass while holding the high bid", "actor_id")
 
 
 def _validate_jail_fine_action(

@@ -548,6 +548,8 @@ def place_auction_bid(
         raise IllegalRuleActionError("there is no active auction")
     if player_id in auction.passed_player_ids:
         raise IllegalRuleActionError(f"{player_id} has already passed")
+    if player_id == auction.high_bidder_id:
+        raise IllegalRuleActionError("player cannot increase their own high bid")
     if amount <= 0:
         raise IllegalRuleActionError("auction bid must be positive")
     if auction.high_bid_amount is not None and amount <= auction.high_bid_amount:
@@ -576,6 +578,8 @@ def pass_auction(
         raise IllegalRuleActionError("there is no active auction")
     if player_id in auction.passed_player_ids:
         raise IllegalRuleActionError(f"{player_id} has already passed")
+    if player_id == auction.high_bidder_id:
+        raise IllegalRuleActionError("player cannot pass while holding the high bid")
 
     return _set_active_auction(
         _EventStream(event_id_prefix),

@@ -22,9 +22,13 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["app*"]
 
+[tool.setuptools]
+py-modules = ["sitecustomize"]
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.36.0",
+    "coverage>=7.15.0",
     "pytest>=9.0.0",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.14.0",
