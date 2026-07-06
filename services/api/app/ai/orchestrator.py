@@ -13,6 +13,7 @@ import json
 import os
 import signal
 import subprocess
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -138,22 +139,45 @@ class CodexSubprocessRunner:
             **popen_kwargs,
         )
         windows_job_handle = _create_windows_job_for_process(process) if os.name == "nt" else None
+        communicate_result = _CommunicateResult()
+        communicate_thread = threading.Thread(
+            target=_communicate_with_process,
+            args=(process, stdin, communicate_result),
+            name="codex-subprocess-communicate",
+            daemon=True,
+        )
+        communicate_thread.start()
+        started_at = time.monotonic()
         try:
             try:
-                stdout, stderr = process.communicate(input=stdin, timeout=timeout_seconds)
+                returncode = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired as exc:
                 _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+                _join_communicate_thread(communicate_thread, timeout_seconds=5)
                 raise CodexExecTimeoutError(timeout_seconds) from exc
 
-            returncode = process.returncode
-            if returncode is None:
-                returncode = process.wait()
             if int(returncode) != 0:
                 _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+                _join_communicate_thread(communicate_thread, timeout_seconds=5)
+                return CodexExecProcessResult(
+                    returncode=int(returncode),
+                    stdout=communicate_result.stdout,
+                    stderr=communicate_result.stderr,
+                )
+            remaining_timeout = max(0.0, timeout_seconds - (time.monotonic() - started_at))
+            if not _join_communicate_thread(
+                communicate_thread,
+                timeout_seconds=remaining_timeout,
+            ):
+                _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+                _join_communicate_thread(communicate_thread, timeout_seconds=5)
+                raise CodexExecTimeoutError(timeout_seconds)
+            if communicate_result.error is not None:
+                raise communicate_result.error
             return CodexExecProcessResult(
                 returncode=int(returncode),
-                stdout=stdout or "",
-                stderr=stderr or "",
+                stdout=communicate_result.stdout,
+                stderr=communicate_result.stderr,
             )
         finally:
             if windows_job_handle is not None:
@@ -951,6 +975,33 @@ def _coerce_uuid(value: UUID | str) -> UUID:
     if isinstance(value, UUID):
         return value
     return UUID(str(value))
+
+
+@dataclass(slots=True)
+class _CommunicateResult:
+    stdout: str = ""
+    stderr: str = ""
+    error: BaseException | None = None
+
+
+def _communicate_with_process(
+    process: subprocess.Popen[str],
+    stdin: str,
+    result: _CommunicateResult,
+) -> None:
+    try:
+        stdout, stderr = process.communicate(input=stdin)
+    except BaseException as exc:
+        result.error = exc
+        return
+
+    result.stdout = stdout or ""
+    result.stderr = stderr or ""
+
+
+def _join_communicate_thread(thread: threading.Thread, *, timeout_seconds: float) -> bool:
+    thread.join(timeout=max(0.0, timeout_seconds))
+    return not thread.is_alive()
 
 
 def _terminate_process_tree(

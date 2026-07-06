@@ -67,7 +67,7 @@ Measured browser signals and thresholds:
 - Windows subprocesses start with `CREATE_NEW_PROCESS_GROUP`.
 - POSIX subprocesses start in a new session.
 - Timeout cleanup terminates the process tree, waits for exit, and raises `CodexExecTimeoutError`.
-- failed subprocess cleanup terminates the process tree before returning the nonzero return code.
+- failed subprocess cleanup terminates the process tree before returning the nonzero return code, including the inherited pipe case where a child keeps captured stdout/stderr open after the parent exits.
 - Stage 11.4 backend tests launch real parent processes that create child workers, then verify the child exits after timeout cleanup and after a failed parent exits with return code 7.
 
 This specifically guards against orphaned AI subprocesses after Codex timeout and failed subprocess exits.

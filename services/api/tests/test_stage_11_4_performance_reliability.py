@@ -335,6 +335,88 @@ def test_stage_11_4_codex_subprocess_failure_cleanup_terminates_child_tree(
             _kill_pid_tree(child_pid)
 
 
+def test_stage_11_4_codex_subprocess_inherited_pipe_failure_preserves_parent_returncode_and_cleans_child_tree(
+    tmp_path: Path,
+) -> None:
+    # inherited pipe regression: a failed parent must preserve returncode=7 even when
+    # a child keeps inherited stdout/stderr pipes open.
+    child_script = tmp_path / "inherited_pipe_child_worker.py"
+    parent_script = tmp_path / "inherited_pipe_parent_worker.py"
+    heartbeat_file = tmp_path / "inherited_pipe_child_heartbeat.txt"
+    child_pid_file = tmp_path / "inherited_pipe_child.pid"
+
+    child_script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import os",
+                "import sys",
+                "import time",
+                "from pathlib import Path",
+                "heartbeat = Path(sys.argv[1])",
+                "pid_file = Path(sys.argv[2])",
+                "pid_file.write_text(str(os.getpid()), encoding='utf-8')",
+                "for _ in range(1200):",
+                "    heartbeat.write_text(str(time.time()), encoding='utf-8')",
+                "    time.sleep(0.05)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parent_script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import subprocess",
+                "import sys",
+                "import time",
+                "from pathlib import Path",
+                "child_script = Path(sys.argv[1])",
+                "heartbeat = Path(sys.argv[2])",
+                "pid_file = Path(sys.argv[3])",
+                "child = subprocess.Popen([sys.executable, str(child_script), str(heartbeat), str(pid_file)])",
+                "deadline = time.time() + 5",
+                "while not pid_file.exists() and time.time() < deadline:",
+                "    time.sleep(0.01)",
+                "print('parent stdout before returncode 7', flush=True)",
+                "print('parent stderr before returncode 7', file=sys.stderr, flush=True)",
+                "sys.exit(7)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    runner = CodexSubprocessRunner()
+    child_pid: int | None = None
+    try:
+        result = runner.run(
+            [
+                sys.executable,
+                str(parent_script),
+                str(child_script),
+                str(heartbeat_file),
+                str(child_pid_file),
+            ],
+            stdin="",
+            timeout_seconds=5,
+            output_last_message_path=None,
+        )
+
+        child_pid = _read_pid(child_pid_file)
+        assert result.returncode == 7
+        assert "parent stdout before returncode 7" in result.stdout
+        assert "parent stderr before returncode 7" in result.stderr
+        assert child_pid is not None
+        assert _wait_for_pid_exit(child_pid, timeout_seconds=5)
+    finally:
+        if child_pid is None:
+            child_pid = _read_pid(child_pid_file)
+        if child_pid is not None and _pid_is_running(child_pid):
+            _kill_pid_tree(child_pid)
+
+
 async def _ensure_stage_11_4_database() -> None:
     admin_engine = create_async_engine(
         STAGE_11_4_ADMIN_DATABASE_URL,

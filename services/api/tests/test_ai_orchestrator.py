@@ -416,7 +416,8 @@ def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch:
     else:
         assert captured["kwargs"]["start_new_session"] is True
     assert captured["communicate"]["input"] == "prompt on stdin"
-    assert captured["communicate"]["timeout"] == 3
+    assert captured["communicate"]["timeout"] is None
+    assert captured["wait_timeout"] == 3
     assert result.stdout == '{"type":"session_configured"}\n'
     assert result.stderr == ""
     assert result.returncode == 0
