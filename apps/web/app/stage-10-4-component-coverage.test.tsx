@@ -72,7 +72,7 @@ function renderWithQueryClient(ui: ReactElement, fetchMock?: FetchMock) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   }
 
-  return render(ui, { wrapper: Wrapper });
+  return { ...render(ui, { wrapper: Wrapper }), queryClient };
 }
 
 function jsonResponse(payload: unknown, init?: ResponseInit): Promise<Response> {
@@ -902,6 +902,7 @@ describe("Stage 10.4 frontend component coverage", () => {
 
   it("contract panel renders obligations and submits enforcement payloads", async () => {
     const enforcementDeferred = deferred<Response>();
+    const settleContractEndpoint = `${apiBaseUrl}/games/${gameId}/contracts/contract-stage-10-4/settle`;
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -918,13 +919,13 @@ describe("Stage 10.4 frontend component coverage", () => {
       if (url === `${apiBaseUrl}/games/${gameId}/deals` && method === "GET") {
         return jsonResponse({ deals: [dealFixture({ status: "accepted", accepted_at: createdAt })] });
       }
-      if (url === `${apiBaseUrl}/games/${gameId}/contracts/enforce` && method === "POST") {
+      if (url === settleContractEndpoint && method === "POST") {
         return enforcementDeferred.promise;
       }
 
       throw new Error(`Unexpected fetch ${method} ${url}`);
     });
-    renderWithQueryClient(
+    const { queryClient } = renderWithQueryClient(
       <ContractsPanel
         apiBaseUrl={apiBaseUrl}
         events={acceptedEventsFixture()}
@@ -934,6 +935,7 @@ describe("Stage 10.4 frontend component coverage", () => {
       />,
       fetchMock,
     );
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     const panel = await screen.findByRole("region", { name: "Contracts obligations panel" });
     await within(panel).findByText("Contract contract-stage-10-4");
@@ -947,18 +949,17 @@ describe("Stage 10.4 frontend component coverage", () => {
       expect(
         fetchMock.mock.calls.some(
           ([url, init]) =>
-            String(url) === `${apiBaseUrl}/games/${gameId}/contracts/enforce` &&
+            String(url) === settleContractEndpoint &&
             init?.method === "POST" &&
             JSON.stringify(JSON.parse(String(init.body))) ===
               JSON.stringify({
-                trigger_context: {
-                  source: "contracts_panel",
-                  contract_id: "contract-stage-10-4",
-                  obligation_id: "obligation-upcoming-stage-10-4",
-                },
+                obligation_id: "obligation-upcoming-stage-10-4",
               }),
         ),
       ).toBe(true),
+    );
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === `${apiBaseUrl}/games/${gameId}/contracts/enforce`)).toBe(
+      false,
     );
     expect(within(obligation).getByRole("button", { name: "Enforcing..." })).toBeDisabled();
 
@@ -992,6 +993,13 @@ describe("Stage 10.4 frontend component coverage", () => {
     expect(await within(panel).findByRole("status", { name: "Contract enforcement status" })).toHaveTextContent(
       "settled 1 obligation",
     );
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["game-state", gameId] }));
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["game", gameId] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["legal-actions", gameId] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["contracts", gameId] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["obligations", gameId] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["contract-outcomes", gameId] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["events", gameId] });
   });
 
   it("ai audit view renders self-dialogue memory decisions and rejected outputs", async () => {

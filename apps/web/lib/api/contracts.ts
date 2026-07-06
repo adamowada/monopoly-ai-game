@@ -132,6 +132,11 @@ type EnforceContractsOptions = GameApiOptions & {
   triggerContext?: Record<string, unknown>;
 };
 
+type SettleContractOptions = GameApiOptions & {
+  contractId: string;
+  obligationId: string;
+};
+
 function getDefaultBackendBaseUrl(): string {
   return (
     process.env.NEXT_PUBLIC_API_BASE_URL ??
@@ -233,4 +238,26 @@ export async function enforceContracts({
   });
   const payload = await readJson(response, "Enforce contracts", true);
   return parseOrThrow(ContractEnforcementResultSchema, payload, "contract enforcement");
+}
+
+export async function settleContract({
+  gameId,
+  contractId,
+  obligationId,
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: SettleContractOptions): Promise<ContractEnforcementResult> {
+  const response = await fetcher(gameUrl(baseUrl, gameId, `/contracts/${encodeURIComponent(contractId)}/settle`), {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      obligation_id: obligationId,
+    }),
+  });
+  const payload = await readJson(response, "Settle contract", true);
+  return parseOrThrow(ContractEnforcementResultSchema, payload, "contract settlement");
 }

@@ -6,10 +6,10 @@ import { useMemo, useState } from "react";
 
 import { Button } from "../components/ui/button";
 import {
-  enforceContracts,
   readContractOutcomes,
   readContracts,
   readObligations,
+  settleContract,
   type ContractEnforcementResult,
   type ContractOutcomeExplanation,
   type ContractRecord,
@@ -658,22 +658,24 @@ export function ContractsPanel({
   );
   const enforceContractsMutation = useMutation({
     mutationFn: (obligation: ObligationRecord) =>
-      enforceContracts({
+      settleContract({
         gameId,
         baseUrl: apiBaseUrl,
-        triggerContext: {
-          source: "contracts_panel",
-          contract_id: obligation.contract_id,
-          obligation_id: obligation.id,
-        },
+        contractId: obligation.contract_id,
+        obligationId: obligation.id,
       }),
     onSuccess: async (result) => {
       setEnforcementResult(result);
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["game", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["game-state", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["rejected-actions", gameId] }),
         queryClient.invalidateQueries({ queryKey: ["contracts", gameId] }),
         queryClient.invalidateQueries({ queryKey: ["obligations", gameId] }),
         queryClient.invalidateQueries({ queryKey: ["contract-outcomes", gameId] }),
-        queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["deals", gameId] }),
       ]);
     },
   });
