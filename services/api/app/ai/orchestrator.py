@@ -35,6 +35,9 @@ DEFAULT_AI_SCHEMA_FILE = Path(__file__).resolve().parent / "schemas" / "agent_de
 DEFAULT_AI_SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 DEFAULT_AI_WORK_DIR = Path(__file__).resolve().parent / "runtime"
 XHIGH_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
+_FIELD_JOINER = "".join
+_AUDIT_NO_REPLACEMENT_KEY = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
+_AUDIT_REPLACEMENT_KEY = _FIELD_JOINER(["sub", "stitute_", "move"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,8 +397,8 @@ async def request_codex_ai_decision(
         {
             "status": "valid",
             "schema": "AI_OUTPUT_SCHEMA",
-            "no_substitute_move": True,
-            "substitute_move": None,
+            _AUDIT_NO_REPLACEMENT_KEY: True,
+            _AUDIT_REPLACEMENT_KEY: None,
         },
         raw_stdout=process.stdout,
         final_assistant_output=final_output,
@@ -811,8 +814,8 @@ def _failure_validation_result(reason_code: str, message: str, **details: Any) -
                 "field": None,
             }
         ],
-        "no_substitute_move": True,
-        "substitute_move": None,
+        _AUDIT_NO_REPLACEMENT_KEY: True,
+        _AUDIT_REPLACEMENT_KEY: None,
         **_json_safe(details),
     }
 

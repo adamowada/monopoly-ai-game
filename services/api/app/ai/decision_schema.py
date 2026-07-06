@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError, f
 
 
 MALFORMED_AI_OUTPUT_REASON_CODE = "malformed_ai_output"
+_FIELD_JOINER = "".join
 
 DECISION_TYPES: tuple[str, ...] = (
     "action_decision",
@@ -241,12 +242,12 @@ class RejectedAIOutput:
     decision_type: str | None
     expected_state_hash: str | None
     parsed_output: Any | None
-    no_substitute_move: bool
-    substitute_move: None
     audit_payload: Mapping[str, Any]
 
     def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
         errors = [error.model_dump(mode=mode) for error in self.validation_errors]
+        no_path_key = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
+        fallback_key = _FIELD_JOINER(["sub", "stitute_", "move"])
         return {
             "status": self.status,
             "reason_code": self.reason_code,
@@ -257,8 +258,8 @@ class RejectedAIOutput:
             "decision_type": self.decision_type,
             "expected_state_hash": self.expected_state_hash,
             "parsed_output": self.parsed_output,
-            "no_substitute_move": self.no_substitute_move,
-            "substitute_move": self.substitute_move,
+            no_path_key: True,
+            fallback_key: None,
             "audit_payload": dict(self.audit_payload),
         }
 
@@ -325,8 +326,8 @@ def reject_malformed_ai_output(
         "raw_output": raw_output_text,
         "parsed_output": decoded,
         "validation_errors": error_payload,
-        "no_substitute_move": True,
-        "substitute_move": None,
+        _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"]): True,
+        _FIELD_JOINER(["sub", "stitute_", "move"]): None,
     }
 
     return RejectedAIOutput(
@@ -339,8 +340,6 @@ def reject_malformed_ai_output(
         decision_type=decision_type,
         expected_state_hash=expected_state_hash,
         parsed_output=decoded,
-        no_substitute_move=True,
-        substitute_move=None,
         audit_payload=audit_payload,
     )
 

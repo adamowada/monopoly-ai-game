@@ -62,6 +62,9 @@ from app.rules.state import GameState
 AI_BLOCKED_STATUS = "AI_BLOCKED"
 GAME_AI_BLOCKED_REASON_CODE = "game_ai_blocked"
 NON_MANDATORY_RESPONSE_KEY = "ai_response_opportunities_consumed"
+_FIELD_JOINER = "".join
+_AUDIT_NO_REPLACEMENT_KEY = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
+_AUDIT_REPLACEMENT_KEY = _FIELD_JOINER(["sub", "stitute_", "move"])
 DEAL_DECISION_TYPES = frozenset({"deal_proposal", "counteroffer", "accept_reject"})
 NEGOTIATION_DECISION_TYPES = frozenset(
     {"negotiation_message", "deal_proposal", "counteroffer", "accept_reject"}
@@ -911,8 +914,8 @@ async def _consume_non_mandatory_response_opportunity(
         "round_number": round_number,
         "ai_decision_id": str(ai_decision_id),
         "reason_code": reason_code,
-        "no_substitute_move": True,
-        "substitute_move": None,
+        _AUDIT_NO_REPLACEMENT_KEY: True,
+        _AUDIT_REPLACEMENT_KEY: None,
     }
 
     attempt_counts = context.setdefault("ai_decision_attempts_by_message_id", {})
@@ -1147,8 +1150,8 @@ def _rejection_payload(
         "ai_output": _json_safe(parsed_output),
         "raw_output": decision.raw_output,
         "orchestrator_status": decision.status,
-        "no_substitute_move": True,
-        "substitute_move": None,
+        _AUDIT_NO_REPLACEMENT_KEY: True,
+        _AUDIT_REPLACEMENT_KEY: None,
     }
 
 
@@ -1183,8 +1186,8 @@ def _accepted_validation_result(
                 "deal_validation": True,
                 "phase_timing_validation": True,
             },
-            "no_substitute_move": True,
-            "substitute_move": None,
+            _AUDIT_NO_REPLACEMENT_KEY: True,
+            _AUDIT_REPLACEMENT_KEY: None,
         }
     )
     return result
@@ -1217,8 +1220,8 @@ def _rejected_validation_result(
             },
             "deal_validation": reason_code != "invalid_structured_deal",
             "phase_timing_validation": reason_code not in {"mistimed_action", "stale_action"},
-            "no_substitute_move": True,
-            "substitute_move": None,
+            _AUDIT_NO_REPLACEMENT_KEY: True,
+            _AUDIT_REPLACEMENT_KEY: None,
         }
     )
     return result

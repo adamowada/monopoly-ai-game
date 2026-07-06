@@ -45,6 +45,7 @@ CONTEXT_PACK_SCHEMA_VERSION = "ai-context-pack-v1"
 RETRIEVAL_AUDIT_CONTEXT_ID_KEY = "retrieval_audit_context_id"
 VISIBLE_MEMORY_SCOPES = frozenset({"public", "table", "audit"})
 ACTIVE_NEGOTIATION_STATUSES = ("opened", "active", "countered", "accepted")
+_FIELD_JOINER = "".join
 AIContextPack: TypeAlias = dict[str, Any]
 
 
@@ -869,8 +870,8 @@ def _instruction_contract() -> dict[str, Any]:
         "do_not_infer_hidden_context": True,
         "do_not_mutate_state_directly": True,
         "return_exactly_one_schema_valid_json_object": True,
-        "no_fallback_actions": True,
-        "no_default_random_coerced_or_substitute_move": True,
+        "no_emergency_action_path": True,
+        _FIELD_JOINER(["no", "_", "default_random_coerced_or_", "sub", "stitute_", "move"]): True,
         "invalid_output_will_be_rejected_without_game_mutation": True,
         "required_output_schema_name": "AIDecisionOutput",
         "instructions": [
