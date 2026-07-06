@@ -35,6 +35,7 @@ from app.ai.orchestrator import (
     CodexExecRunner,
     CodexExecTimeoutError,
     CodexSubprocessRunner,
+    DEFAULT_AI_SCHEMA_FILE,
     build_codex_exec_command,
     build_prompt,
     parse_codex_jsonl_events,
@@ -366,7 +367,10 @@ def decision_request(fixture: OrchestratorFixture) -> CodexExecAIDecisionRequest
 
 def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) -> None:
     evidence = "Codex exec command forces no approval prompts"
-    schema_path = write_ai_output_schema_file(tmp_path / "agent_decision.schema.json")
+    schema_path = write_ai_output_schema_file(
+        tmp_path / "agent_decision.schema.json",
+        decision_type="action_decision",
+    )
     sandbox_dir = tmp_path / "ai-sandbox"
     last_message_path = tmp_path / "last-message.json"
 
@@ -378,14 +382,30 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
     )
 
     assert command[:4] == ["codex", "-a", "never", "exec"], evidence
+    assert "--skip-git-repo-check" in command
     assert "--json" in command
     assert "--ephemeral" in command
-    assert command[command.index("-c") + 1] == 'model_reasoning_effort="xhigh"'
+    assert command.count("--disable") == 3
+    assert "plugins" in command
+    assert "plugin_hooks" in command
+    assert "shell_snapshot" in command
+    config_values = [command[index + 1] for index, value in enumerate(command[:-1]) if value == "-c"]
+    assert "mcp_servers.robinhood-trading.enabled=false" in config_values
+    assert 'model_reasoning_effort="xhigh"' in config_values
     assert command[command.index("--output-schema") + 1] == str(schema_path)
     assert command[command.index("-C") + 1] == str(sandbox_dir)
     assert command[command.index("--output-last-message") + 1] == str(last_message_path)
     assert command[-1] == "-"
-    assert json.loads(schema_path.read_text(encoding="utf-8"))["title"] == "AIDecisionOutput"
+    written_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert written_schema["type"] == "object"
+    assert written_schema["properties"]["decision_type"]["const"] == "action_decision"
+    assert "oneOf" not in written_schema
+    assert "$defs" not in written_schema
+
+
+def test_default_schema_file_is_runtime_generated_not_checked_in_schema() -> None:
+    assert DEFAULT_AI_SCHEMA_FILE.parent.name == "runtime"
+    assert DEFAULT_AI_SCHEMA_FILE.name == "agent_decision.schema.json"
 
 
 def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch: pytest.MonkeyPatch) -> None:

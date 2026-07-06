@@ -321,6 +321,7 @@ async def test_stage_11_2_ai_command_uses_codex_exec_json_with_xhigh_reasoning()
     )
     assert "codex" in command
     assert "exec" in command
+    assert "--skip-git-repo-check" in command
     assert "--json" in command
     assert "--output-schema" in command
     assert "-c" in command

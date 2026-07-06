@@ -11,6 +11,7 @@ from app.ai.decision_schema import (
     AIDecisionValidationError,
     DECISION_TYPES,
     MALFORMED_AI_OUTPUT_REASON_CODE,
+    output_schema,
     rejected_ai_output,
     validate_ai_decision_output,
 )
@@ -171,6 +172,58 @@ def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
     assert "expected_state_hash" in serialized
     assert "confidence" in serialized
     assert "rationale" in serialized
+
+
+def test_schema_export_closes_all_objects_for_codex_response_format() -> None:
+    def walk(node: object) -> list[dict[str, Any]]:
+        if isinstance(node, dict):
+            found = [node] if node.get("type") == "object" else []
+            for value in node.values():
+                found.extend(walk(value))
+            return found
+        if isinstance(node, list):
+            found: list[dict[str, Any]] = []
+            for value in node:
+                found.extend(walk(value))
+            return found
+        return []
+
+    object_schemas = walk(AI_OUTPUT_SCHEMA)
+
+    assert object_schemas
+    assert all(schema.get("additionalProperties") is False for schema in object_schemas)
+
+
+def test_decision_specific_schema_is_single_strict_object_for_codex_response_format() -> None:
+    schema = output_schema("action_decision")
+
+    assert schema["type"] == "object"
+    assert "oneOf" not in schema
+    assert "$defs" not in schema
+    assert schema["properties"]["decision_type"]["const"] == "action_decision"
+
+    def walk(node: object) -> list[dict[str, Any]]:
+        if isinstance(node, dict):
+            assert "$ref" not in node
+            found = [node] if node.get("type") == "object" else []
+            for value in node.values():
+                found.extend(walk(value))
+            return found
+        if isinstance(node, list):
+            found: list[dict[str, Any]] = []
+            for value in node:
+                found.extend(walk(value))
+            return found
+        return []
+
+    object_schemas = walk(schema)
+
+    assert object_schemas
+    for object_schema in object_schemas:
+        assert object_schema.get("additionalProperties") is False
+        properties = object_schema.get("properties")
+        assert isinstance(properties, dict)
+        assert set(object_schema.get("required", ())) == set(properties)
 
 
 def test_open_negotiation_parses_without_negotiation_id() -> None:

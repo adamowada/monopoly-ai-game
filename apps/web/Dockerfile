@@ -17,6 +17,7 @@ RUN pnpm install --frozen-lockfile
 
 COPY apps/web apps/web
 COPY packages/schemas packages/schemas
+COPY content/rules content/rules
 
 RUN pnpm --filter @monopoly-ai-game/web exec next build
 

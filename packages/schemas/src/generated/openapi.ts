@@ -283,7 +283,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Deals */
+        get: operations["list_deals_games__game_id__deals_get"];
         put?: never;
         /** Create Deal */
         post: operations["create_deal_games__game_id__deals_post"];
@@ -1264,6 +1265,11 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** DealsResponse */
+        DealsResponse: {
+            /** Deals */
+            deals: components["schemas"]["DealResponse"][];
+        };
         /** EnforceContractsRequest */
         EnforceContractsRequest: {
             /** Trigger Context */
@@ -2196,6 +2202,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ContractSettlementResponse"] | components["schemas"]["LifecycleRejectedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deals_games__game_id__deals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealsResponse"];
                 };
             };
             /** @description Validation Error */

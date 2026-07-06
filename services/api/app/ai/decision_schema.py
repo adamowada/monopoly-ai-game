@@ -204,6 +204,33 @@ AIDecisionVariant = Annotated[
 ]
 
 
+_OUTPUT_SCHEMA_DEF_BY_DECISION_TYPE: Mapping[str, str] = {
+    "action_decision": "ActionDecisionOutput",
+    "open_negotiation": "OpenNegotiationOutput",
+    "negotiation_message": "NegotiationMessageOutput",
+    "deal_proposal": "DealProposalOutput",
+    "counteroffer": "CounterofferOutput",
+    "accept_reject": "AcceptRejectOutput",
+    "self_dialogue": "SelfDialogueOutput",
+    "memory_update": "MemoryUpdateOutput",
+}
+_RESPONSE_FORMAT_OMIT_KEYS = {
+    "$defs",
+    "default",
+    "description",
+    "format",
+    "maxItems",
+    "maxLength",
+    "maximum",
+    "minItems",
+    "minLength",
+    "minimum",
+    "minProperties",
+    "title",
+    "uniqueItems",
+}
+
+
 class AIDecisionOutput(RootModel[AIDecisionVariant]):
     """Root AI output contract for `codex exec --json --output-schema`."""
 
@@ -266,13 +293,68 @@ class RejectedAIOutput:
         }
 
 
-AI_OUTPUT_SCHEMA: dict[str, Any] = AIDecisionOutput.model_json_schema()
+def _codex_strict_schema(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        strict_value = {str(key): _codex_strict_schema(item) for key, item in value.items()}
+        if strict_value.get("type") == "object":
+            strict_value["additionalProperties"] = False
+        return strict_value
+    if isinstance(value, list):
+        return [_codex_strict_schema(item) for item in value]
+    return value
 
 
-def output_schema() -> dict[str, Any]:
+AI_OUTPUT_SCHEMA: dict[str, Any] = _codex_strict_schema(AIDecisionOutput.model_json_schema())
+
+
+def _codex_response_format_schema(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        strict_value = {
+            str(key): _codex_response_format_schema(item)
+            for key, item in value.items()
+            if key not in _RESPONSE_FORMAT_OMIT_KEYS
+        }
+        if strict_value.get("type") == "object":
+            strict_value["additionalProperties"] = False
+            properties = strict_value.get("properties")
+            if isinstance(properties, Mapping):
+                strict_value["required"] = list(properties)
+            else:
+                strict_value["properties"] = {}
+                strict_value["required"] = []
+        return strict_value
+    if isinstance(value, list):
+        return [_codex_response_format_schema(item) for item in value]
+    return value
+
+
+def _inline_local_schema_refs(value: Any, definitions: Mapping[str, Any]) -> Any:
+    if isinstance(value, Mapping):
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            definition_name = ref.removeprefix("#/$defs/")
+            resolved = copy.deepcopy(definitions[definition_name])
+            sibling_keywords = {key: item for key, item in value.items() if key != "$ref"}
+            return _inline_local_schema_refs({**resolved, **sibling_keywords}, definitions)
+        return {str(key): _inline_local_schema_refs(item, definitions) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_inline_local_schema_refs(item, definitions) for item in value]
+    return value
+
+
+def output_schema(decision_type: str | None = None) -> dict[str, Any]:
     """Return a copy of the schema for writing to `codex exec --json --output-schema`."""
 
-    return copy.deepcopy(AI_OUTPUT_SCHEMA)
+    if decision_type is None:
+        return copy.deepcopy(AI_OUTPUT_SCHEMA)
+
+    definition_name = _OUTPUT_SCHEMA_DEF_BY_DECISION_TYPE.get(decision_type)
+    if definition_name is None:
+        raise ValueError(f"Unknown AI decision type for output schema: {decision_type}")
+
+    definitions = copy.deepcopy(AI_OUTPUT_SCHEMA["$defs"])
+    decision_schema = copy.deepcopy(definitions[definition_name])
+    return _codex_response_format_schema(_inline_local_schema_refs(decision_schema, definitions))
 
 
 def validate_ai_decision_output(raw_output: Mapping[str, Any] | str | bytes) -> AIDecisionOutput:

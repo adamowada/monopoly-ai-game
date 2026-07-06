@@ -415,6 +415,10 @@ function negotiationFixture(patch: Partial<Negotiation> = {}): Negotiation {
     context: "Ada wants Reading Railroad and a rent share.",
     status: "opened",
     round_number: 1,
+    pending_deal_id: null,
+    current_deal_id: null,
+    acceptances: {},
+    invalidated_acceptances: {},
     created_at: createdAt,
     updated_at: createdAt,
     ...patch,
@@ -433,7 +437,7 @@ function dealFixture(patch: Partial<Deal> = {}): Deal {
     status: "proposed",
     terms: [
       {
-        kind: "cash_transfer",
+        kind: "immediate_cash_transfer",
         from_player_id: adaId,
         to_player_id: graceId,
         amount: 120,
@@ -887,7 +891,14 @@ describe("Stage 10.4 frontend component coverage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Add sample complex instruments" }));
     const preview = screen.getByRole("region", { name: "Contract preview" });
-    for (const termKind of ["cash_transfer", "property_transfer", "loan", "option", "rent_share", "risk_transfer"]) {
+    for (const termKind of [
+      "immediate_cash_transfer",
+      "deferred_cash_payment",
+      "interest_bearing_debt",
+      "property_purchase_option",
+      "rent_share",
+      "insurance_payout",
+    ]) {
       expect(preview).toHaveTextContent(termKind);
     }
 
@@ -906,12 +917,12 @@ describe("Stage 10.4 frontend component coverage", () => {
       participant_player_ids: [adaId, graceId],
       parent_deal_id: null,
       terms: expect.arrayContaining([
-        expect.objectContaining({ kind: "cash_transfer" }),
-        expect.objectContaining({ kind: "property_transfer" }),
-        expect.objectContaining({ kind: "loan" }),
-        expect.objectContaining({ kind: "option" }),
+        expect.objectContaining({ kind: "immediate_cash_transfer" }),
+        expect.objectContaining({ kind: "deferred_cash_payment" }),
+        expect.objectContaining({ kind: "interest_bearing_debt" }),
+        expect.objectContaining({ kind: "property_purchase_option" }),
         expect.objectContaining({ kind: "rent_share" }),
-        expect.objectContaining({ kind: "risk_transfer" }),
+        expect.objectContaining({ kind: "insurance_payout" }),
       ]),
     });
   });

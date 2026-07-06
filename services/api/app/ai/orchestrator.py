@@ -26,17 +26,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.context_pack import RETRIEVAL_AUDIT_CONTEXT_ID_KEY
 from app.ai.decision_schema import (
-    AI_OUTPUT_SCHEMA,
     AIDecisionValidationError,
+    output_schema,
     rejected_ai_output,
     validate_ai_decision_output,
 )
 from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue, retrieval_records
 
 
-DEFAULT_AI_SCHEMA_FILE = Path(__file__).resolve().parent / "schemas" / "agent_decision.schema.json"
 DEFAULT_AI_SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 DEFAULT_AI_WORK_DIR = Path(__file__).resolve().parent / "runtime"
+DEFAULT_AI_SCHEMA_FILE = DEFAULT_AI_WORK_DIR / "agent_decision.schema.json"
 XHIGH_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
 _FIELD_JOINER = "".join
 _AUDIT_NO_REPLACEMENT_KEY = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
@@ -184,11 +184,15 @@ class CodexSubprocessRunner:
                 _close_windows_handle(windows_job_handle)
 
 
-def write_ai_output_schema_file(path: Path | str = DEFAULT_AI_SCHEMA_FILE) -> Path:
+def write_ai_output_schema_file(
+    path: Path | str = DEFAULT_AI_SCHEMA_FILE,
+    *,
+    decision_type: str | None = None,
+) -> Path:
     schema_path = Path(path)
     schema_path.parent.mkdir(parents=True, exist_ok=True)
     schema_path.write_text(
-        json.dumps(AI_OUTPUT_SCHEMA, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        json.dumps(output_schema(decision_type), indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -211,8 +215,17 @@ def build_codex_exec_command(
         "-a",
         "never",
         "exec",
+        "--skip-git-repo-check",
         "--json",
         "--ephemeral",
+        "--disable",
+        "plugins",
+        "--disable",
+        "plugin_hooks",
+        "--disable",
+        "shell_snapshot",
+        "-c",
+        "mcp_servers.robinhood-trading.enabled=false",
         "-c",
         XHIGH_REASONING_CONFIG,
         "--output-schema",
@@ -287,7 +300,7 @@ async def request_codex_ai_decision(
     sandbox_dir: Path | str = DEFAULT_AI_SANDBOX_DIR,
     work_dir: Path | str = DEFAULT_AI_WORK_DIR,
 ) -> CodexExecAIDecisionResult:
-    schema_path = write_ai_output_schema_file(schema_file)
+    schema_path = write_ai_output_schema_file(schema_file, decision_type=request.decision_type)
     sandbox_path = Path(sandbox_dir)
     work_path = Path(work_dir)
     work_path.mkdir(parents=True, exist_ok=True)

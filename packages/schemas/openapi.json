@@ -1981,6 +1981,22 @@
         "title": "DealResponse",
         "type": "object"
       },
+      "DealsResponse": {
+        "properties": {
+          "deals": {
+            "items": {
+              "$ref": "#/components/schemas/DealResponse"
+            },
+            "title": "Deals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deals"
+        ],
+        "title": "DealsResponse",
+        "type": "object"
+      },
       "EnforceContractsRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3866,6 +3882,47 @@
       }
     },
     "/games/{game_id}/deals": {
+      "get": {
+        "operationId": "list_deals_games__game_id__deals_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DealsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Deals",
+        "tags": [
+          "games"
+        ]
+      },
       "post": {
         "operationId": "create_deal_games__game_id__deals_post",
         "parameters": [

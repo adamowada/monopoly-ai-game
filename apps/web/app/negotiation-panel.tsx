@@ -69,12 +69,16 @@ type AiNegotiationStepRequest = {
 };
 
 const termKinds: DealTermKind[] = [
-  "cash_transfer",
-  "property_transfer",
-  "loan",
-  "option",
+  "immediate_cash_transfer",
+  "immediate_property_transfer",
+  "deferred_cash_payment",
+  "installment_loan",
+  "interest_bearing_debt",
+  "collateralized_loan",
+  "property_purchase_option",
   "rent_share",
-  "risk_transfer",
+  "insurance_payout",
+  "conditional_obligation",
 ];
 
 function playerName(game: GameMetadata, playerId: string | null | undefined): string {
@@ -119,29 +123,35 @@ function termSummary(game: GameMetadata, term: DealTerm): string {
   const amount = formatMoney(readNumber(term.amount));
   const propertyId = readString(term.property_id) ?? "unspecified property";
   const percentage = readNumber(term.percentage);
-  if (term.kind === "cash_transfer") {
+  if (term.kind === "immediate_cash_transfer") {
     return `${from} transfers ${amount} to ${to}`;
   }
-  if (term.kind === "property_transfer") {
+  if (term.kind === "immediate_property_transfer") {
     return `${from} transfers ${propertyId} to ${to}`;
   }
-  if (term.kind === "loan") {
+  if (term.kind === "deferred_cash_payment") {
+    return `${from} owes ${amount} to ${to}`;
+  }
+  if (term.kind === "installment_loan" || term.kind === "interest_bearing_debt" || term.kind === "collateralized_loan") {
     return `${from} lends ${amount} to ${to}`;
   }
-  if (term.kind === "option") {
+  if (term.kind === "property_purchase_option") {
     return `${to} receives an option on ${propertyId}`;
   }
   if (term.kind === "rent_share") {
     return `${from} shares ${percentage ?? 0}% rent with ${to}`;
   }
-  return `${to} receives risk coverage from ${from}`;
+  if (term.kind === "insurance_payout") {
+    return `${to} receives risk coverage from ${from}`;
+  }
+  return `${from} owes ${to} a conditional payment`;
 }
 
 function defaultTermDraft(game: GameMetadata, participants: string[]): TermDraft {
   const first = participants[0] ?? game.players[0]?.id ?? "";
   const second = participants.find((playerId) => playerId !== first) ?? game.players[1]?.id ?? first;
   return {
-    kind: "cash_transfer",
+    kind: "immediate_cash_transfer",
     from_player_id: first,
     to_player_id: second,
     amount: "100",
@@ -168,22 +178,79 @@ function termFromDraft(draft: TermDraft): DealTerm {
     summary: draft.summary.trim() || undefined,
   };
 
-  if (draft.kind === "cash_transfer") {
+  if (draft.kind === "immediate_cash_transfer") {
     return { ...base, amount };
   }
-  if (draft.kind === "property_transfer") {
+  if (draft.kind === "immediate_property_transfer") {
     return { ...base, property_id: draft.property_id };
   }
-  if (draft.kind === "loan") {
-    return { ...base, principal: amount, due_round: dueRound, interest_rate_percent: 10 };
+  if (draft.kind === "deferred_cash_payment") {
+    return { ...base, amount, due_turn: dueRound };
   }
-  if (draft.kind === "option") {
-    return { ...base, property_id: draft.property_id, strike_price: amount, expires_round: dueRound };
+  if (draft.kind === "installment_loan") {
+    return {
+      kind: draft.kind,
+      lender_player_id: draft.from_player_id,
+      borrower_player_id: draft.to_player_id,
+      principal_amount: amount,
+      schedule: [{ due_turn: dueRound, amount }],
+      summary: draft.summary.trim() || undefined,
+    };
+  }
+  if (draft.kind === "interest_bearing_debt") {
+    return {
+      kind: draft.kind,
+      lender_player_id: draft.from_player_id,
+      borrower_player_id: draft.to_player_id,
+      principal_amount: amount,
+      due_turn: dueRound,
+      interest_rate_percent: 10,
+      summary: draft.summary.trim() || undefined,
+    };
+  }
+  if (draft.kind === "collateralized_loan") {
+    return {
+      kind: draft.kind,
+      lender_player_id: draft.from_player_id,
+      borrower_player_id: draft.to_player_id,
+      principal_amount: amount,
+      due_turn: dueRound,
+      collateral_property_ids: [draft.property_id],
+      summary: draft.summary.trim() || undefined,
+    };
+  }
+  if (draft.kind === "property_purchase_option") {
+    return {
+      kind: draft.kind,
+      grantor_player_id: draft.from_player_id,
+      holder_player_id: draft.to_player_id,
+      property_id: draft.property_id,
+      strike_price: amount,
+      expiration_turn: dueRound,
+      summary: draft.summary.trim() || undefined,
+    };
   }
   if (draft.kind === "rent_share") {
-    return { ...base, property_id: draft.property_id, percentage, expires_round: dueRound };
+    return { ...base, property_id: draft.property_id, share_percent: percentage, duration_turns: dueRound };
   }
-  return { ...base, covered_event: "rent_due", payout_amount: amount, expires_round: dueRound };
+  if (draft.kind === "insurance_payout") {
+    return {
+      kind: draft.kind,
+      insurer_player_id: draft.from_player_id,
+      insured_player_id: draft.to_player_id,
+      amount,
+      trigger: { type: "rent_collected", property_id: draft.property_id },
+      summary: draft.summary.trim() || undefined,
+    };
+  }
+  return {
+    kind: draft.kind,
+    obligor_player_id: draft.from_player_id,
+    obligee_player_id: draft.to_player_id,
+    amount,
+    trigger: { type: "turn_end", turn: dueRound },
+    summary: draft.summary.trim() || undefined,
+  };
 }
 
 function sampleComplexTerms(game: GameMetadata, participants: string[]): DealTerm[] {
@@ -191,35 +258,36 @@ function sampleComplexTerms(game: GameMetadata, participants: string[]): DealTer
   const second = participants.find((playerId) => playerId !== first) ?? game.players[1]?.id ?? first;
   return [
     {
-      kind: "cash_transfer",
+      kind: "immediate_cash_transfer",
       from_player_id: first,
       to_player_id: second,
       amount: 120,
       summary: `${playerName(game, first)} pays ${playerName(game, second)} $120 immediately`,
     },
     {
-      kind: "property_transfer",
+      kind: "deferred_cash_payment",
       from_player_id: second,
       to_player_id: first,
-      property_id: "property_reading_railroad",
-      summary: `${playerName(game, second)} transfers Reading Railroad`,
+      amount: 60,
+      due_turn: 2,
+      summary: `${playerName(game, second)} owes ${playerName(game, first)} $60 on turn 2`,
     },
     {
-      kind: "loan",
-      from_player_id: first,
-      to_player_id: second,
-      principal: 200,
-      due_round: 3,
+      kind: "interest_bearing_debt",
+      lender_player_id: first,
+      borrower_player_id: second,
+      principal_amount: 200,
+      due_turn: 3,
       interest_rate_percent: 10,
       summary: `${playerName(game, first)} finances a $200 loan due in round 3`,
     },
     {
-      kind: "option",
-      from_player_id: second,
-      to_player_id: first,
+      kind: "property_purchase_option",
+      grantor_player_id: second,
+      holder_player_id: first,
       property_id: "property_oriental_avenue",
       strike_price: 140,
-      expires_round: 4,
+      expiration_turn: 4,
       summary: `${playerName(game, first)} receives a purchase option on Oriental Avenue`,
     },
     {
@@ -227,17 +295,16 @@ function sampleComplexTerms(game: GameMetadata, participants: string[]): DealTer
       from_player_id: first,
       to_player_id: second,
       property_id: "property_reading_railroad",
-      percentage: 25,
-      expires_round: 5,
+      share_percent: 25,
+      duration_turns: 5,
       summary: `${playerName(game, second)} receives 25% of Reading Railroad rent`,
     },
     {
-      kind: "risk_transfer",
-      from_player_id: second,
-      to_player_id: first,
-      covered_event: "large_rent_payment",
-      payout_amount: 75,
-      expires_round: 2,
+      kind: "insurance_payout",
+      insurer_player_id: second,
+      insured_player_id: first,
+      amount: 75,
+      trigger: { type: "rent_collected", property_id: "property_reading_railroad" },
       summary: `${playerName(game, second)} covers $75 of ${playerName(game, first)}'s next large rent loss`,
     },
   ];
@@ -510,7 +577,8 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
   });
 
   const acceptDealMutation = useMutation({
-    mutationFn: (dealId: string) => acceptDeal({ gameId, dealId, baseUrl: apiBaseUrl }),
+    mutationFn: ({ dealId, playerId }: { dealId: string; playerId: string | null }) =>
+      acceptDeal({ gameId, dealId, playerId, baseUrl: apiBaseUrl }),
     onSuccess: async (result) => {
       if (isRejectedMutation(result)) {
         setValidationErrors(result.validation_errors);
@@ -610,6 +678,14 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
     setProposerPlayerId(
       deal.participant_player_ids.find((playerId) => playerId !== deal.proposer_player_id) ?? deal.proposer_player_id,
     );
+  }
+
+  function nextAcceptancePlayerId(deal: Deal): string | null {
+    const accepted = new Set(selectedNegotiation?.acceptances[deal.id] ?? []);
+    const nonProposer = deal.participant_player_ids.filter(
+      (playerId) => playerId !== deal.proposer_player_id && !accepted.has(playerId),
+    );
+    return nonProposer[0] ?? deal.participant_player_ids.find((playerId) => !accepted.has(playerId)) ?? null;
   }
 
   function updateTermDraft(patch: Partial<TermDraft>) {
@@ -1074,7 +1150,15 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                                 <RefreshCw aria-hidden="true" className="size-4" />
                                 Counteroffer
                               </Button>
-                              <Button onClick={() => acceptDealMutation.mutate(deal.id)} disabled={busy}>
+                              <Button
+                                onClick={() =>
+                                  acceptDealMutation.mutate({
+                                    dealId: deal.id,
+                                    playerId: nextAcceptancePlayerId(deal),
+                                  })
+                                }
+                                disabled={busy || !nextAcceptancePlayerId(deal)}
+                              >
                                 {acceptDealMutation.isPending ? (
                                   <Loader2 aria-hidden="true" className="size-4 animate-spin" />
                                 ) : (

@@ -4,7 +4,7 @@
       "additionalProperties": false,
       "properties": {
         "payload": {
-          "additionalProperties": true,
+          "additionalProperties": false,
           "description": "Game action payload to validate before mutation.",
           "title": "Payload",
           "type": "object"
@@ -274,7 +274,7 @@
           "type": "string"
         },
         "terms": {
-          "additionalProperties": true,
+          "additionalProperties": false,
           "minProperties": 1,
           "title": "Terms",
           "type": "object"
@@ -375,7 +375,7 @@
           "type": "array"
         },
         "terms": {
-          "additionalProperties": true,
+          "additionalProperties": false,
           "minProperties": 1,
           "title": "Terms",
           "type": "object"
@@ -472,7 +472,7 @@
           "type": "integer"
         },
         "metadata": {
-          "additionalProperties": true,
+          "additionalProperties": false,
           "title": "Metadata",
           "type": "object"
         },
@@ -569,7 +569,7 @@
           "type": "string"
         },
         "metadata": {
-          "additionalProperties": true,
+          "additionalProperties": false,
           "title": "Metadata",
           "type": "object"
         },
@@ -654,7 +654,7 @@
       "additionalProperties": false,
       "properties": {
         "context": {
-          "additionalProperties": true,
+          "additionalProperties": false,
           "title": "Context",
           "type": "object"
         },

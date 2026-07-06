@@ -429,6 +429,10 @@ class DealResponse(BaseModel):
     accepted_at: Any | None
 
 
+class DealsResponse(BaseModel):
+    deals: list[DealResponse]
+
+
 class DealDecisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1373,6 +1377,20 @@ async def create_negotiation(
             row = dict(result.mappings().one())
 
     return _negotiation_response(row)
+
+
+@router.get("/{game_id}/deals", response_model=DealsResponse)
+async def list_deals(game_id: UUID, request: Request) -> DealsResponse:
+    session_factory = _session_factory(request)
+    await _ensure_game_exists(session_factory, game_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.select(deals)
+            .where(deals.c.game_id == game_id)
+            .order_by(deals.c.created_at.asc(), deals.c.version.asc(), deals.c.id.asc())
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+    return DealsResponse(deals=[_deal_response(row) for row in rows])
 
 
 @router.post(
