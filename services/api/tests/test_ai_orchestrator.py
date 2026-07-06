@@ -408,6 +408,19 @@ def test_default_schema_file_is_runtime_generated_not_checked_in_schema() -> Non
     assert DEFAULT_AI_SCHEMA_FILE.name == "agent_decision.schema.json"
 
 
+def test_default_runtime_schema_file_is_ignored_by_git() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    runtime_schema_path = DEFAULT_AI_SCHEMA_FILE.resolve().relative_to(repo_root)
+
+    completed = subprocess.run(
+        ["git", "check-ignore", "-q", "--", runtime_schema_path.as_posix()],
+        cwd=repo_root,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+
+
 def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 

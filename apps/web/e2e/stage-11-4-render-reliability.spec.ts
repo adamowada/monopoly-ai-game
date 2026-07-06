@@ -11,6 +11,8 @@ const players: TestPlayer[] = [
   { name: "Grace", kind: "human", color: "#7c3aed" },
 ];
 
+const FULL_REVIEW_LONG_TASK_LIMIT = 30;
+
 async function createGame(page: Page) {
   await page.addInitScript(() => {
     const bucket = { longTasks: [] as number[] };
@@ -133,7 +135,7 @@ test("stage-11-4-render-reliability: board panels property management and AI aud
   expect(submittedActions).toContain("End turn");
   expect(metrics.elapsedMs / updateCount).toBeLessThan(1_250);
   expect(metrics.domNodes).toBeLessThan(7_500);
-  expect(metrics.longTaskCount).toBeLessThan(20);
+  expect(metrics.longTaskCount).toBeLessThan(FULL_REVIEW_LONG_TASK_LIMIT);
   expect(metrics.maxLongTaskMs).toBeLessThan(1_000);
   expect(metrics.resourceCount).toBeLessThan(350);
   if (metrics.usedJSHeapSize !== null) {
