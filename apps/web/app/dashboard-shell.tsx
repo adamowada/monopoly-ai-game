@@ -39,14 +39,14 @@ const navigation = [
 const workspaceRows = [
   {
     name: "Game table",
-    status: "Shell ready",
-    detail: "Created games open into a table-based board shell until the SVG board stage starts.",
+    status: "Ready",
+    detail: "Created games open into the illustrated board with player tokens, legal actions, and live table state.",
     icon: Gamepad2,
   },
   {
-    name: "Research audit",
+    name: "AI audit",
     status: "Active",
-    detail: "Rejected action attempts are visible now; AI decisions and memory remain reserved for later phases.",
+    detail: "AI decisions, memory, self-dialogue, and rejected outputs are inspectable from the game table.",
     icon: FlaskConical,
   },
   {
@@ -125,7 +125,7 @@ function getTierRows(snapshot: HealthSnapshot) {
       tier: "Next.js app",
       status: "ready",
       tone: "info",
-      stage: "Stage 1.4 shell",
+      stage: "Game table shell",
       environment: "local browser",
       record: "App Router",
       icon: Activity,
@@ -145,7 +145,7 @@ function getTierRows(snapshot: HealthSnapshot) {
 export function DashboardShell({
   initialHealth,
   initialRejectedActions = [],
-  title = "Local Game Research Console",
+  title = "Monopoly 2.0 Game Table",
 }: DashboardShellProps) {
   const healthQuery = useQuery({
     queryKey: ["backend-health"],
@@ -166,11 +166,11 @@ export function DashboardShell({
               <Gamepad2 aria-hidden="true" className="size-5" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-neutral-950">Monopoly AI</p>
-              <p className="text-xs text-neutral-500">Local game console</p>
+              <p className="text-sm font-semibold text-neutral-950">Monopoly 2.0</p>
+              <p className="text-xs text-neutral-500">Local tabletop game</p>
             </div>
           </div>
-          <nav aria-label="Stack navigation" className="flex flex-1 flex-col gap-1 px-4 py-5">
+          <nav aria-label="Table navigation" className="flex flex-1 flex-col gap-1 px-4 py-5">
             {navigation.map((item) => (
               <a
                 key={`${item.name}-${item.href}`}
@@ -190,14 +190,14 @@ export function DashboardShell({
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase text-teal-700" data-scaffold-stage="Phase 1 Stage 1.4">
-                    Phase 5 Stage 5.1
+                    Local tabletop build
                   </p>
                   <h1 className="mt-1 text-2xl font-semibold tracking-normal text-neutral-950">
                     {title}
                   </h1>
                 </div>
                 <nav
-                  aria-label="Stack navigation"
+                  aria-label="Table navigation"
                   className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:hidden"
                 >
                   {navigation.map((item) => (
@@ -220,11 +220,11 @@ export function DashboardShell({
               <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] lg:px-8">
                 <div>
                   <h2 id="overview-title" className="text-base font-semibold text-neutral-950">
-                    Stack status
+                    Table status
                   </h2>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
-                    Monitor the local stack and create a backend-owned game before using the board
-                    shell, legal actions, negotiations, and audit views.
+                    Start a local table, choose human or AI seats, then play from the illustrated
+                    board with backend-owned legal actions, negotiations, contracts, and audit views.
                   </p>
                 </div>
 
@@ -296,10 +296,10 @@ export function DashboardShell({
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <h2 id="tier-health-title" className="text-base font-semibold text-neutral-950">
-                      Tier health records
+                      Local services
                     </h2>
                     <p className="mt-2 text-sm text-neutral-600">
-                      Compact records for comparing current local stack readiness.
+                      Fast local checks for the browser, API, and database behind the table.
                     </p>
                   </div>
                 </div>
@@ -364,7 +364,7 @@ export function DashboardShell({
               <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8">
                 <div>
                   <h2 id="workspace-title" className="text-base font-semibold text-neutral-950">
-                    Future workspace regions
+                    Table regions
                   </h2>
                   <div className="mt-5 grid gap-3 md:grid-cols-3">
                     {workspaceRows.map((item) => (
@@ -385,9 +385,8 @@ export function DashboardShell({
                 <aside className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
                   <h3 className="text-sm font-semibold text-neutral-950">Stage boundary</h3>
                   <p className="mt-2 text-sm leading-6 text-neutral-600">
-                    This stage creates games and opens the board shell. SVG board art, turn controls,
-                    property actions, auctions, and negotiations remain reserved for later Phase 5
-                    stages.
+                    Games run locally only. The backend referee owns legality, while the browser keeps
+                    the board, action controls, negotiations, contracts, and audit records visible.
                   </p>
                 </aside>
               </div>

@@ -1,6 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { BOARD_SPACES } from "@monopoly-ai-game/schemas";
 
+import { DECK_ART, SPACE_ART_BY_ID } from "./board-art";
 import { ClassicGameBoard } from "./game-board";
 import type { GameMetadata } from "../lib/api/games";
 
@@ -55,6 +57,19 @@ function gameFixture(positions: number[] = [0, 7]): GameMetadata {
 }
 
 describe("ClassicGameBoard", () => {
+  it("defines original art metadata for every board space and both decks", () => {
+    for (const space of BOARD_SPACES) {
+      const art = SPACE_ART_BY_ID[space.id];
+      expect(art, `${space.id} should have art metadata`).toBeDefined();
+      expect(art.title).toBeTruthy();
+      expect(art.motif).toBeTruthy();
+      expect(art.palette.length).toBeGreaterThanOrEqual(2);
+    }
+
+    expect(DECK_ART.chance.title).toBe("Chance");
+    expect(DECK_ART.community_chest.title).toBe("Community Chest");
+  });
+
   it("renders the named board region with all 40 stable board spaces", () => {
     render(<ClassicGameBoard game={gameFixture()} />);
 
@@ -67,6 +82,33 @@ describe("ClassicGameBoard", () => {
     });
     expect(within(board).getByText("GO")).toBeInTheDocument();
     expect(within(board).getByText("Boardwalk")).toBeInTheDocument();
+    expect(within(board).getByText("$400")).toBeInTheDocument();
+  });
+
+  it("renders a game-facing center title and physical deck art without research copy", () => {
+    render(<ClassicGameBoard game={gameFixture()} />);
+
+    const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
+
+    expect(within(board).getByText("Monopoly 2.0")).toBeInTheDocument();
+    expect(within(board).getByLabelText("Chance deck art")).toBeInTheDocument();
+    expect(within(board).getByLabelText("Community Chest deck art")).toBeInTheDocument();
+    expect(within(board).queryByText("Local research table")).not.toBeInTheDocument();
+    expect(within(board).queryByText("Original vector board surface. Token locations are rendered from backend player state.")).not.toBeInTheDocument();
+    expect(within(board).queryByText("40 spaces")).not.toBeInTheDocument();
+    expect(within(board).queryByText("Stable 0-39 indexes")).not.toBeInTheDocument();
+    expect(within(board).queryByText("No board scans")).not.toBeInTheDocument();
+  });
+
+  it("renders a visible motif for each board square", () => {
+    render(<ClassicGameBoard game={gameFixture()} />);
+
+    const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
+    const spaces = board.querySelectorAll("[data-board-space]");
+
+    spaces.forEach((space) => {
+      expect(space.querySelector("[data-space-art]")).toBeTruthy();
+    });
   });
 
   it("derives visible token labels from player positions and updates after rerender", () => {

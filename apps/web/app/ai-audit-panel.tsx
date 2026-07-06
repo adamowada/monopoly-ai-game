@@ -523,7 +523,7 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
               AI audit
             </h2>
             <p className="mt-1 text-sm text-neutral-600">
-              Private local research view for server-owned AI reasoning records. codex exec runtime is scheduled for Phase 7.
+              Private local AI audit for server-owned decisions, memory, self-dialogue, and rejected outputs.
             </p>
           </div>
           <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-200">

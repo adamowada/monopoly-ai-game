@@ -70,11 +70,11 @@ describe("DashboardShell", () => {
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: "Local Game Research Console",
+        name: "Monopoly 2.0 Game Table",
       }),
     ).toBeInTheDocument();
 
-    const navigation = screen.getAllByRole("navigation", { name: "Stack navigation" })[0];
+    const navigation = screen.getAllByRole("navigation", { name: "Table navigation" })[0];
     expect(within(navigation).getByRole("link", { name: /Overview/ })).toHaveAttribute("href", "#overview");
     expect(within(navigation).getByRole("link", { name: /Tier health/ })).toHaveAttribute("href", "#tier-health");
     expect(within(navigation).getByRole("link", { name: /Rejected actions/ })).toHaveAttribute(
@@ -88,7 +88,7 @@ describe("DashboardShell", () => {
     expect(healthStatus).toHaveTextContent("test");
 
     expect(screen.getByRole("row", { name: /FastAPI service ok phase-1-stage-1.3/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Next.js app ready Stage 1.4 shell/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Next.js app ready Game table shell/ })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /Postgres configured compose service/ })).toBeInTheDocument();
   });
 

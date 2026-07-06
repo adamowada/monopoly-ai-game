@@ -6,7 +6,7 @@ export const revalidate = 0;
 
 export default async function Home() {
   const initialHealth = await readBackendHealth();
-  const title = "Local Game Research Console";
+  const title = "Monopoly 2.0 Game Table";
 
   return <DashboardShell initialHealth={initialHealth} title={title} />;
 }

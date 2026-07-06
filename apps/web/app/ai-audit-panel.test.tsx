@@ -403,7 +403,7 @@ describe("AiAuditPanel", () => {
     const panel = await screen.findByRole("region", { name: "AI audit" });
     await within(panel).findByText("Grace audit profile");
 
-    expect(panel).toHaveTextContent("Private local research view");
+    expect(panel).toHaveTextContent("Private local AI audit");
     expect(panel).toHaveTextContent("AI profile");
     expect(panel).toHaveTextContent("Grace");
     expect(panel).toHaveTextContent("Traits");

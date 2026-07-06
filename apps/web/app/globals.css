@@ -2,12 +2,12 @@
 
 :root {
   color-scheme: light;
-  --color-page: #f6f7f5;
-  --color-surface: #ffffff;
-  --color-surface-elevated: #eef2f1;
-  --color-text: #171717;
-  --color-text-secondary: #525866;
-  --color-border: #d8dedc;
+  --color-page: #efe4cf;
+  --color-surface: #fff8e8;
+  --color-surface-elevated: #f3dfb8;
+  --color-text: #2f2418;
+  --color-text-secondary: #6f604c;
+  --color-border: #b99768;
   --color-focus: #0f766e;
 }
 
@@ -23,7 +23,10 @@ html {
 body {
   min-height: 100%;
   margin: 0;
-  background: var(--color-page);
+  background:
+    radial-gradient(circle at 25% 20%, rgba(247, 217, 119, 0.12), transparent 28rem),
+    radial-gradient(circle at 75% 10%, rgba(255, 248, 232, 0.08), transparent 24rem),
+    var(--color-page);
   color: var(--color-text);
   font-family:
     Arial,

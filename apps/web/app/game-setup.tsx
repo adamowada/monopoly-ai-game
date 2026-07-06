@@ -167,12 +167,12 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase text-teal-700">Phase 5 Stage 5.1</p>
+            <p className="text-xs font-semibold uppercase text-teal-700">Local tabletop setup</p>
             <h2 id="game-setup-title" className="mt-1 text-base font-semibold text-neutral-950">
               Game setup
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
-              Configure a local table and create the game through the FastAPI referee.
+              Configure seats, colors, AI players, and negotiation limits before opening the board.
             </p>
           </div>
           <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
@@ -186,7 +186,7 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
             <div className="flex flex-col gap-3 border-b border-neutral-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-neutral-950">Players</h3>
-                <p className="mt-1 text-sm text-neutral-600">Each row maps to a backend player seat.</p>
+                <p className="mt-1 text-sm text-neutral-600">Each row becomes one token at the local table.</p>
               </div>
               <Button onClick={addPlayer} disabled={!canAddPlayer || isSubmitting} className="justify-center">
                 <Plus aria-hidden="true" className="size-4" />

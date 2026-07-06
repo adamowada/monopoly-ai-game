@@ -13,11 +13,9 @@ assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
 
 const page = readFileSync(join(root, "app", "page.tsx"), "utf8");
 for (const marker of [
-  "Local Game Research Console",
-  "Phase 1 Stage 1.1",
-  "Web tier",
-  "API tier",
-  "Database tier",
+  "Monopoly 2.0 Game Table",
+  "DashboardShell",
+  "readBackendHealth",
 ]) {
   assert.ok(page.includes(marker), `page is missing ${marker}`);
 }

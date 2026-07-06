@@ -1,7 +1,8 @@
 import { BOARD_SPACES, PROPERTIES_BY_ID, PROPERTY_GROUPS, type StaticDataBoardSpace } from "@monopoly-ai-game/schemas";
-import { BadgeDollarSign, Building2, Car, Landmark, LockKeyhole, Train, UsersRound } from "lucide-react";
+import { UsersRound } from "lucide-react";
 
 import type { GameMetadata, GamePlayer } from "../lib/api/games";
+import { DECK_ART, DeckArtPreview, SPACE_ART_BY_ID, SpaceMotif } from "./board-art";
 
 type BoardCoordinates = {
   row: number;
@@ -91,65 +92,74 @@ function propertyBandColor(space: StaticDataBoardSpace): string | null {
   return property ? (groupColorById.get(property.group) ?? null) : null;
 }
 
-function spaceKindLabel(space: StaticDataBoardSpace): string {
+function spaceDetailLabel(space: StaticDataBoardSpace): string {
+  if (space.property_id) {
+    const property = PROPERTIES_BY_ID[space.property_id];
+    return property ? `$${property.price}` : "For sale";
+  }
+  if (space.type === "tax") {
+    return typeof space.amount === "number" ? `$${space.amount}` : "Tax";
+  }
   switch (space.type) {
     case "go":
-      return "Start";
+      return "Collect $200";
     case "community_chest":
-      return "Community";
-    case "tax":
-      return "Tax";
-    case "railroad":
-      return "Railroad";
+      return "Draw card";
     case "chance":
-      return "Chance";
+      return "Draw card";
     case "jail":
-      return "Corner";
-    case "utility":
-      return "Utility";
+      return "Just visiting";
     case "free_parking":
-      return "Corner";
+      return "Free stop";
     case "go_to_jail":
-      return "Corner";
-    case "street":
-      return "Property";
+      return "Move to jail";
     default:
       return "Space";
   }
 }
 
-function SpaceIcon({ space }: { space: StaticDataBoardSpace }) {
-  if (space.type === "railroad") {
-    return <Train aria-hidden="true" className="size-3 text-neutral-700" />;
-  }
-  if (space.type === "utility") {
-    return <Building2 aria-hidden="true" className="size-3 text-neutral-700" />;
-  }
-  if (space.type === "tax") {
-    return <BadgeDollarSign aria-hidden="true" className="size-3 text-neutral-700" />;
-  }
-  if (space.type === "go_to_jail" || space.type === "jail") {
-    return <LockKeyhole aria-hidden="true" className="size-3 text-neutral-700" />;
-  }
-  if (space.type === "free_parking") {
-    return <Car aria-hidden="true" className="size-3 text-neutral-700" />;
-  }
-  if (space.type === "go") {
-    return <Landmark aria-hidden="true" className="size-3 text-teal-700" />;
-  }
-  return null;
+function BoardTitleMark() {
+  return (
+    <div className="relative mx-auto grid max-w-sm place-items-center px-3 py-2 text-center">
+      <svg aria-hidden="true" className="absolute inset-0 h-full w-full" viewBox="0 0 360 150" preserveAspectRatio="none">
+        <path d="M28 75 C54 18 123 13 180 34 C237 13 306 18 332 75 C306 132 237 137 180 116 C123 137 54 132 28 75 Z" fill="#173c45" />
+        <path d="M43 75 C66 32 124 28 180 48 C236 28 294 32 317 75 C294 118 236 122 180 102 C124 122 66 118 43 75 Z" fill="none" stroke="#d7a84c" strokeWidth="7" />
+        <path d="M93 75 H267" stroke="#f7e6ad" strokeWidth="2" strokeLinecap="round" opacity="0.75" />
+      </svg>
+      <div className="relative py-3">
+        <p className="text-[11px] font-black uppercase tracking-normal text-[#f7d977]">Local tabletop edition</p>
+        <h2 className="mt-0.5 font-serif text-3xl font-black leading-none text-[#fff7dc] [text-shadow:0_2px_0_rgba(47,36,24,0.5)]">
+          Monopoly 2.0
+        </h2>
+        <p className="mt-1 text-[10px] font-bold uppercase tracking-normal text-[#f7d977]">AI strategy board</p>
+      </div>
+    </div>
+  );
 }
 
-function CardDeckPreview({ title, tone }: { title: string; tone: "chance" | "community" }) {
-  const colorClass = tone === "chance" ? "border-violet-200 bg-violet-50 text-violet-800" : "border-teal-200 bg-teal-50 text-teal-800";
+function CenterBoardArt() {
   return (
-    <div className={`rounded-md border px-3 py-2 ${colorClass}`}>
-      <div className="text-[10px] font-semibold uppercase">{title}</div>
-      <div className="mt-2 h-12 rounded border border-current/20 bg-white/65" aria-hidden="true">
-        <svg viewBox="0 0 120 64" role="img" aria-label={`${title} card preview`} className="h-full w-full">
-          <rect x="10" y="10" width="100" height="44" rx="6" fill="none" stroke="currentColor" strokeWidth="3" />
-          <path d="M24 40 C38 18 52 18 66 40 S94 62 104 24" fill="none" stroke="currentColor" strokeWidth="4" />
+    <div className="col-start-2 col-end-11 row-start-2 row-end-11 overflow-hidden border-4 border-[#2f2418] bg-[#f3dfb8] p-3 text-[#2f2418] shadow-inner">
+      <div className="relative flex h-full min-h-0 flex-col justify-between overflow-hidden rounded-sm border border-[#a06b2d]/45 bg-[#f8edcf] p-3">
+        <svg aria-hidden="true" className="absolute inset-0 h-full w-full opacity-45" viewBox="0 0 720 720" preserveAspectRatio="none">
+          <defs>
+            <pattern id="board-paper-grid" width="36" height="36" patternUnits="userSpaceOnUse">
+              <path d="M36 0H0V36" fill="none" stroke="#c99a55" strokeOpacity="0.16" strokeWidth="2" />
+            </pattern>
+          </defs>
+          <rect width="720" height="720" fill="url(#board-paper-grid)" />
+          <path d="M58 58 H662 V662 H58 Z" fill="none" stroke="#8a5b24" strokeWidth="6" />
+          <path d="M94 94 H626 V626 H94 Z" fill="none" stroke="#8a5b24" strokeWidth="2" strokeDasharray="12 12" />
         </svg>
+
+        <div className="relative">
+          <BoardTitleMark />
+        </div>
+
+        <div className="relative grid min-h-0 grid-cols-2 gap-3">
+          <DeckArtPreview deck={DECK_ART.chance} />
+          <DeckArtPreview deck={DECK_ART.community_chest} />
+        </div>
       </div>
     </div>
   );
@@ -171,56 +181,31 @@ export function ClassicGameBoard({ game }: ClassicGameBoardProps) {
   return (
     <section
       aria-label="Classic Monopoly-style board"
-      className="rounded-md border border-[var(--color-border)] bg-white p-3 shadow-sm"
+      className="rounded-md border border-[#2f2418]/35 bg-[#7a4b2a] p-3 shadow-[0_18px_40px_rgba(47,36,24,0.24)]"
     >
       <div
-        className="relative grid aspect-square w-full overflow-hidden rounded border border-neutral-300 bg-[#f6f7f5]"
+        className="relative grid aspect-square w-full overflow-hidden rounded border-4 border-[#2f2418] bg-[#f3dfb8]"
         style={{
           gridTemplateColumns: `repeat(${boardGridSize}, minmax(0, 1fr))`,
           gridTemplateRows: `repeat(${boardGridSize}, minmax(0, 1fr))`,
         }}
       >
-        <div className="col-start-2 col-end-11 row-start-2 row-end-11 flex flex-col justify-between border border-neutral-200 bg-[#eef2f1] p-4 text-neutral-950">
-          <div>
-            <p className="text-xs font-semibold uppercase text-teal-700">Local research table</p>
-            <h2 className="mt-1 text-lg font-semibold">Classic Monopoly-style board</h2>
-            <p className="mt-2 max-w-md text-xs leading-5 text-neutral-600">
-              Original vector board surface. Token locations are rendered from backend player state.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <CardDeckPreview title="Chance" tone="chance" />
-            <CardDeckPreview title="Community Chest" tone="community" />
-          </div>
-
-          <div className="grid gap-2 text-xs text-neutral-700 sm:grid-cols-3">
-            <div className="rounded border border-neutral-200 bg-white px-3 py-2">
-              <span className="block font-semibold text-neutral-950">40 spaces</span>
-              <span>Stable 0-39 indexes</span>
-            </div>
-            <div className="rounded border border-neutral-200 bg-white px-3 py-2">
-              <span className="block font-semibold text-neutral-950">{game.players.length} tokens</span>
-              <span>Live positions</span>
-            </div>
-            <div className="rounded border border-neutral-200 bg-white px-3 py-2">
-              <span className="block font-semibold text-neutral-950">Vector-only</span>
-              <span>No board scans</span>
-            </div>
-          </div>
-        </div>
+        <CenterBoardArt />
 
         {BOARD_SPACES.map((space) => {
           const coordinates = boardCoordinates(space.position);
           const bandColor = propertyBandColor(space);
           const players = playersByPosition.get(space.position) ?? [];
           const isCorner = space.position % 10 === 0;
+          const art = SPACE_ART_BY_ID[space.id];
+          const [, paperColor] = art.palette;
+          const detailLabel = spaceDetailLabel(space);
 
           return (
             <div
               key={space.id}
               aria-label={`${space.position}: ${space.name}`}
-              className={`relative flex min-h-0 min-w-0 flex-col overflow-hidden border border-neutral-300 bg-white ${
+              className={`relative flex min-h-0 min-w-0 flex-col overflow-hidden border border-[#2f2418]/35 ${
                 isCorner ? "p-1.5" : "p-1"
               }`}
               data-board-space=""
@@ -228,26 +213,27 @@ export function ClassicGameBoard({ game }: ClassicGameBoardProps) {
               style={{
                 gridColumn: coordinates.column,
                 gridRow: coordinates.row,
+                backgroundColor: paperColor,
               }}
             >
               {bandColor ? (
                 <span
                   aria-hidden="true"
-                  className="mb-1 h-1.5 shrink-0 rounded-sm"
+                  className="mb-0.5 h-1.5 shrink-0 rounded-sm shadow-[inset_0_-1px_0_rgba(47,36,24,0.25)]"
                   style={{ backgroundColor: bandColor }}
                 />
               ) : null}
 
-              <div className="flex min-h-0 flex-1 flex-col justify-between gap-1">
+              <div className="flex min-h-0 flex-1 flex-col justify-between gap-0.5">
                 <div>
                   <div className="flex items-center justify-between gap-1">
-                    <span className="text-[9px] font-semibold text-neutral-500">{space.position}</span>
-                    <SpaceIcon space={space} />
+                    <span className="text-[8px] font-black text-[#6c5130]">{space.position}</span>
+                    <span className="truncate text-[8px] font-black uppercase text-[#6c5130]">{detailLabel}</span>
                   </div>
-                  <p className={`${isCorner ? "text-[10px]" : "text-[9px]"} mt-0.5 font-semibold leading-tight text-neutral-950`}>
+                  <p className={`${isCorner ? "text-[10px]" : "text-[9px]"} mt-0.5 font-black leading-[0.95] text-[#2f2418]`}>
                     {space.name}
                   </p>
-                  <p className="mt-0.5 text-[8px] font-medium uppercase text-neutral-500">{spaceKindLabel(space)}</p>
+                  <SpaceMotif art={art} className="mx-auto mt-0.5 h-[32%] min-h-4 w-full max-w-12 shrink" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-0.5" aria-label={`Tokens on ${space.name}`}>
@@ -257,7 +243,7 @@ export function ClassicGameBoard({ game }: ClassicGameBoardProps) {
                       <span
                         key={player.id}
                         aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
-                        className="inline-flex aspect-square min-h-4 min-w-4 items-center justify-center rounded-full border border-white text-[9px] font-bold shadow-sm ring-1 ring-neutral-900/10"
+                        className="inline-flex aspect-square min-h-4 min-w-4 items-center justify-center rounded-full border border-white text-[9px] font-black shadow-sm ring-2 ring-[#2f2418]/25"
                         data-player-token=""
                         data-player-id={player.id}
                         data-space-index={space.position}
@@ -279,7 +265,7 @@ export function ClassicGameBoard({ game }: ClassicGameBoardProps) {
       </div>
 
       <div className="mt-3 flex items-center gap-2 text-xs text-neutral-600">
-        <UsersRound aria-hidden="true" className="size-4 text-teal-700" />
+        <UsersRound aria-hidden="true" className="size-4 text-[#7a4b2a]" />
         <span>Player tokens are grouped on their current board spaces and labeled for assistive technology.</span>
       </div>
     </section>

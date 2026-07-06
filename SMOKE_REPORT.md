@@ -3,18 +3,18 @@ Status: pass
 ## Lineage Gate
 
 - Selected Design Lineage: `application-dashboard`.
-- Primary user task: monitor current local game/research stack state, compare tier records, navigate future operational details, and adjust setup filters/settings later.
-- Selected Page: `Dashboard Page`.
-- Selected Layout: `Sidebar App Shell`; mobile uses the same navigation as a top summary/navigation list with no hamburger control.
-- Selected Component families: `tables`, `badges`, `forms`, `grid-layout`, `icon-systems`, `responsive-behavior`, `accessibility-patterns`, `tailwind-theme-patterns`.
-- Rejected lineage: `application-coordination`, because Stage 1.4 monitors broad stack state rather than choosing and acting on one record.
-- Rejected lineage: `saas-marketing`, because marketing density, hero rhythm, and CTA hierarchy conflict with an operational local game console.
-- Color Palette roles: neutral off-white page background, white surface, tinted neutral elevated surface, near-black primary text, cool neutral secondary/muted text, low-contrast neutral border, teal primary accent/focus, green secondary/success, amber warning, rose danger, neutral disabled.
-- Density: medium-to-high operational density with compact repeated records.
-- Visual Hierarchy: app title and backend stack status first, tier health records second, future workspace regions third.
-- Affordance and Hover State: navigation anchors target page sections, refresh button refetches health, disabled future setup controls are visibly disabled, passive workspace cards do not carry interactive affordance.
-- Responsive behavior: desktop sidebar becomes a top summary/navigation list on narrow screens; essential health and navigation remain visible.
-- Accessibility basics: landmarks, semantic headings, table headers, form labels, named refresh control, visible focus, and text status labels in addition to color.
+- Primary user task: play and inspect an active local board game while keeping turn controls, player state, negotiations, contracts, and AI audit reachable.
+- Selected Page: `Dashboard Page`, adapted as a game table surface where the board is the dominant product object.
+- Selected Layout: existing two-column application layout with a large board region and right-side action panels; board interior uses a responsive `Grid Layout`.
+- Selected Component families: `badges`, `forms`, `grid-layout`, `icon-systems`, `image-usage`, `responsive-behavior`, `accessibility-patterns`, and `tailwind-theme-patterns`.
+- Rejected lineage: `saas-marketing`, because the gameplay page is an active application workflow rather than a persuasion page.
+- Rejected lineage: `ecommerce-product-evaluation`, because the board art needs product-like image richness, but the primary task is not choosing variants or purchasing.
+- Color Palette roles: warm paper board background, off-white square surfaces, deeper rail/border ink, near-black primary text, muted brown secondary text, classic property colors, gold title accent, red primary mark accent, teal focus, green success, amber warning, rose danger, neutral disabled.
+- Density: game-board density on the board itself, compact operational density in side panels, no marketing hero rhythm.
+- Visual Hierarchy: the board and title mark lead, square names and prices follow, player tokens remain immediately visible, action panels stay secondary.
+- Affordance and Hover State: board squares are passive display objects with no decorative hover affordance; actionable buttons remain explicit and labelled.
+- Responsive behavior: the square board remains aspect-ratio constrained; small viewports stack panels without hiding legal actions or token positions.
+- Accessibility basics: semantic board region, accessible square labels, text alternatives for visual motifs, named controls, visible focus, and no status by color alone.
 
 ## Actual Index Files Read
 
@@ -26,26 +26,52 @@ Status: pass
 
 ## Source Inspection Boundary
 
-- `application_blocks/react/page-examples/home-screens/02-stacked.jsx`
-- `application_blocks/react/application-shells/multi-column/06-full-width-with-narrow-sidebar-and-header.jsx`
-- `application_blocks/react/lists/tables/18-with-hidden-headings.jsx`
-- `application_blocks/react/elements/badges/18-small-flat-pill-with-dot.jsx`
-- `insights/application_blocks/react/page-examples/home-screens/02-stacked.jsx.md`
-- `insights/application_blocks/react/application-shells/multi-column/06-full-width-with-narrow-sidebar-and-header.jsx.md`
-- `insights/application_blocks/react/lists/tables/18-with-hidden-headings.jsx.md`
-- `insights/application_blocks/react/elements/badges/18-small-flat-pill-with-dot.jsx.md`
+- Current repo files inspected:
+  - `apps/web/app/game-board.tsx`
+  - `apps/web/app/game-board.test.tsx`
+  - `apps/web/app/stage-10-4-component-coverage.test.tsx`
+  - `apps/web/app/globals.css`
+  - `assets/vector/README.md`
+  - `AGENTS.md`
+- Web Design Templates guidance inspected:
+  - `GLOSSARY.md`
+  - `insights/guides/START_HERE.md`
+  - `insights/guides/VALIDATION.md`
+  - `insights/guides/redesigning-a-website.md`
+  - `insights/guides/using-images-and-icons.md`
+  - `insights/guides/finding-visual-style.md`
+  - `insights/guides/choosing-a-design-lineage.md`
+  - `insights/recipes/admin-dashboard.md`
+  - `insights/library/pages/dashboard-page.md`
+  - `insights/library/layouts/grid-layout.md`
+  - `insights/library/images/image-usage.md`
+  - `insights/library/icons/icon-systems.md`
+  - `insights/library/responsive/responsive-behavior.md`
+  - `insights/library/accessibility/accessibility-patterns.md`
+  - `insights/library/styles/tailwind-theme-patterns.md`
+  - `insights/library/styles/typography-styles.md`
+  - `insights/library/components/badges.md`
 
 ## Runtime Verification
 
-- Build command: `pnpm --filter @monopoly-ai-game/web run build`.
-- Start command: `pnpm --filter @monopoly-ai-game/web run start`.
-- API verification port: `18002`.
-- Web verification port: `13002`.
-- Production server PID during verification: `19156`.
-- Verification routes: `/` and `/api/backend-health`.
-- Runtime evidence: production HTML contained `Local Game Research Console`, `api`, and `ok`; Playwright verified the browser-visible backend health status, backend stage, and environment text against the production server.
-- Cleanup result: API and web process trees were stopped and ports `18002` and `13002` were confirmed closed.
+- Build command: `$env:NEXT_PUBLIC_API_BASE_URL='http://127.0.0.1:18202'; $env:INTERNAL_API_BASE_URL='http://127.0.0.1:18202'; $env:NEXT_TELEMETRY_DISABLED='1'; pnpm --filter @monopoly-ai-game/web run build`.
+- Start command: `pnpm --filter @monopoly-ai-game/web run start` with `PORT=13202`, `HOSTNAME=127.0.0.1`, `INTERNAL_API_BASE_URL=http://127.0.0.1:18202`, and `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:18202`.
+- Mock API start command: `node scripts/mock-api.mjs` with `MOCK_API_PORT=18202`.
+- API verification port: `18202`.
+- Web verification port: `13202`.
+- Production server launcher PID during verification: `26008`.
+- Mock API PID during verification: `14936`.
+- Verification routes: `/`, `/games/mock-game-*`, and `/api/backend-health`.
+- Runtime evidence:
+  - `curl.exe -I http://127.0.0.1:13202/` returned `HTTP/1.1 200 OK`.
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/app-shell.spec.ts e2e/game-board.spec.ts --project=chromium` passed against the production server with `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13202`, `PLAYWRIGHT_API_BASE_URL=http://127.0.0.1:18202`, and `MOCK_API_PORT=18202`.
+  - `pnpm --filter @monopoly-ai-game/web run test:e2e` passed with 25 passing tests and 1 expected skipped final-local-acceptance test.
+  - `pnpm --filter @monopoly-ai-game/web run test:unit` passed with 64 passing tests.
+  - `pnpm --filter @monopoly-ai-game/web run typecheck` passed.
+  - Screenshot evidence captured at `tmp/art-polish-board-final.png`.
+- Cleanup result: production web and mock API processes were stopped; no `LISTENING` sockets remained on ports `13202` or `18202`.
 
 ## Residual Risks
 
-- No known residual risk for Stage 1.4 scope.
+- The generated style sheet at `assets/art/reference/monopoly-2-style-sheet-v1.png` is reference-only because its central plaque is too close to Monopoly-like trade dress for production use.
+- The production board uses code-native motifs for tiny square readability. `ART_PLAN.md` allows future local AI-generated bitmap replacements where larger card/property surfaces can show richer art.
