@@ -1,8 +1,8 @@
 {
   "fixture_version": 1,
   "id": "stage10_end_turn_phase_graph",
-  "title": "END_TURN uses a valid phase graph and rejects reducer-invalid timing",
-  "source": ".codex-supervisor/phase10_stage106_review_after_end_turn_repair.txt",
+  "title": "END_TURN uses a valid phase graph and preserves mandatory roll timing",
+  "source": "commit 865bf7f and .codex-supervisor/phase10_stage106_review_after_end_turn_repair.txt",
   "seed": "stage10-end-turn-phase-graph-seed",
   "game_id": "stage10-end-turn-phase-graph-game",
   "players": [
@@ -82,9 +82,25 @@
         "phase": "POST_ROLL_MANAGEMENT",
         "consecutive_doubles": 0
       }
+    },
+    {
+      "event_id": "stage10-end-turn-phase-graph-6",
+      "sequence": 6,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "NEGOTIATION_WINDOW",
+        "consecutive_doubles": 0
+      }
     }
   ],
   "reproduction": {
+    "legal_entry_prefix_sequences": {
+      "POST_ROLL_MANAGEMENT": 5,
+      "NEGOTIATION_WINDOW": 6
+    },
     "legal_action": {
       "actor_id": "player-1",
       "type": "END_TURN",
@@ -95,17 +111,23 @@
       "actor_id": "player-1",
       "type": "END_TURN",
       "payload": {}
+    },
+    "start_turn_illegal_action": {
+      "actor_id": "player-1",
+      "type": "END_TURN",
+      "payload": {}
     }
   },
   "expectation": {
-    "bug": "END_TURN must not surface InvalidEventError from reducer-invalid phases.",
+    "bug": "END_TURN must not surface InvalidEventError from reducer-invalid phases or bypass the mandatory roll window.",
     "assertions": {
-      "final_replayed_phase": "POST_ROLL_MANAGEMENT",
+      "final_replayed_phase": "NEGOTIATION_WINDOW",
       "legal_end_turn_event_count": 2,
       "legal_end_turn_phases": ["END_TURN", "START_TURN"],
       "next_current_player_id": "player-2",
       "next_turn_number": 2,
-      "illegal_rejection_code": "mistimed_action"
+      "illegal_rejection_code": "mistimed_action",
+      "mandatory_roll_rejection_code": "mistimed_action"
     }
   }
 }

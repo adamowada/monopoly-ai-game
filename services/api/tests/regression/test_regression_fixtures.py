@@ -60,28 +60,57 @@ def test_regression_fixture_fixed_behavior(fixture_id: str) -> None:
 
 
 def _assert_stage10_end_turn_phase_graph(fixture: Mapping[str, Any], state: GameState) -> None:
+    reproduction = fixture["reproduction"]
     assertions = fixture["expectation"]["assertions"]
     assert state.turn.phase == assertions["final_replayed_phase"]
-    assert "END_TURN" in _legal_action_types(state, "player-1")
 
-    action = _action_from_fixture(state, fixture["reproduction"]["legal_action"])
-    execution = execute_action(state, action, "stage10-end-turn-phase-graph")
+    # Mandatory-roll protection: a fresh START_TURN cannot skip directly to END_TURN.
+    fresh_state = _replay_fixture(fixture, through_sequence=0)
+    assert fresh_state.turn.phase == "START_TURN"
+    assert "END_TURN" not in _legal_action_types(fresh_state, "player-1")
+    with pytest.raises(ActionValidationError) as exc_info:
+        validate_action(
+            fresh_state,
+            _action_from_fixture(fresh_state, reproduction["start_turn_illegal_action"]),
+        )
 
-    assert [event.type for event in execution.events] == ["TURN_STATE_SET", "TURN_STATE_SET"]
-    assert [event.payload.phase for event in execution.events] == assertions["legal_end_turn_phases"]
-    assert execution.state.turn.current_player_id == assertions["next_current_player_id"]
-    assert execution.state.turn.turn_number == assertions["next_turn_number"]
-    assert execution.state.event_sequence == state.event_sequence + assertions["legal_end_turn_event_count"]
+    assert _issue_codes(exc_info.value) == {assertions["mandatory_roll_rejection_code"]}
+    assert assertions["mandatory_roll_rejection_code"] == "mistimed_action"
+
+    legal_entry_prefix_sequences = reproduction["legal_entry_prefix_sequences"]
+    assert isinstance(legal_entry_prefix_sequences, Mapping)
+    assert set(legal_entry_prefix_sequences) == {"POST_ROLL_MANAGEMENT", "NEGOTIATION_WINDOW"}
+    for phase_name, prefix_sequence in legal_entry_prefix_sequences.items():
+        legal_state = _replay_fixture(fixture, through_sequence=int(prefix_sequence))
+        assert legal_state.turn.phase == phase_name
+        assert "END_TURN" in _legal_action_types(legal_state, "player-1")
+
+        action = _action_from_fixture(legal_state, reproduction["legal_action"])
+        validate_action(legal_state, action)
+        execution = execute_action(
+            legal_state,
+            action,
+            f"stage10-end-turn-phase-graph-{phase_name.lower()}",
+        )
+
+        assert [event.type for event in execution.events] == ["TURN_STATE_SET", "TURN_STATE_SET"]
+        assert [event.payload.phase for event in execution.events] == assertions["legal_end_turn_phases"]
+        assert execution.state.turn.current_player_id == assertions["next_current_player_id"]
+        assert execution.state.turn.turn_number == assertions["next_turn_number"]
+        assert (
+            execution.state.event_sequence
+            == legal_state.event_sequence + assertions["legal_end_turn_event_count"]
+        )
 
     illegal_state = _replay_fixture(
         fixture,
-        through_sequence=fixture["reproduction"]["illegal_prefix_sequence"],
+        through_sequence=reproduction["illegal_prefix_sequence"],
     )
     assert "END_TURN" not in _legal_action_types(illegal_state, "player-1")
     with pytest.raises(ActionValidationError) as exc_info:
         validate_action(
             illegal_state,
-            _action_from_fixture(illegal_state, fixture["reproduction"]["illegal_action"]),
+            _action_from_fixture(illegal_state, reproduction["illegal_action"]),
         )
 
     assert _issue_codes(exc_info.value) == {assertions["illegal_rejection_code"]}
