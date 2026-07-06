@@ -230,7 +230,7 @@ def _updates_for_event(state: GameState, event: GameEvent) -> dict[str, Any]:
 
     if event.type == "DECK_STATE_SET":
         payload = _expect_payload(event, DeckStateSetPayload)
-        _validate_deck_state_payload(payload)
+        _validate_deck_state_payload(state, payload)
         deck_updates = state.decks.model_dump(mode="python")
         deck_updates[payload.deck] = DeckState(
             draw_pile=payload.draw_pile,
@@ -418,8 +418,12 @@ def _validate_active_payment_payload(state: GameState, payload: ActivePaymentSet
             raise InvalidEventError(f"unknown creditor {payload.creditor_id}") from exc
 
 
-def _validate_deck_state_payload(payload: DeckStateSetPayload) -> None:
-    _validate_full_deck_membership(payload.deck, (*payload.draw_pile, *payload.discard_pile))
+def _validate_deck_state_payload(state: GameState, payload: DeckStateSetPayload) -> None:
+    _validate_deck_membership_allowing_held_cards(
+        state,
+        payload.deck,
+        (*payload.draw_pile, *payload.discard_pile),
+    )
 
 
 def _validate_dice_rolled_payload(state: GameState, payload: DiceRolledPayload) -> None:
@@ -480,12 +484,49 @@ def _validate_full_deck_membership(deck_name: str, card_ids: tuple[str, ...]) ->
         raise InvalidEventError(f"{deck_name} deck state must contain every deck card exactly once")
 
 
+def _validate_deck_membership_allowing_held_cards(
+    state: GameState,
+    deck_name: str,
+    card_ids: tuple[str, ...],
+) -> None:
+    expected_card_ids = _card_ids_for_deck(deck_name)
+    event_card_ids = set(card_ids)
+    unknown_card_ids = event_card_ids - expected_card_ids
+    if unknown_card_ids:
+        unknown_card_id = sorted(unknown_card_ids)[0]
+        raise InvalidEventError(f"unknown card {unknown_card_id}")
+    if len(card_ids) != len(event_card_ids):
+        raise InvalidEventError(f"{deck_name} deck cannot contain duplicate cards")
+
+    held_card_ids = _held_card_ids_for_deck(state, deck_name)
+    duplicated_held_cards = event_card_ids & held_card_ids
+    if duplicated_held_cards:
+        duplicated_card_id = sorted(duplicated_held_cards)[0]
+        raise InvalidEventError(f"{duplicated_card_id} cannot be both held and in the {deck_name} deck")
+
+    accounted_card_ids = event_card_ids | held_card_ids
+    if accounted_card_ids != expected_card_ids:
+        raise InvalidEventError(f"{deck_name} deck state must contain every unheld deck card exactly once")
+
+
 def _validate_player_card_ids(card_ids: tuple[str, ...]) -> None:
     known_card_ids = _all_card_ids()
     unknown_card_ids = set(card_ids) - known_card_ids
     if unknown_card_ids:
         unknown_card_id = sorted(unknown_card_ids)[0]
         raise InvalidEventError(f"unknown card {unknown_card_id}")
+
+
+def _held_card_ids_for_deck(state: GameState, deck_name: str) -> set[str]:
+    expected_card_ids = _card_ids_for_deck(deck_name)
+    held_card_ids: set[str] = set()
+    for player in state.players:
+        held_card_ids.update(
+            card_id
+            for card_id in player.get_out_of_jail_card_ids
+            if card_id in expected_card_ids
+        )
+    return held_card_ids
 
 
 def _validate_turn_payload(state: GameState, payload: TurnStateSetPayload) -> None:

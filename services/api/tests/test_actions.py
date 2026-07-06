@@ -554,6 +554,6 @@ def test_roll_dice_action_uses_deterministic_rng_and_records_dice_event() -> Non
 
     assert next_state_a.rng.dice_roll_count == 1
     assert next_state_a.players[0].position == next_state_b.players[0].position
-    assert next_state_a.turn.phase == "POST_ROLL_MANAGEMENT"
-    assert "END_TURN" in _types(list_legal_actions(next_state_a, "player-1"))
+    assert next_state_a.turn.phase == "PURCHASE_OR_AUCTION"
+    assert {"BUY_PROPERTY", "START_AUCTION"}.issubset(_types(list_legal_actions(next_state_a, "player-1")))
     assert next_state_a.applied_event_ids[0] == "roll-1"
