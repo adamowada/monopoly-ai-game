@@ -127,7 +127,10 @@ function dueText(obligation: ObligationRecord): string {
 }
 
 export function canSettleObligation(obligation: ObligationRecord): boolean {
-  return obligation.status === "due";
+  if (obligation.status === "due") {
+    return true;
+  }
+  return obligation.status === "pending" && obligation.due_turn === null && obligation.due_condition === null;
 }
 
 function eventKind(event: AcceptedEvent): LogFilter {

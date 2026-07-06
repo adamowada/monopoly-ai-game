@@ -300,16 +300,16 @@ function contractFixture(): ContractRecord {
 function obligationsFixture(): ObligationRecord[] {
   return [
     {
-      id: "obligation-upcoming-stage-10-4",
+      id: "obligation-immediate-stage-10-4",
       game_id: gameId,
       contract_id: "contract-stage-10-4",
       obligated_player_id: adaId,
       counterparty_player_id: graceId,
-      status: "due",
-      due_turn: 6,
-      due_condition: "Boardwalk rent collected",
+      status: "pending",
+      due_turn: null,
+      due_condition: null,
       amount: 50,
-      asset_summary: "$50 rent-share transfer",
+      asset_summary: "$50 immediate rent-share transfer",
       transfer_summary: null,
       triggering_event_id: null,
       settled_at: null,
@@ -920,13 +920,26 @@ describe("Stage 10.4 frontend component coverage", () => {
     const enforcementDeferred = deferred<Response>();
     const settleContractEndpoint = `${apiBaseUrl}/games/${gameId}/contracts/contract-stage-10-4/settle`;
     const obligations = obligationsFixture();
-    const dueObligationRecord = obligations.find((obligation) => obligation.id === "obligation-upcoming-stage-10-4");
+    const immediateObligationRecord = obligations.find(
+      (obligation) => obligation.id === "obligation-immediate-stage-10-4",
+    );
     const futureObligationRecord = obligations.find((obligation) => obligation.id === "obligation-future-stage-10-4");
-    if (!dueObligationRecord || !futureObligationRecord) {
+    if (!immediateObligationRecord || !futureObligationRecord) {
       throw new Error("Stage 10.4 obligation fixture is incomplete.");
     }
-    expect(dueObligationRecord.status === "due").toBe(true);
-    expect(canSettleObligation(dueObligationRecord)).toBe(true);
+    expect(immediateObligationRecord.status === "pending").toBe(true);
+    expect(immediateObligationRecord.due_turn === null).toBe(true);
+    expect(immediateObligationRecord.due_condition === null).toBe(true);
+    expect(canSettleObligation(immediateObligationRecord)).toBe(true);
+    expect(
+      canSettleObligation({
+        ...immediateObligationRecord,
+        id: "obligation-due-stage-10-4",
+        status: "due",
+        due_turn: 6,
+        due_condition: "Boardwalk rent collected",
+      }),
+    ).toBe(true);
     expect(canSettleObligation(futureObligationRecord)).toBe(false);
 
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
@@ -965,9 +978,10 @@ describe("Stage 10.4 frontend component coverage", () => {
 
     const panel = await screen.findByRole("region", { name: "Contracts obligations panel" });
     await within(panel).findByText("Contract contract-stage-10-4");
-    const obligation = within(panel).getByRole("article", { name: "Obligation obligation-upcoming-stage-10-4" });
-    expect(obligation).toHaveTextContent("due_turn 6");
-    expect(obligation).toHaveTextContent("$50 rent-share transfer");
+    const obligation = within(panel).getByRole("article", { name: "Obligation obligation-immediate-stage-10-4" });
+    expect(obligation).toHaveTextContent("pending");
+    expect(obligation).toHaveTextContent("due condition not set");
+    expect(obligation).toHaveTextContent("$50 immediate rent-share transfer");
 
     const futureObligation = within(panel).getByRole("article", { name: "Obligation obligation-future-stage-10-4" });
     expect(futureObligation).toHaveTextContent("scheduled");
@@ -999,7 +1013,7 @@ describe("Stage 10.4 frontend component coverage", () => {
             init?.method === "POST" &&
             JSON.stringify(JSON.parse(String(init.body))) ===
               JSON.stringify({
-                obligation_id: "obligation-upcoming-stage-10-4",
+                obligation_id: "obligation-immediate-stage-10-4",
               }),
         ),
       ).toBe(true),
@@ -1013,7 +1027,7 @@ describe("Stage 10.4 frontend component coverage", () => {
       Response.json({
         status: "ok",
         game_id: gameId,
-        settled_obligation_ids: ["obligation-upcoming-stage-10-4"],
+        settled_obligation_ids: ["obligation-immediate-stage-10-4"],
         defaulted_obligation_ids: [],
         accepted_events: [
           {
@@ -1024,7 +1038,7 @@ describe("Stage 10.4 frontend component coverage", () => {
             event_type: "CONTRACT_TRIGGERED_TRANSFER",
             payload: {
               contract_id: "contract-stage-10-4",
-              obligation_id: "obligation-upcoming-stage-10-4",
+              obligation_id: "obligation-immediate-stage-10-4",
               amount: 50,
             },
             state_hash: "state-contract-stage-10-4-2",
