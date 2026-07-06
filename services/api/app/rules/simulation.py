@@ -5,11 +5,29 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Final
 
 from app.rules.actions import GameAction, LegalAction, apply_action, list_legal_actions
 from app.rules.mechanics import is_game_over, winning_player_id
+from app.rules.phases import TurnPhase
 from app.rules.static_data import load_classic_monopoly_data
 from app.rules.state import GameState, PlayerSetup, PlayerState, create_initial_game_state
+
+
+INVARIANT_CHECKS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "cash_ledger_reconciliation": (
+            "Accepted event streams must reconcile player cash from PLAYER_CASH_DELTA events."
+        ),
+        "ownership_uniqueness": "Each tracked purchasable property must have one ownership slot.",
+        "bank_inventory_non_negative": "Bank house and hotel inventory must stay within bank bounds.",
+        "house_hotel_scarcity": "Bank inventory plus board improvements must equal the classic supply.",
+        "phase_validity": "The turn phase must be one of the declared rules-engine phases.",
+        "replay_determinism": "Replaying the same seed and events must reproduce the same state.",
+        "random_legal_action_simulation": "Generated legal-action simulations must preserve invariants.",
+        "reproducible_failure_context": "Invariant failures must include enough context to reproduce.",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,6 +336,26 @@ def _collect_invariant_violations(state: GameState) -> tuple[InvariantViolation,
     if not 0 <= state.bank_inventory.hotels <= 12:
         add("invalid_bank_hotels", "bank hotel inventory must be within 0 to 12", "bank_inventory.hotels")
 
+    houses_on_board = sum(ownership.houses for ownership in state.property_ownership)
+    hotels_on_board = sum(1 for ownership in state.property_ownership if ownership.hotel)
+    if state.bank_inventory.houses + houses_on_board != data.bank_inventory.houses:
+        add(
+            "house_scarcity_mismatch",
+            "bank houses plus board houses must equal the classic house supply",
+            "bank_inventory.houses",
+        )
+    if state.bank_inventory.hotels + hotels_on_board != data.bank_inventory.hotels:
+        add(
+            "hotel_scarcity_mismatch",
+            "bank hotels plus board hotels must equal the classic hotel supply",
+            "bank_inventory.hotels",
+        )
+
+    try:
+        TurnPhase(state.turn.phase)
+    except ValueError:
+        add("invalid_turn_phase", f"unknown turn phase {state.turn.phase}", "turn.phase")
+
     for ownership in state.property_ownership:
         if ownership.owner_id is not None and ownership.owner_id not in active_player_ids:
             add(
@@ -463,6 +501,7 @@ def _build_failure(
 ) -> SimulationFailure:
     action_data = _action_to_mapping(action)
     context = {
+        "seed": state.seed,
         "state_hash": _safe_state_hash(state),
         "event_sequence": state.event_sequence,
         "action_index": action_index if isinstance(action_index, int) else None,
@@ -638,6 +677,7 @@ def _thaw_value(value: object) -> object:
 
 __all__ = [
     "ActionLogEntry",
+    "INVARIANT_CHECKS",
     "InvariantViolation",
     "RandomLegalActionPlayer",
     "ScriptedPlayer",

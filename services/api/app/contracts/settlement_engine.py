@@ -78,7 +78,18 @@ async def settlement_engine(
             obligation_id=obligation_id,
         )
         if obligation_id is not None and contract_id is not None and not obligation_rows:
-            continue
+            if await _obligation_exists_for_contract(
+                session=session,
+                game_id=game_id,
+                contract_id=contract_row["id"],
+                obligation_id=obligation_id,
+            ):
+                continue
+            raise SettlementEngineError(
+                "obligation_not_found",
+                "obligation does not belong to the contract",
+                field="obligation_id",
+            )
         for obligation_row in obligation_rows:
             if obligation_id is None and not _obligation_due(obligation_row, state, trigger_context):
                 continue
@@ -471,6 +482,23 @@ async def _load_pending_obligation_rows(
         statement = statement.where(obligations.c.id == obligation_id)
     result = await session.execute(statement.order_by(obligations.c.created_at, obligations.c.id).with_for_update())
     return [dict(row) for row in result.mappings().all()]
+
+
+async def _obligation_exists_for_contract(
+    *,
+    session: AsyncSession,
+    game_id: UUID,
+    contract_id: UUID,
+    obligation_id: UUID,
+) -> bool:
+    result = await session.execute(
+        sa.select(obligations.c.id).where(
+            obligations.c.game_id == game_id,
+            obligations.c.contract_id == contract_id,
+            obligations.c.id == obligation_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
 
 
 def _obligation_due(

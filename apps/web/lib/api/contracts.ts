@@ -86,9 +86,39 @@ export const ContractOutcomesResponseSchema = z.object({
   outcomes: z.array(ContractOutcomeExplanationSchema),
 });
 
+export const ContractSettlementResponseSchema = z.object({
+  status: z.literal("ok"),
+  game_id: z.string().min(1),
+  settled_obligation_ids: z.array(z.string().min(1)),
+  defaulted_obligation_ids: z.array(z.string().min(1)),
+  accepted_events: z.array(z.record(z.string(), z.unknown())),
+  state_hash: z.string().min(1),
+  event_sequence: z.number().int().nonnegative(),
+});
+
+export const ContractLifecycleRejectedResponseSchema = z.object({
+  status: z.literal("rejected"),
+  reason_code: z.string().min(1),
+  validation_errors: z.array(
+    z.object({
+      code: z.string().min(1),
+      message: z.string().min(1),
+      field: z.string().nullable().optional(),
+    }),
+  ),
+});
+
+export const ContractEnforcementResultSchema = z.discriminatedUnion("status", [
+  ContractSettlementResponseSchema,
+  ContractLifecycleRejectedResponseSchema,
+]);
+
 export type ContractRecord = z.infer<typeof ContractRecordSchema>;
 export type ObligationRecord = z.infer<typeof ObligationRecordSchema>;
 export type ContractOutcomeExplanation = z.infer<typeof ContractOutcomeExplanationSchema>;
+export type ContractSettlementResponse = z.infer<typeof ContractSettlementResponseSchema>;
+export type ContractLifecycleRejectedResponse = z.infer<typeof ContractLifecycleRejectedResponseSchema>;
+export type ContractEnforcementResult = z.infer<typeof ContractEnforcementResultSchema>;
 
 type ApiFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -96,6 +126,15 @@ type GameApiOptions = {
   gameId: string;
   baseUrl?: string;
   fetcher?: ApiFetcher;
+};
+
+type EnforceContractsOptions = GameApiOptions & {
+  triggerContext?: Record<string, unknown>;
+};
+
+type SettleContractOptions = GameApiOptions & {
+  contractId: string;
+  obligationId: string;
 };
 
 function getDefaultBackendBaseUrl(): string {
@@ -114,7 +153,7 @@ function gameUrl(baseUrl: string, gameId: string, resource: string): string {
   return `${backendBaseUrl(baseUrl)}/games/${encodeURIComponent(gameId)}${resource}`;
 }
 
-async function readJson(response: Response, action: string): Promise<unknown> {
+async function readJson(response: Response, action: string, allowRejected = false): Promise<unknown> {
   let payload: unknown = null;
   try {
     payload = await response.json();
@@ -125,7 +164,10 @@ async function readJson(response: Response, action: string): Promise<unknown> {
   }
 
   if (!response.ok) {
-    throw new Error(`${action} returned HTTP ${response.status}`);
+    const isRejected = allowRejected && payload && typeof payload === "object" && "status" in payload;
+    if (!isRejected) {
+      throw new Error(`${action} returned HTTP ${response.status}`);
+    }
   }
   return payload;
 }
@@ -175,4 +217,47 @@ export async function readContractOutcomes({
   });
   const payload = await readJson(response, "Load contract outcomes");
   return parseOrThrow(ContractOutcomesResponseSchema, payload, "contract outcomes").outcomes;
+}
+
+export async function enforceContracts({
+  gameId,
+  triggerContext = {},
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: EnforceContractsOptions): Promise<ContractEnforcementResult> {
+  const response = await fetcher(gameUrl(baseUrl, gameId, "/contracts/enforce"), {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      trigger_context: triggerContext,
+    }),
+  });
+  const payload = await readJson(response, "Enforce contracts", true);
+  return parseOrThrow(ContractEnforcementResultSchema, payload, "contract enforcement");
+}
+
+export async function settleContract({
+  gameId,
+  contractId,
+  obligationId,
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: SettleContractOptions): Promise<ContractEnforcementResult> {
+  const response = await fetcher(gameUrl(baseUrl, gameId, `/contracts/${encodeURIComponent(contractId)}/settle`), {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      obligation_id: obligationId,
+    }),
+  });
+  const payload = await readJson(response, "Settle contract", true);
+  return parseOrThrow(ContractEnforcementResultSchema, payload, "contract settlement");
 }

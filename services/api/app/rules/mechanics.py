@@ -22,6 +22,7 @@ from app.rules.events import (
 )
 from app.rules.event_capture import record_rule_event
 from app.rules.reducer import apply_event
+from app.rules.phases import TurnPhase
 from app.rules.static_data import (
     BoardSpace,
     CardData,
@@ -38,6 +39,18 @@ GO_SALARY = 200
 JAIL_POSITION = 10
 JAIL_FINE = 50
 BOARD_SPACE_COUNT = 40
+END_TURN_ENTRY_PHASES = frozenset(
+    {
+        TurnPhase.POST_ROLL_MANAGEMENT,
+        TurnPhase.NEGOTIATION_WINDOW,
+    }
+)
+END_TURN_COMMIT_PHASES = frozenset(
+    {
+        TurnPhase.END_TURN,
+        *END_TURN_ENTRY_PHASES,
+    }
+)
 
 
 class IllegalRuleActionError(ValueError):
@@ -127,6 +140,46 @@ def apply_dice_roll(
 
     state = _set_consecutive_doubles(stream, state, next_doubles_count)
     return move_player_steps(state, player_id, dice_total, event_id_prefix)
+
+
+def end_turn(state: GameState, player_id: str, event_id_prefix: str) -> GameState:
+    player = _active_player_by_id(state, player_id)
+    if player.id != state.turn.current_player_id:
+        raise IllegalRuleActionError(f"{player_id} is not the current turn player")
+    if state.active_auction is not None:
+        raise IllegalRuleActionError("players cannot end a turn during an active auction")
+    if state.active_payment is not None:
+        raise IllegalRuleActionError("players cannot end a turn with unresolved debt")
+    current_phase = TurnPhase(state.turn.phase)
+    if current_phase not in END_TURN_COMMIT_PHASES:
+        raise IllegalRuleActionError(f"players cannot end a turn during {current_phase.value}")
+
+    stream = _EventStream(event_id_prefix)
+    if current_phase in END_TURN_ENTRY_PHASES:
+        state = stream.apply(
+            state,
+            "TURN_STATE_SET",
+            TurnStateSetPayload(
+                turn_number=state.turn.turn_number,
+                current_player_index=state.turn.current_player_index,
+                current_player_id=state.turn.current_player_id,
+                phase=TurnPhase.END_TURN.value,
+                consecutive_doubles=state.turn.consecutive_doubles,
+            ),
+        )
+    next_player_index = _next_active_player_index(state)
+    next_player = state.players[next_player_index]
+    return stream.apply(
+        state,
+        "TURN_STATE_SET",
+        TurnStateSetPayload(
+            turn_number=state.turn.turn_number + 1,
+            current_player_index=next_player_index,
+            current_player_id=next_player.id,
+            phase=TurnPhase.START_TURN.value,
+            consecutive_doubles=0,
+        ),
+    )
 
 
 def buy_property(
@@ -548,6 +601,8 @@ def place_auction_bid(
         raise IllegalRuleActionError("there is no active auction")
     if player_id in auction.passed_player_ids:
         raise IllegalRuleActionError(f"{player_id} has already passed")
+    if player_id == auction.high_bidder_id:
+        raise IllegalRuleActionError("player cannot increase their own high bid")
     if amount <= 0:
         raise IllegalRuleActionError("auction bid must be positive")
     if auction.high_bid_amount is not None and amount <= auction.high_bid_amount:
@@ -576,6 +631,8 @@ def pass_auction(
         raise IllegalRuleActionError("there is no active auction")
     if player_id in auction.passed_player_ids:
         raise IllegalRuleActionError(f"{player_id} has already passed")
+    if player_id == auction.high_bidder_id:
+        raise IllegalRuleActionError("player cannot pass while holding the high bid")
 
     return _set_active_auction(
         _EventStream(event_id_prefix),
@@ -1003,6 +1060,15 @@ def _classic_data() -> ClassicMonopolyData:
     return load_classic_monopoly_data()
 
 
+def _next_active_player_index(state: GameState) -> int:
+    current_index = state.turn.current_player_index
+    for offset in range(1, len(state.players) + 1):
+        candidate_index = (current_index + offset) % len(state.players)
+        if not state.players[candidate_index].is_bankrupt:
+            return candidate_index
+    raise IllegalRuleActionError("no active player is available for the next turn")
+
+
 __all__ = [
     "IllegalRuleActionError",
     "apply_card_effect",
@@ -1012,6 +1078,7 @@ __all__ = [
     "calculate_rent",
     "close_auction",
     "declare_bankruptcy",
+    "end_turn",
     "is_game_over",
     "mortgage_property",
     "move_player_steps",

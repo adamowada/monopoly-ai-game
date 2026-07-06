@@ -214,11 +214,15 @@ function createGame(payload) {
       created_at: createdAt,
       updated_at: createdAt,
     })),
+    current_player_index: 0,
+    round_number: 1,
+    pending_debt: null,
   };
   configurePropertyManagementSeed(game);
   configureNegotiationSeed(game);
   configureContractsLogSeed(game);
   configureAiAuditSeed(game);
+  configureStage105Seed(game);
   games.set(id, game);
   return game;
 }
@@ -367,6 +371,73 @@ function isContractsLogSeed(seed) {
 
 function isAiAuditSeed(seed) {
   return typeof seed === "string" && seed.startsWith("stage-5-8");
+}
+
+function isStage105Seed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-10-5");
+}
+
+function isStage105TwoHumanRoundSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-10-5-two-human-full-round");
+}
+
+function isStage105MixedRoundSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-10-5-five-player-mixed-round");
+}
+
+function isStage105ContractSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-10-5-contract-enforcement");
+}
+
+function ensureMockAiProfiles(game) {
+  const existingProfilePlayerIds = new Set((game.ai_profiles ?? []).map((profile) => profile.player_id));
+  const createdAt = nowIso();
+  for (const player of game.players.filter((candidate) => candidate.controller_type === "ai")) {
+    if (existingProfilePlayerIds.has(player.id)) {
+      continue;
+    }
+    game.ai_profiles.push({
+      ai_profile_id: `${game.id}-ai-profile-${game.ai_profiles.length + 1}`,
+      game_id: game.id,
+      player_id: player.id,
+      display_name: `${player.name} fake AI profile`,
+      traits: ["fake-ai", "legal-action-driven", "audit-visible"],
+      personality: "Deterministic fake AI used by browser E2E tests.",
+      play_style: "Chooses legal browser-visible actions without fallback moves.",
+      persona_summary: `${player.name} is a deterministic fake AI for local Playwright coverage.`,
+      created_at: createdAt,
+    });
+  }
+}
+
+function configureStage105Seed(game) {
+  if (!isStage105Seed(game.seed)) {
+    return;
+  }
+
+  game.current_phase = "START_TURN";
+  game.current_player_index = 0;
+  game.round_number = 1;
+  game.pending_debt = null;
+  ensureMockAiProfiles(game);
+
+  if (isStage105TwoHumanRoundSeed(game.seed)) {
+    const ada = game.players[0]?.id ?? null;
+    setPropertyOwnership(game, "property_baltic_avenue", {
+      owner_id: ada,
+      mortgaged: false,
+      houses: 0,
+      hotel: false,
+      hotels: 0,
+    });
+    setPropertyOwnership(game, "property_reading_railroad", {
+      owner_id: ada,
+      mortgaged: false,
+      houses: 0,
+      hotel: false,
+      hotels: 0,
+    });
+  }
 }
 
 function configureAiAuditSeed(game) {
@@ -979,7 +1050,72 @@ function acceptDealRecord(game, deal) {
     negotiation.updated_at = acceptedAt;
   }
   game.updated_at = acceptedAt;
+  if (isStage105ContractSeed(game.seed)) {
+    const dealEvent = createAcceptedEvent(
+      game,
+      "DEAL_ACCEPTED",
+      {
+        deal_id: deal.id,
+        source_agreement_id: `${game.id}-stage-10-5-agreement`,
+      },
+      deal.proposer_player_id,
+    );
+    createStage105ContractFromDeal(game, deal, dealEvent);
+    broadcastSse(game, dealEvent);
+  }
   return deal;
+}
+
+function firstCashTransferTerm(deal) {
+  return deal.terms.find((term) => term.kind === "cash_transfer" && Number.isInteger(term.amount)) ?? null;
+}
+
+function createStage105ContractFromDeal(game, deal, dealEvent) {
+  if (game.contracts.some((contract) => contract.deal_id === deal.id)) {
+    return;
+  }
+  const term = firstCashTransferTerm(deal);
+  const obligatedPlayerId = term?.from_player_id ?? deal.participant_player_ids[0] ?? game.players[0]?.id ?? "";
+  const counterpartyPlayerId =
+    term?.to_player_id ??
+    deal.participant_player_ids.find((playerId) => playerId !== obligatedPlayerId) ??
+    game.players.find((player) => player.id !== obligatedPlayerId)?.id ??
+    null;
+  const amount = term?.amount ?? 75;
+  const createdAt = nowIso();
+  const contract = {
+    id: `${game.id}-contract-${game.contracts.length + 1}`,
+    game_id: game.id,
+    deal_id: deal.id,
+    source_agreement_id: dealEvent.payload.source_agreement_id,
+    effective_event_id: dealEvent.id,
+    party_player_ids: [...deal.participant_player_ids],
+    status: "active",
+    terms: deal.terms,
+    term_summary: term?.summary ?? "Stage 10.5 accepted deal creates an immediately enforceable cash obligation.",
+    created_at: createdAt,
+    effective_at: createdAt,
+  };
+  game.contracts = [contract, ...game.contracts];
+  game.obligations = [
+    {
+      id: `${game.id}-obligation-stage-10-5-${game.obligations.length + 1}`,
+      game_id: game.id,
+      contract_id: contract.id,
+      obligated_player_id: obligatedPlayerId,
+      counterparty_player_id: counterpartyPlayerId,
+      status: "pending",
+      due_turn: null,
+      due_condition: null,
+      amount,
+      asset_summary: `$${amount} cash transfer`,
+      transfer_summary: null,
+      triggering_event_id: null,
+      settled_at: null,
+      created_at: createdAt,
+    },
+    ...game.obligations,
+  ];
 }
 
 function rejectDealRecord(game, deal) {
@@ -1023,10 +1159,12 @@ function gameState(game) {
       property_ownership: game.property_ownership,
       bank_inventory: game.bank_inventory,
       active_auction: game.active_auction,
+      pending_debt: game.pending_debt,
       turn: {
         phase: game.current_phase,
-        current_player_index: 0,
-        current_player_id: game.players[0]?.id ?? null,
+        current_player_index: game.current_player_index ?? 0,
+        current_player_id: activePlayer(game)?.id ?? null,
+        round_number: game.round_number ?? 1,
       },
     },
     state_hash: stateHash(game),
@@ -1039,7 +1177,8 @@ function stateHash(game) {
 }
 
 function activePlayer(game) {
-  return game.players[0] ?? null;
+  const index = Number.isInteger(game.current_player_index) ? game.current_player_index : 0;
+  return game.players[index] ?? game.players[0] ?? null;
 }
 
 function playerById(game, playerId) {
@@ -1073,6 +1212,25 @@ function legalActionsFor(game, actorPlayerId) {
   if (isPropertyManagementSeed(game.seed) && game.current_phase === "PRE_ROLL_MANAGEMENT") {
     return propertyManagementLegalActionsFor(game);
   }
+  if (game.current_phase === "PAYMENT_RESOLUTION") {
+    const debt = game.pending_debt;
+    if (debt?.debtor_player_id === actor.id) {
+      return [
+        legalAction(
+          game,
+          "SETTLE_DEBT",
+          {
+            debt_id: debt.id,
+            creditor_player_id: debt.creditor_player_id,
+            amount: debt.amount,
+            reason: debt.reason,
+          },
+          actor.id,
+        ),
+      ];
+    }
+    return [];
+  }
   if (game.current_phase === "PURCHASE_OR_AUCTION") {
     const propertyId = purchasablePropertyId(game);
     if (!propertyId) {
@@ -1083,6 +1241,12 @@ function legalActionsFor(game, actorPlayerId) {
       legalAction(game, "BUY_PROPERTY", { property_id: propertyId, ...(price ? { price } : {}) }, actor.id),
       legalAction(game, "START_AUCTION", { property_id: propertyId }, actor.id),
     ];
+  }
+  if (game.current_phase === "END_TURN") {
+    return [legalAction(game, "END_TURN", {}, actor.id)];
+  }
+  if (isStage105Seed(game.seed) && (game.current_phase === "START_TURN" || game.current_phase === "PRE_ROLL_MANAGEMENT")) {
+    return [legalAction(game, "ROLL_DICE", {}, actor.id), ...propertyManagementLegalActionsFor(game)];
   }
   return [legalAction(game, "ROLL_DICE", {}, actor.id)];
 }
@@ -1130,6 +1294,7 @@ function propertyManagementLegalActionsFor(game) {
   const mediterranean = propertyOwnership(game, "property_mediterranean_avenue");
   const baltic = propertyOwnership(game, "property_baltic_avenue");
   const parkPlace = propertyOwnership(game, "property_park_place");
+  const readingRailroad = propertyOwnership(game, "property_reading_railroad");
   const actions = [];
   if (mediterranean?.owner_id === activePlayer(game)?.id && !mediterranean.mortgaged && mediterranean.houses === 0 && !mediterranean.hotel) {
     actions.push(legalAction(game, "BUY_HOUSE", { property_id: "property_mediterranean_avenue", cost: 50 }));
@@ -1139,6 +1304,9 @@ function propertyManagementLegalActionsFor(game) {
   }
   if (parkPlace?.owner_id === activePlayer(game)?.id && parkPlace.mortgaged) {
     actions.push(legalAction(game, "UNMORTGAGE_PROPERTY", { property_id: "property_park_place", cost: 220 }));
+  }
+  if (isStage105Seed(game.seed) && readingRailroad?.owner_id === activePlayer(game)?.id && !readingRailroad.mortgaged) {
+    actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_reading_railroad", proceeds: 100 }));
   }
   return actions;
 }
@@ -1205,15 +1373,81 @@ function broadcastSse(game, event) {
   }
 }
 
+function stage105RollDestination(game, actor) {
+  if (isStage105TwoHumanRoundSeed(game.seed)) {
+    return 1;
+  }
+  if (isStage105MixedRoundSeed(game.seed)) {
+    const destinations = [1, 1, 3, 5, 6];
+    return destinations[actor?.seat_order ?? 0] ?? 7;
+  }
+  return 7;
+}
+
+function baseRentForProperty(property, ownership) {
+  if (!property || !ownership || ownership.mortgaged) {
+    return 0;
+  }
+  if (Array.isArray(property.rents)) {
+    if (ownership.hotel) {
+      return property.rents[5] ?? property.rents.at(-1) ?? 0;
+    }
+    return property.rents[ownership.houses ?? 0] ?? property.rents[0] ?? 0;
+  }
+  return 25;
+}
+
+function pendingRentDebtForLanding(game, actor, property) {
+  if (!actor || !property) {
+    return null;
+  }
+  const ownership = propertyOwnership(game, property.id);
+  if (!ownership?.owner_id || ownership.owner_id === actor.id) {
+    return null;
+  }
+  const amount = baseRentForProperty(property, ownership);
+  if (amount <= 0) {
+    return null;
+  }
+  return {
+    id: `${game.id}-debt-${game.event_sequence + 1}`,
+    debtor_player_id: actor.id,
+    creditor_player_id: ownership.owner_id,
+    property_id: property.id,
+    amount,
+    reason: "rent",
+  };
+}
+
+function phaseAfterLanding(game, actor) {
+  const property = propertyAtPosition(actor?.state.position ?? 0);
+  if (!property) {
+    game.pending_debt = null;
+    return "END_TURN";
+  }
+  const debt = pendingRentDebtForLanding(game, actor, property);
+  if (debt) {
+    game.pending_debt = debt;
+    return "PAYMENT_RESOLUTION";
+  }
+  game.pending_debt = null;
+  const ownership = propertyOwnership(game, property.id);
+  return ownership?.owner_id === null ? "PURCHASE_OR_AUCTION" : "END_TURN";
+}
+
 function acceptRollDice(game, action) {
   const actor = activePlayer(game);
   const fromPosition = actor?.state.position ?? 0;
   const isAuctionSeed = typeof game.seed === "string" && game.seed.startsWith("stage-5-auction");
-  const toPosition = isAuctionSeed ? 1 : 7;
+  const toPosition = isStage105Seed(game.seed) ? stage105RollDestination(game, actor) : isAuctionSeed ? 1 : 7;
   const rolled = createAcceptedEvent(
     game,
     "DICE_ROLLED",
-    isAuctionSeed ? { dice: [1], total: 1 } : { dice: [3, 4], total: 7 },
+    isStage105Seed(game.seed)
+      ? { dice: [toPosition], total: toPosition }
+      : isAuctionSeed
+        ? { dice: [1], total: 1 }
+        : { dice: [3, 4], total: 7 },
     actor?.id ?? null,
   );
 
@@ -1224,7 +1458,7 @@ function acceptRollDice(game, action) {
     };
     actor.updated_at = nowIso();
   }
-  game.current_phase = "PURCHASE_OR_AUCTION";
+  game.current_phase = isStage105Seed(game.seed) ? phaseAfterLanding(game, actor) : "PURCHASE_OR_AUCTION";
   game.updated_at = nowIso();
   const moved = createAcceptedEvent(
     game,
@@ -1261,6 +1495,265 @@ function rejectAction(game, action, reasonCode, message, field = "expected_state
     payload: { rejected_action_id: record.id, reason_code: reasonCode },
   });
   return rejectedPayload(record, action);
+}
+
+function debtPayloadMismatch(game, action) {
+  if (action.type !== "SETTLE_DEBT") {
+    return null;
+  }
+  const debt = game.pending_debt;
+  const actor = playerById(game, action.actor_id);
+  if (!debt || !actor || debt.debtor_player_id !== actor.id) {
+    return null;
+  }
+  const payload = isObject(action.payload) ? action.payload : {};
+  if (payload.debt_id !== debt.id) {
+    return {
+      field: "payload.debt_id",
+      message: "SETTLE_DEBT payload debt_id must match the pending debt",
+    };
+  }
+  if (payload.creditor_player_id !== debt.creditor_player_id) {
+    return {
+      field: "payload.creditor_player_id",
+      message: "SETTLE_DEBT payload creditor_player_id must match the pending debt",
+    };
+  }
+  if (payload.amount !== debt.amount) {
+    return {
+      field: "payload.amount",
+      message: "SETTLE_DEBT payload amount must match the pending debt",
+    };
+  }
+  return null;
+}
+
+function rejectDebtPayloadMismatch(game, action, mismatch = debtPayloadMismatch(game, action)) {
+  return rejectAction(
+    game,
+    action,
+    "debt_payload_mismatch",
+    mismatch?.message ?? "SETTLE_DEBT payload must match the pending debt",
+    mismatch?.field ?? "payload",
+  );
+}
+
+function acceptBuyProperty(game, action) {
+  const actor = playerById(game, action.actor_id);
+  const propertyId = action.payload.property_id;
+  const property = propertyById(propertyId);
+  const ownership = propertyOwnership(game, propertyId);
+  if (!actor || !property || ownership?.owner_id !== null) {
+    return rejectAction(game, action, "illegal_action", "property is not currently available to buy", "payload.property_id");
+  }
+  if ((actor.state.cash ?? 0) < property.price) {
+    return rejectAction(game, action, "illegal_action", "insufficient cash to buy property", "payload.price");
+  }
+
+  actor.state = {
+    ...actor.state,
+    cash: (actor.state.cash ?? 0) - property.price,
+  };
+  actor.updated_at = nowIso();
+  setPropertyOwnership(game, property.id, { owner_id: actor.id });
+  game.current_phase = "END_TURN";
+  game.pending_debt = null;
+
+  return createAcceptedResponse(game, [
+    createAcceptedEvent(game, "PLAYER_CASH_DELTA", { player_id: actor.id, amount: -property.price }, actor.id),
+    createAcceptedEvent(game, "PROPERTY_OWNER_SET", { property_id: property.id, owner_id: actor.id }, actor.id),
+    createAcceptedEvent(
+      game,
+      "PROPERTY_PURCHASED",
+      { property_id: property.id, buyer_player_id: actor.id, price: property.price },
+      actor.id,
+    ),
+  ]);
+}
+
+function acceptSettleDebt(game, action) {
+  const debt = game.pending_debt;
+  const actor = playerById(game, action.actor_id);
+  if (!debt || !actor || debt.debtor_player_id !== actor.id) {
+    return rejectAction(game, action, "illegal_action", "there is no payable debt for this actor", "type");
+  }
+  const mismatch = debtPayloadMismatch(game, action);
+  if (mismatch) {
+    return rejectDebtPayloadMismatch(game, action, mismatch);
+  }
+  const creditor = playerById(game, debt.creditor_player_id);
+  if (!creditor) {
+    return rejectAction(game, action, "illegal_action", "debt creditor is not an active player", "payload.creditor_player_id");
+  }
+  if ((actor.state.cash ?? 0) < debt.amount) {
+    return rejectAction(game, action, "illegal_action", "insufficient cash to settle debt", "payload.amount");
+  }
+
+  actor.state = {
+    ...actor.state,
+    cash: (actor.state.cash ?? 0) - debt.amount,
+  };
+  creditor.state = {
+    ...creditor.state,
+    cash: (creditor.state.cash ?? 0) + debt.amount,
+  };
+  actor.updated_at = nowIso();
+  creditor.updated_at = nowIso();
+  game.pending_debt = null;
+  game.current_phase = "END_TURN";
+
+  return createAcceptedResponse(game, [
+    createAcceptedEvent(game, "PLAYER_CASH_DELTA", { player_id: actor.id, amount: -debt.amount }, actor.id),
+    createAcceptedEvent(game, "PLAYER_CASH_DELTA", { player_id: creditor.id, amount: debt.amount }, actor.id),
+    createAcceptedEvent(
+      game,
+      "RENT_PAID",
+      {
+        debtor_player_id: actor.id,
+        creditor_player_id: creditor.id,
+        property_id: debt.property_id,
+        amount: debt.amount,
+      },
+      actor.id,
+    ),
+  ]);
+}
+
+function acceptEndTurn(game, action) {
+  const actor = activePlayer(game);
+  if (!actor || actor.id !== action.actor_id || game.current_phase !== "END_TURN") {
+    return rejectAction(game, action, "illegal_action", "end turn is only legal for the active player at END_TURN", "type");
+  }
+  const previousIndex = game.current_player_index ?? 0;
+  const nextIndex = (previousIndex + 1) % game.players.length;
+  game.current_player_index = nextIndex;
+  if (nextIndex === 0) {
+    game.round_number = (game.round_number ?? 1) + 1;
+  }
+  game.current_phase = "START_TURN";
+  game.pending_debt = null;
+  return createAcceptedResponse(game, [
+    createAcceptedEvent(
+      game,
+      "TURN_ENDED",
+      {
+        ended_player_id: actor.id,
+        next_player_id: activePlayer(game)?.id ?? null,
+        round_number: game.round_number ?? 1,
+      },
+      actor.id,
+    ),
+  ]);
+}
+
+function canSettleMockObligation(obligation) {
+  return obligation?.status === "due" || (obligation?.status === "pending" && obligation.due_turn === null && obligation.due_condition === null);
+}
+
+function settleStage105Contract(game, contractId, obligationId) {
+  const contract = game.contracts.find((candidate) => candidate.id === contractId);
+  const obligation = game.obligations.find((candidate) => candidate.id === obligationId && candidate.contract_id === contractId);
+  if (!contract || !obligation) {
+    return {
+      statusCode: 404,
+      payload: {
+        status: "rejected",
+        reason_code: "missing_obligation",
+        validation_errors: [aiValidationError("missing_obligation", "contract obligation was not found", "obligation_id")],
+      },
+    };
+  }
+  if (!canSettleMockObligation(obligation)) {
+    return {
+      statusCode: 409,
+      payload: {
+        status: "rejected",
+        reason_code: "obligation_not_due",
+        validation_errors: [aiValidationError("obligation_not_due", "obligation is not currently enforceable", "obligation_id")],
+      },
+    };
+  }
+
+  const fromPlayer = playerById(game, obligation.obligated_player_id);
+  const toPlayer = obligation.counterparty_player_id ? playerById(game, obligation.counterparty_player_id) : null;
+  if (!fromPlayer || !toPlayer) {
+    return {
+      statusCode: 409,
+      payload: {
+        status: "rejected",
+        reason_code: "missing_contract_party",
+        validation_errors: [aiValidationError("missing_contract_party", "contract party is not active", "player_id")],
+      },
+    };
+  }
+
+  const amount = obligation.amount ?? 0;
+  fromPlayer.state = {
+    ...fromPlayer.state,
+    cash: (fromPlayer.state.cash ?? 0) - amount,
+  };
+  toPlayer.state = {
+    ...toPlayer.state,
+    cash: (toPlayer.state.cash ?? 0) + amount,
+  };
+  fromPlayer.updated_at = nowIso();
+  toPlayer.updated_at = nowIso();
+  const summary = `${fromPlayer.name} paid ${toPlayer.name} $${amount} from accepted deal enforcement.`;
+  const transferEvent = createAcceptedEvent(
+    game,
+    "CONTRACT_TRIGGERED_TRANSFER",
+    {
+      contract_id: contract.id,
+      obligation_id: obligation.id,
+      deal_id: contract.deal_id,
+      source_agreement_id: contract.source_agreement_id,
+      from_player_id: fromPlayer.id,
+      to_player_id: toPlayer.id,
+      amount,
+      summary,
+    },
+    null,
+  );
+  obligation.status = "settled";
+  obligation.transfer_summary = summary;
+  obligation.triggering_event_id = transferEvent.id;
+  obligation.settled_at = nowIso();
+  game.contract_outcomes.unshift({
+    id: `${contract.id}:${obligation.id}`,
+    game_id: game.id,
+    source_deal_id: contract.deal_id,
+    contract_id: contract.id,
+    obligation_id: obligation.id,
+    obligation_type: "cash_transfer",
+    trigger: { type: "manual_enforcement", route: "/settle" },
+    classic_rule_interaction: {
+      policy: { impossible_state_prevention: "strict" },
+      policy_key: "strict_cash_transfer",
+    },
+    decision: { status: "settled", decision: "manual_contract_enforcement" },
+    resulting_state_effect: {
+      from_player_id: fromPlayer.id,
+      to_player_id: toPlayer.id,
+      amount,
+    },
+    explanation_text: `CONTRACT_TRIGGERED_TRANSFER settled ${obligation.id}: ${summary}`,
+    created_at: nowIso(),
+  });
+  game.updated_at = nowIso();
+  broadcastSse(game, transferEvent);
+
+  return {
+    statusCode: 200,
+    payload: {
+      status: "ok",
+      game_id: game.id,
+      settled_obligation_ids: [obligation.id],
+      defaulted_obligation_ids: [],
+      accepted_events: [transferEvent],
+      state_hash: stateHash(game),
+      event_sequence: game.event_sequence,
+    },
+  };
 }
 
 function aiValidationError(reasonCode, message, field) {
@@ -1592,6 +2085,9 @@ function applyMockAiNegotiationStep(game, payload, decision) {
 
 function chooseMockAuctionAiAction(game, playerId) {
   const legalActions = legalActionsFor(game, playerId);
+  if (isStage105Seed(game.seed) && game.active_auction?.high_bidder_id) {
+    return legalActions.find((action) => action.type === "PASS_AUCTION") ?? null;
+  }
   return (
     legalActions.find((action) => action.type === "BID_AUCTION") ??
     legalActions.find((action) => action.type === "PASS_AUCTION") ??
@@ -1673,6 +2169,39 @@ function applyMockAiAuctionStep(game, payload, decision) {
       acceptedEvents: auctionResponse.payload.accepted_events,
       outcome: { kind: "action_decision", status: "accepted", action: action.type },
     }),
+  };
+}
+
+function chooseMockTurnAiAction(game, playerId) {
+  const legalActions = legalActionsFor(game, playerId);
+  const priority = ["SETTLE_DEBT", "BUY_PROPERTY", "END_TURN", "ROLL_DICE"];
+  for (const type of priority) {
+    const action = legalActions.find((candidate) => candidate.type === type);
+    if (action) {
+      return action;
+    }
+  }
+  return legalActions[0] ?? null;
+}
+
+function acceptMockAiTurnAction(game, action) {
+  if (action.type === "ROLL_DICE") {
+    return acceptRollDice(game, action);
+  }
+  if (action.type === "BUY_PROPERTY") {
+    return acceptBuyProperty(game, action);
+  }
+  if (action.type === "SETTLE_DEBT") {
+    return acceptSettleDebt(game, action);
+  }
+  if (action.type === "END_TURN") {
+    return acceptEndTurn(game, action);
+  }
+  return {
+    status: "rejected",
+    reason_code: "unsupported_ai_action",
+    validation_errors: [aiValidationError("unsupported_ai_action", "fake AI selected an unsupported action", "action")],
+    accepted_events: [],
   };
 }
 
@@ -1760,8 +2289,55 @@ function applyMockAiStep(game, payload) {
     return applyMockAiAuctionStep(game, { ...payload, decision_type: decisionType, negotiation_id: null }, decision);
   }
 
-  const action = legalAction(game, "ROLL_DICE", {}, payload.player_id);
-  const accepted = acceptRollDice(game, action);
+  const action = isStage105Seed(game.seed)
+    ? chooseMockTurnAiAction(game, payload.player_id)
+    : legalAction(game, "ROLL_DICE", {}, payload.player_id);
+  if (!action) {
+    const errors = [aiValidationError("no_legal_action", "AI player has no legal action", "player_id")];
+    const rejection = createRejectedAction(
+      game,
+      { actor_id: payload.player_id, type: "AI_ACTION_DECISION", payload },
+      "no_legal_action",
+      errors,
+    );
+    decision.status = "rejected";
+    return {
+      statusCode: 200,
+      body: aiStepPayload({
+        game,
+        payload: { ...payload, decision_type: decisionType, negotiation_id: null },
+        decision,
+        status: "rejected",
+        rejectedActionId: rejection.id,
+        outcome: { kind: "action_decision", status: "rejected" },
+        reasonCode: "no_legal_action",
+        validationErrors: errors,
+      }),
+    };
+  }
+  decision.parsed_output = {
+    mock: true,
+    decision_type: "action_decision",
+    action: action.type,
+    payload: action.payload,
+  };
+  const accepted = isStage105Seed(game.seed) ? acceptMockAiTurnAction(game, action) : acceptRollDice(game, action);
+  if (accepted.status !== "accepted") {
+    decision.status = "rejected";
+    return {
+      statusCode: 200,
+      body: aiStepPayload({
+        game,
+        payload: { ...payload, decision_type: decisionType, negotiation_id: null },
+        decision,
+        status: "rejected",
+        rejectedActionId: accepted.rejected_action_id ?? null,
+        outcome: { kind: "action_decision", status: "rejected", action: action.type },
+        reasonCode: accepted.reason_code ?? "ai_action_rejected",
+        validationErrors: accepted.validation_errors ?? [],
+      }),
+    };
+  }
   decision.status = "accepted";
   return {
     statusCode: 200,
@@ -1779,6 +2355,15 @@ function applyMockAiStep(game, payload) {
 function actionMatchesLegalAction(candidate, action) {
   if (candidate.type !== action.type) {
     return false;
+  }
+  if (candidate.type === "SETTLE_DEBT") {
+    const candidatePayload = isObject(candidate.payload) ? candidate.payload : {};
+    const actionPayload = isObject(action.payload) ? action.payload : {};
+    return (
+      candidatePayload.debt_id === actionPayload.debt_id &&
+      candidatePayload.creditor_player_id === actionPayload.creditor_player_id &&
+      candidatePayload.amount === actionPayload.amount
+    );
   }
   const candidatePropertyId = isObject(candidate.payload) ? candidate.payload.property_id : undefined;
   const actionPropertyId = isObject(action.payload) ? action.payload.property_id : undefined;
@@ -1903,6 +2488,7 @@ function closeAuctionEvents(game, actorPlayerId) {
   }
 
   game.active_auction = null;
+  game.current_phase = "END_TURN";
   events.push(activeAuctionSetEvent(game, actorPlayerId, null));
   return events;
 }
@@ -2354,6 +2940,31 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  const contractSettleMatch = url.pathname.match(/^\/games\/([^/]+)\/contracts\/([^/]+)\/settle$/);
+  if (request.method === "POST" && contractSettleMatch) {
+    const gameId = decodeURIComponent(contractSettleMatch[1]);
+    const contractId = decodeURIComponent(contractSettleMatch[2]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    try {
+      const payload = await readBody(request);
+      const obligationId = typeof payload.obligation_id === "string" ? payload.obligation_id : "";
+      const result = settleStage105Contract(game, contractId, obligationId);
+      json(response, result.statusCode, result.payload);
+      return;
+    } catch {
+      json(response, 400, {
+        status: "rejected",
+        reason_code: "malformed_json",
+        validation_errors: [aiValidationError("malformed_json", "request body must be valid JSON", "body")],
+      });
+      return;
+    }
+  }
+
   const obligationsMatch = url.pathname.match(/^\/games\/([^/]+)\/obligations$/);
   if (request.method === "GET" && obligationsMatch) {
     const gameId = decodeURIComponent(obligationsMatch[1]);
@@ -2623,6 +3234,11 @@ const server = createServer(async (request, response) => {
       }
 
       const legalActions = legalActionsFor(game, action.actor_id);
+      const debtMismatch = debtPayloadMismatch(game, action);
+      if (debtMismatch) {
+        json(response, 422, rejectDebtPayloadMismatch(game, action, debtMismatch));
+        return;
+      }
       if (!legalActions.some((candidate) => actionMatchesLegalAction(candidate, action))) {
         json(response, 422, rejectAction(game, action, "illegal_action", `${action.type} is not currently legal`, "type"));
         return;
@@ -2645,6 +3261,21 @@ const server = createServer(async (request, response) => {
 
       if (action.type === "ROLL_DICE") {
         json(response, 200, acceptRollDice(game, action));
+        return;
+      }
+
+      if (action.type === "BUY_PROPERTY") {
+        json(response, 200, acceptBuyProperty(game, action));
+        return;
+      }
+
+      if (action.type === "SETTLE_DEBT") {
+        json(response, 200, acceptSettleDebt(game, action));
+        return;
+      }
+
+      if (action.type === "END_TURN") {
+        json(response, 200, acceptEndTurn(game, action));
         return;
       }
 

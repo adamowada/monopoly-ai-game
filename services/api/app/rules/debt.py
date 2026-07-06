@@ -33,6 +33,7 @@ DEBT_FORBIDDEN_ACTION_TYPES: Final[frozenset[str]] = frozenset(
         "PASS_AUCTION",
         "PAY_JAIL_FINE",
         "USE_GET_OUT_OF_JAIL_CARD",
+        "END_TURN",
         "PROPOSE_DEAL",
         "COUNTER_DEAL",
         "ACCEPT_DEAL",

@@ -26,6 +26,7 @@ from app.rules.events import (
     PropertyMortgageSetPayload,
     PropertyOwnerSetPayload,
 )
+from app.rules.phases import TurnPhase
 from app.rules.reducer import apply_event
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
@@ -66,6 +67,18 @@ def _apply_setup_event(state: GameState, event_type: str, payload: object) -> Ga
             type=event_type,  # type: ignore[arg-type]
             payload=payload,  # type: ignore[arg-type]
         ),
+    )
+
+
+def _state_in_phase(state: GameState, phase: TurnPhase) -> GameState:
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": phase,
+            },
+        }
     )
 
 
@@ -207,15 +220,138 @@ def test_legal_actions_are_serializable_and_include_state_guards() -> None:
     assert all(isinstance(action.schema, Mapping) for action in legal_actions)
 
 
-def test_initial_state_exposes_roll_and_bankruptcy_but_not_purchase() -> None:
+def test_initial_state_exposes_roll_and_bankruptcy_but_not_end_turn_or_purchase() -> None:
     state = _initial_state()
 
     legal_types = _types(list_legal_actions(state, "player-1"))
 
+    assert "END_TURN" not in legal_types, "mandatory roll window must not expose END_TURN"
     assert "ROLL_DICE" in legal_types
     assert "DECLARE_BANKRUPTCY" in legal_types
     assert "BUY_PROPERTY" not in legal_types
     assert "START_AUCTION" not in legal_types
+
+
+def test_end_turn_from_start_turn_is_rejected_without_state_mutation() -> None:
+    state = _initial_state(count=2)
+    action = _action(state, "player-1", "END_TURN")
+
+    assert "END_TURN" not in _types(
+        list_legal_actions(state, "player-1")
+    ), "mandatory roll window must not expose END_TURN"
+    with pytest.raises(ActionValidationError) as exc_info:
+        validate_action(state, action)
+    assert _issue_codes(exc_info.value) == {"mistimed_action"}
+
+    _assert_rejection_does_not_mutate(state, action, "mistimed_action")
+    assert state.turn.current_player_id == "player-1"
+    assert state.turn.turn_number == 1
+    assert state.rng.dice_roll_count == 0
+
+
+def test_end_turn_phase_rotates_to_next_active_player_and_advances_turn_number() -> None:
+    state = _state_in_phase(_initial_state(count=3), TurnPhase.END_TURN)
+
+    next_state = apply_action(state, _action(state, "player-1", "END_TURN"), "end-turn")
+
+    assert next_state.turn.turn_number == state.turn.turn_number + 1
+    assert next_state.turn.current_player_index == 1
+    assert next_state.turn.current_player_id == "player-2"
+    assert next_state.turn.phase == "START_TURN"
+    assert next_state.turn.consecutive_doubles == 0
+    assert next_state.event_sequence == state.event_sequence + 1
+    assert next_state.applied_event_ids[-1] == "end-turn-1"
+
+
+def test_end_turn_skips_bankrupt_players_and_wraps_after_full_cycle() -> None:
+    state = _state_in_phase(_set_bankrupt(_initial_state(count=3), "player-2"), TurnPhase.END_TURN)
+
+    second_turn = apply_action(state, _action(state, "player-1", "END_TURN"), "end-turn")
+    third_player_end_window = _state_in_phase(second_turn, TurnPhase.END_TURN)
+    full_cycle = apply_action(
+        third_player_end_window,
+        _action(third_player_end_window, "player-3", "END_TURN"),
+        "end-turn",
+    )
+
+    assert second_turn.turn.current_player_id == "player-3"
+    assert second_turn.turn.current_player_index == 2
+    assert full_cycle.turn.current_player_id == "player-1"
+    assert full_cycle.turn.current_player_index == 0
+    assert full_cycle.turn.turn_number == state.turn.turn_number + 2
+
+
+def test_end_turn_is_rejected_for_non_current_actor() -> None:
+    state = _initial_state()
+
+    _assert_rejection_does_not_mutate(state, _action(state, "player-2", "END_TURN"), "mistimed_action")
+
+
+@pytest.mark.parametrize(
+    "phase",
+    (
+        TurnPhase.PRE_ROLL_MANAGEMENT,
+        TurnPhase.ROLL_REQUIRED,
+        TurnPhase.MOVEMENT_RESOLUTION,
+        TurnPhase.SPACE_RESOLUTION,
+        TurnPhase.PURCHASE_OR_AUCTION,
+        TurnPhase.PAYMENT_RESOLUTION,
+        TurnPhase.JAIL_RESOLUTION,
+        TurnPhase.GAME_OVER,
+    ),
+)
+def test_end_turn_is_not_exposed_or_accepted_where_it_would_invalid_phase_transition(
+    phase: TurnPhase,
+) -> None:
+    state = _state_in_phase(_initial_state(), phase)
+
+    assert "END_TURN" not in _types(
+        list_legal_actions(state, "player-1")
+    ), "invalid phase transition guard should not be advertised"
+    with pytest.raises(ActionValidationError) as exc_info:
+        apply_action(state, _action(state, "player-1", "END_TURN"), "invalid-phase-transition-probe")
+
+    assert _issue_codes(exc_info.value) == {"mistimed_action"}
+
+
+@pytest.mark.parametrize(
+    "phase",
+    (TurnPhase.POST_ROLL_MANAGEMENT, TurnPhase.NEGOTIATION_WINDOW),
+)
+def test_end_turn_from_management_end_windows_commits_through_phase_graph(
+    phase: TurnPhase,
+) -> None:
+    state = _state_in_phase(_initial_state(count=3), phase)
+
+    assert "END_TURN" in _types(list_legal_actions(state, "player-1"))
+    validate_action(state, _action(state, "player-1", "END_TURN"))
+
+    next_state = apply_action(
+        state,
+        _action(state, "player-1", "END_TURN"),
+        f"{phase.value.lower()}-end-turn",
+    )
+
+    assert next_state.turn.turn_number == state.turn.turn_number + 1
+    assert next_state.turn.current_player_index == 1
+    assert next_state.turn.current_player_id == "player-2"
+    assert next_state.turn.phase == "START_TURN"
+    assert next_state.turn.consecutive_doubles == 0
+    assert next_state.event_sequence == state.event_sequence + 2
+    assert next_state.applied_event_ids[-2:] == (
+        f"{phase.value.lower()}-end-turn-1",
+        f"{phase.value.lower()}-end-turn-2",
+    )
+
+
+def test_end_turn_from_explicit_end_turn_phase_commits_without_invalid_phase_transition() -> None:
+    state = _state_in_phase(_initial_state(count=3), TurnPhase.END_TURN)
+
+    next_state = apply_action(state, _action(state, "player-1", "END_TURN"), "end-turn-phase")
+
+    assert next_state.turn.current_player_id == "player-2"
+    assert next_state.turn.phase == "START_TURN"
+    assert next_state.event_sequence == state.event_sequence + 1
 
 
 def test_unowned_property_exposes_purchase_choices_and_buy_applies_events() -> None:
@@ -418,4 +554,6 @@ def test_roll_dice_action_uses_deterministic_rng_and_records_dice_event() -> Non
 
     assert next_state_a.rng.dice_roll_count == 1
     assert next_state_a.players[0].position == next_state_b.players[0].position
+    assert next_state_a.turn.phase == "POST_ROLL_MANAGEMENT"
+    assert "END_TURN" in _types(list_legal_actions(next_state_a, "player-1"))
     assert next_state_a.applied_event_ids[0] == "roll-1"

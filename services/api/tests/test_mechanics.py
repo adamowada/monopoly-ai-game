@@ -245,11 +245,11 @@ def test_auction_bid_pass_and_close_transfers_property_for_high_bid() -> None:
     with pytest.raises(IllegalRuleActionError, match="passed"):
         place_auction_bid(state, "player-2", 80, "auction")
 
-    state = place_auction_bid(state, "player-1", 90, "auction")
+    state = pass_auction(state, "player-3", "auction")
     state = close_auction(state, "auction")
 
     assert state.active_auction is None
-    assert _player(state, "player-1").cash == 1410
+    assert _player(state, "player-1").cash == 1430
     assert _property(state, "property_mediterranean_avenue").owner_id == "player-1"
 
 

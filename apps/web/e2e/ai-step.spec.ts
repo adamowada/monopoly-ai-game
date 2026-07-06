@@ -37,7 +37,29 @@ async function createAuctionGameWithAiBidder(page: Page) {
   const graceId = game.players.find((player) => player.name === "Grace" && player.controller_type === "ai")?.id;
   expect(graceId).toBeTruthy();
 
+  const rollResponse = page.waitForResponse(
+    (response) => response.url().endsWith(`/games/${gameId}/actions`) && response.request().method() === "POST",
+  );
   await page.getByRole("region", { name: "Turn controls" }).getByRole("button", { name: "Roll dice" }).click();
+  const rollBody = (await (await rollResponse).json()) as {
+    status: string;
+    accepted_events?: Array<{ event_type: string }>;
+  };
+  expect(rollBody.status).toBe("accepted");
+  expect(rollBody.accepted_events?.map((event) => event.event_type)).toEqual(["DICE_ROLLED", "TOKEN_MOVED"]);
+
+  const state = await readMockJson<{
+    state: { turn: { phase: string }; players: Array<{ id: string; position: number }> };
+  }>(page, `/games/${gameId}/state`);
+  expect(state.state.turn.phase).toBe("PURCHASE_OR_AUCTION");
+  expect(state.state.players.every((player) => player.position === 0)).toBe(false);
+
+  const legalActions = await readMockJson<{ legal_actions: Array<{ type: string }> }>(
+    page,
+    `/games/${gameId}/legal-actions?actor_player_id=${game.players[0]?.id ?? ""}`,
+  );
+  expect(legalActions.legal_actions.map((action) => action.type)).toContain("START_AUCTION");
+
   const auction = page.getByRole("region", { name: "Auction", exact: true });
   await auction.getByRole("button", { name: "Start auction" }).click();
   await expect(auction).toContainText(/Auction state\s*Active/);
