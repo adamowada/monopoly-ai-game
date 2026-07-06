@@ -22,6 +22,7 @@ from app.rules.events import (
 )
 from app.rules.event_capture import record_rule_event
 from app.rules.reducer import apply_event
+from app.rules.phases import TurnPhase
 from app.rules.static_data import (
     BoardSpace,
     CardData,
@@ -38,6 +39,19 @@ GO_SALARY = 200
 JAIL_POSITION = 10
 JAIL_FINE = 50
 BOARD_SPACE_COUNT = 40
+END_TURN_ENTRY_PHASES = frozenset(
+    {
+        TurnPhase.POST_ROLL_MANAGEMENT,
+        TurnPhase.NEGOTIATION_WINDOW,
+    }
+)
+END_TURN_COMMIT_PHASES = frozenset(
+    {
+        TurnPhase.START_TURN,
+        TurnPhase.END_TURN,
+        *END_TURN_ENTRY_PHASES,
+    }
+)
 
 
 class IllegalRuleActionError(ValueError):
@@ -137,17 +151,33 @@ def end_turn(state: GameState, player_id: str, event_id_prefix: str) -> GameStat
         raise IllegalRuleActionError("players cannot end a turn during an active auction")
     if state.active_payment is not None:
         raise IllegalRuleActionError("players cannot end a turn with unresolved debt")
+    current_phase = TurnPhase(state.turn.phase)
+    if current_phase not in END_TURN_COMMIT_PHASES:
+        raise IllegalRuleActionError(f"players cannot end a turn during {current_phase.value}")
 
+    stream = _EventStream(event_id_prefix)
+    if current_phase in END_TURN_ENTRY_PHASES:
+        state = stream.apply(
+            state,
+            "TURN_STATE_SET",
+            TurnStateSetPayload(
+                turn_number=state.turn.turn_number,
+                current_player_index=state.turn.current_player_index,
+                current_player_id=state.turn.current_player_id,
+                phase=TurnPhase.END_TURN.value,
+                consecutive_doubles=state.turn.consecutive_doubles,
+            ),
+        )
     next_player_index = _next_active_player_index(state)
     next_player = state.players[next_player_index]
-    return _EventStream(event_id_prefix).apply(
+    return stream.apply(
         state,
         "TURN_STATE_SET",
         TurnStateSetPayload(
             turn_number=state.turn.turn_number + 1,
             current_player_index=next_player_index,
             current_player_id=next_player.id,
-            phase="START_TURN",
+            phase=TurnPhase.START_TURN.value,
             consecutive_doubles=0,
         ),
     )
