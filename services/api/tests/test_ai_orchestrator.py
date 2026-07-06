@@ -391,17 +391,12 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
 def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_run(command: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def fake_popen(command: Sequence[str], **kwargs: Any) -> "_CompletedFakePopen":
         captured["command"] = list(command)
         captured["kwargs"] = kwargs
-        return subprocess.CompletedProcess(
-            args=list(command),
-            returncode=0,
-            stdout='{"type":"session_configured"}\n',
-            stderr="",
-        )
+        return _CompletedFakePopen(captured)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     result = CodexSubprocessRunner().run(
         ["codex", "exec", "--json", "-"],
@@ -411,10 +406,17 @@ def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch:
     )
 
     assert captured["command"] == ["codex", "exec", "--json", "-"]
-    assert captured["kwargs"]["input"] == "prompt on stdin"
-    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["stdin"] == subprocess.PIPE
+    assert captured["kwargs"]["stdout"] == subprocess.PIPE
+    assert captured["kwargs"]["stderr"] == subprocess.PIPE
     assert captured["kwargs"]["text"] is True
-    assert captured["kwargs"]["timeout"] == 3
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    if os.name == "nt":
+        assert captured["kwargs"]["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        assert captured["kwargs"]["start_new_session"] is True
+    assert captured["communicate"]["input"] == "prompt on stdin"
+    assert captured["communicate"]["timeout"] == 3
     assert result.stdout == '{"type":"session_configured"}\n'
     assert result.stderr == ""
     assert result.returncode == 0
@@ -429,17 +431,12 @@ def test_subprocess_wrapper_passes_configured_codex_home_and_preserves_environme
     monkeypatch.setenv("CODEX_HOME", "inherited-codex-home")
     monkeypatch.setenv("MONOPOLY_CODEX_HOME_TEST_ENV", "preserved")
 
-    def fake_run(command: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def fake_popen(command: Sequence[str], **kwargs: Any) -> "_CompletedFakePopen":
         captured["command"] = list(command)
         captured["kwargs"] = kwargs
-        return subprocess.CompletedProcess(
-            args=list(command),
-            returncode=0,
-            stdout='{"type":"session_configured"}\n',
-            stderr="",
-        )
+        return _CompletedFakePopen(captured)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     result = CodexSubprocessRunner(codex_home=configured_codex_home).run(
         ["codex", "exec", "--json", "-"],
@@ -453,6 +450,30 @@ def test_subprocess_wrapper_passes_configured_codex_home_and_preserves_environme
     assert env["CODEX_HOME"] == str(configured_codex_home)
     assert env["MONOPOLY_CODEX_HOME_TEST_ENV"] == "preserved"
     assert result.returncode == 0
+
+
+class _CompletedFakePopen:
+    returncode = 0
+
+    def __init__(self, captured: dict[str, Any]) -> None:
+        self._captured = captured
+
+    def communicate(self, input: str | None = None, timeout: float | None = None) -> tuple[str, str]:
+        self._captured["communicate"] = {"input": input, "timeout": timeout}
+        return '{"type":"session_configured"}\n', ""
+
+    def wait(self, timeout: float | None = None) -> int:
+        self._captured["wait_timeout"] = timeout
+        return self.returncode
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self._captured["killed"] = True
+
+    def terminate(self) -> None:
+        self._captured["terminated"] = True
 
 
 def test_prompt_construction_keeps_caller_context_without_building_stage_7_4_pack() -> None:

@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import os
+import signal
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -110,31 +111,44 @@ class CodexSubprocessRunner:
         output_last_message_path: Path | None,
     ) -> CodexExecProcessResult:
         del output_last_message_path
-        run_kwargs: dict[str, Any] = {
-            "input": stdin,
-            "capture_output": True,
+        popen_kwargs: dict[str, Any] = {
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
             "text": True,
             "encoding": "utf-8",
-            "timeout": timeout_seconds,
-            "check": False,
         }
         if self.codex_home is not None:
-            run_kwargs["env"] = {
+            popen_kwargs["env"] = {
                 **os.environ,
                 "CODEX_HOME": str(self.codex_home),
             }
-        try:
-            completed = subprocess.run(
-                list(command),
-                **run_kwargs,
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
             )
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        process = subprocess.Popen(
+            list(command),
+            **popen_kwargs,
+        )
+        try:
+            stdout, stderr = process.communicate(input=stdin, timeout=timeout_seconds)
         except subprocess.TimeoutExpired as exc:
+            _terminate_process_tree(process)
             raise CodexExecTimeoutError(timeout_seconds) from exc
 
+        returncode = process.returncode
+        if returncode is None:
+            returncode = process.wait()
         return CodexExecProcessResult(
-            returncode=int(completed.returncode),
-            stdout=completed.stdout or "",
-            stderr=completed.stderr or "",
+            returncode=int(returncode),
+            stdout=stdout or "",
+            stderr=stderr or "",
         )
 
 
@@ -929,6 +943,54 @@ def _coerce_uuid(value: UUID | str) -> UUID:
     if isinstance(value, UUID):
         return value
     return UUID(str(value))
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+
+    if os.name == "nt":
+        _terminate_windows_process_tree(process)
+        return
+
+    _terminate_posix_process_tree(process)
+
+
+def _terminate_windows_process_tree(process: subprocess.Popen[str]) -> None:
+    subprocess.run(
+        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def _terminate_posix_process_tree(process: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        process.terminate()
+
+    try:
+        process.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        process.kill()
+    process.wait(timeout=5)
 
 
 __all__ = [
