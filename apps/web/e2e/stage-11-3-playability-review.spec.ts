@@ -160,6 +160,53 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
   });
 });
 
+test("stage-11-3-property-management-playthrough: browser reaches Build house Sell house Mortgage Unmortgage controls", async ({
+  page,
+}) => {
+  await createGame(page, "stage-5-property-management-accept", twoHumanPlayers);
+
+  const log = page.getByRole("region", { name: "Game log" });
+  const propertyManagement = page.getByRole("region", { name: "Property management" });
+  const bankInventory = page.getByRole("region", { name: "Bank inventory" });
+  const mediterranean = page.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
+  const baltic = page.getByRole("region", { name: "Property detail: Baltic Avenue" });
+  const parkPlace = page.getByRole("region", { name: "Property detail: Park Place" });
+  const boardwalk = page.getByRole("region", { name: "Property detail: Boardwalk" });
+
+  await expect(propertyManagement).toBeVisible();
+  await expect(bankInventory).toBeVisible();
+  await expectActivePlayer(page, "Ada");
+  await expect(mediterranean).toContainText("Owner Ada");
+  await expect(baltic).toContainText("Owner Ada");
+  await expect(parkPlace).toContainText("Owner Ada");
+  await expect(parkPlace).toContainText("Mortgaged");
+  await expect(boardwalk).toContainText("Owner Ada");
+  await expect(boardwalk).toContainText("Hotels: 1");
+
+  await expect(baltic.getByRole("button", { name: "Mortgage" })).toBeEnabled();
+  await baltic.getByRole("button", { name: "Mortgage" }).click();
+  await expect(baltic).toContainText("Mortgaged");
+  await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
+
+  await expect(parkPlace.getByRole("button", { name: "Unmortgage" })).toBeEnabled();
+  await parkPlace.getByRole("button", { name: "Unmortgage" }).click();
+  await expect(parkPlace).toContainText("Unmortgaged");
+  await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
+
+  await expect(mediterranean.getByRole("button", { name: "Build house" })).toBeEnabled();
+  await mediterranean.getByRole("button", { name: "Build house" }).click();
+  await expect(mediterranean).toContainText("Houses: 1");
+  await expect(bankInventory).toContainText("Houses remaining 31");
+
+  await expect(boardwalk.getByRole("button", { name: "Sell house" })).toBeEnabled();
+  await boardwalk.getByRole("button", { name: "Sell house" }).click();
+  await expect(boardwalk).toContainText("Houses: 4");
+  await expect(boardwalk).toContainText("Hotels: 0");
+  await expect(bankInventory).toContainText("Houses remaining 27");
+  await expect(bankInventory).toContainText("Hotels remaining 13");
+  await expect(log).toContainText("PROPERTY_IMPROVEMENTS_SET");
+});
+
 test("stage-11-3-mixed-ai-playthrough: mixed human/AI players, Start auction Bid Pass and Step AI with real Codex AI signal path", async ({ page }) => {
   await createGame(page, "stage-10-5-five-player-mixed-round", mixedPlayers);
 

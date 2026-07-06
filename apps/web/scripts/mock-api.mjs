@@ -286,7 +286,6 @@ function configurePropertyManagementSeed(game) {
     return;
   }
   const ada = game.players[0]?.id ?? null;
-  const grace = game.players[1]?.id ?? null;
   game.current_phase = "PRE_ROLL_MANAGEMENT";
   setPropertyOwnership(game, "property_mediterranean_avenue", {
     owner_id: ada,
@@ -303,14 +302,14 @@ function configurePropertyManagementSeed(game) {
     hotels: 0,
   });
   setPropertyOwnership(game, "property_park_place", {
-    owner_id: grace,
+    owner_id: ada,
     mortgaged: true,
     houses: 0,
     hotel: false,
     hotels: 0,
   });
   setPropertyOwnership(game, "property_boardwalk", {
-    owner_id: grace,
+    owner_id: ada,
     mortgaged: false,
     houses: 0,
     hotel: true,
@@ -1294,6 +1293,7 @@ function propertyManagementLegalActionsFor(game) {
   const mediterranean = propertyOwnership(game, "property_mediterranean_avenue");
   const baltic = propertyOwnership(game, "property_baltic_avenue");
   const parkPlace = propertyOwnership(game, "property_park_place");
+  const boardwalk = propertyOwnership(game, "property_boardwalk");
   const readingRailroad = propertyOwnership(game, "property_reading_railroad");
   const actions = [];
   if (mediterranean?.owner_id === activePlayer(game)?.id && !mediterranean.mortgaged && mediterranean.houses === 0 && !mediterranean.hotel) {
@@ -1304,6 +1304,9 @@ function propertyManagementLegalActionsFor(game) {
   }
   if (parkPlace?.owner_id === activePlayer(game)?.id && parkPlace.mortgaged) {
     actions.push(legalAction(game, "UNMORTGAGE_PROPERTY", { property_id: "property_park_place", cost: 220 }));
+  }
+  if (boardwalk?.owner_id === activePlayer(game)?.id && !boardwalk.mortgaged && (boardwalk.hotel || boardwalk.houses > 0)) {
+    actions.push(legalAction(game, "SELL_HOUSE", { property_id: "property_boardwalk", proceeds: 100 }));
   }
   if (isStage105Seed(game.seed) && readingRailroad?.owner_id === activePlayer(game)?.id && !readingRailroad.mortgaged) {
     actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_reading_railroad", proceeds: 100 }));

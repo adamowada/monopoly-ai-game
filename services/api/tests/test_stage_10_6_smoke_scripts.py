@@ -45,6 +45,13 @@ def test_live_codex_smoke_stays_gated_and_uses_xhigh_exec_json() -> None:
     assert "model_reasoning_effort" in source
     assert "xhigh" in source
     assert "--json" in source
+    assert "--output-schema" in source
+    assert "--disable" in source
+    assert "plugin_hooks" in source
+    assert "shell_snapshot" in source
+    assert "robinhood-trading" in source
+    assert "if process.returncode != 0:" in source
+    assert "treating as pass" not in source
 
 
 def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
