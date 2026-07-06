@@ -212,10 +212,44 @@ def test_initial_state_exposes_roll_and_bankruptcy_but_not_purchase() -> None:
 
     legal_types = _types(list_legal_actions(state, "player-1"))
 
+    assert "END_TURN" in legal_types
     assert "ROLL_DICE" in legal_types
     assert "DECLARE_BANKRUPTCY" in legal_types
     assert "BUY_PROPERTY" not in legal_types
     assert "START_AUCTION" not in legal_types
+
+
+def test_end_turn_rotates_to_next_active_player_and_advances_turn_number() -> None:
+    state = _initial_state(count=3)
+
+    next_state = apply_action(state, _action(state, "player-1", "END_TURN"), "end-turn")
+
+    assert next_state.turn.turn_number == state.turn.turn_number + 1
+    assert next_state.turn.current_player_index == 1
+    assert next_state.turn.current_player_id == "player-2"
+    assert next_state.turn.phase == "START_TURN"
+    assert next_state.turn.consecutive_doubles == 0
+    assert next_state.event_sequence == state.event_sequence + 1
+    assert next_state.applied_event_ids[-1] == "end-turn-1"
+
+
+def test_end_turn_skips_bankrupt_players_and_wraps_after_full_cycle() -> None:
+    state = _set_bankrupt(_initial_state(count=3), "player-2")
+
+    second_turn = apply_action(state, _action(state, "player-1", "END_TURN"), "end-turn")
+    full_cycle = apply_action(second_turn, _action(second_turn, "player-3", "END_TURN"), "end-turn")
+
+    assert second_turn.turn.current_player_id == "player-3"
+    assert second_turn.turn.current_player_index == 2
+    assert full_cycle.turn.current_player_id == "player-1"
+    assert full_cycle.turn.current_player_index == 0
+    assert full_cycle.turn.turn_number == state.turn.turn_number + 2
+
+
+def test_end_turn_is_rejected_for_non_current_actor() -> None:
+    state = _initial_state()
+
+    _assert_rejection_does_not_mutate(state, _action(state, "player-2", "END_TURN"), "mistimed_action")
 
 
 def test_unowned_property_exposes_purchase_choices_and_buy_applies_events() -> None:

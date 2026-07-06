@@ -44,6 +44,7 @@ ACTION_PRIORITY = (
     "PAY_JAIL_FINE",
     "USE_GET_OUT_OF_JAIL_CARD",
     "ROLL_DICE",
+    "END_TURN",
     "START_AUCTION",
     "BID_AUCTION",
     "PASS_AUCTION",
@@ -53,6 +54,18 @@ ACTION_PRIORITY = (
     "UNMORTGAGE_PROPERTY",
     "DECLARE_BANKRUPTCY",
 )
+SCRIPTED_RESOLUTION_PRIORITY = (
+    "BUY_PROPERTY",
+    "SETTLE_DEBT",
+    "PAY_JAIL_FINE",
+    "USE_GET_OUT_OF_JAIL_CARD",
+    "START_AUCTION",
+    "BID_AUCTION",
+    "PASS_AUCTION",
+)
+SCRIPTED_TURN_MIN_ACCEPTED_ACTIONS = 4
+SCRIPTED_TURN_MAX_ACCEPTED_ACTIONS = 16
+TURN_TRANSITION_EVENT_TYPES = ("TURN_ENDED", "TURN_STATE_SET")
 
 
 class SmokeFailure(RuntimeError):
@@ -296,20 +309,29 @@ def several_turn_scripted_smoke(context: SmokeContext) -> None:
     )
     game_id = str(game["id"])
     accepted_action_count = 0
-    first_sequence = current_event_sequence(context, game_id, tier="scripted turn")
+    player_count = game_player_count(game, tier="scripted turn")
+    initial_state = http_json(context, "GET", f"/games/{game_id}/state", tier="scripted turn")
+    first_sequence = event_sequence_from_state_response(initial_state, tier="scripted turn")
+    initial_turn = turn_from_state_response(initial_state, tier="scripted turn")
+    initial_current_player_id = turn_current_player_id(initial_turn, tier="scripted turn")
+    initial_turn_number = turn_number(initial_turn, tier="scripted turn")
+    observed_current_player_ids = {initial_current_player_id}
+    observed_actor_ids: set[str] = set()
+    actions_by_turn_actor: dict[tuple[int, str], int] = {}
+    final_current_player_id = initial_current_player_id
+    round_number = initial_turn_number
 
-    for index in range(4):
+    for index in range(SCRIPTED_TURN_MAX_ACCEPTED_ACTIONS):
         state = http_json(context, "GET", f"/games/{game_id}/state", tier="scripted turn")
-        state_body = state.get("state")
-        if not isinstance(state_body, Mapping):
-            raise SmokeFailure("scripted turn", "state response did not include a state object")
-        turn = state_body.get("turn")
-        if not isinstance(turn, Mapping):
-            raise SmokeFailure("scripted turn", "state response did not include turn data")
-        actor_id = str(turn.get("current_player_id"))
+        turn = turn_from_state_response(state, tier="scripted turn")
+        actor_id = turn_current_player_id(turn, tier="scripted turn")
+        round_number = turn_number(turn, tier="scripted turn")
+        observed_current_player_ids.add(actor_id)
+        turn_actor_key = (round_number, actor_id)
         action = choose_scripted_action(
             legal_actions(context, game_id, actor_id, tier="scripted turn"),
             tier="scripted turn",
+            prefer_end_turn=actions_by_turn_actor.get(turn_actor_key, 0) > 0,
         )
         response = http_json(
             context,
@@ -322,17 +344,71 @@ def several_turn_scripted_smoke(context: SmokeContext) -> None:
         if response.get("status") != "accepted":
             raise SmokeFailure("scripted turn", f"scripted action was not accepted: {response}")
         accepted_action_count += 1
+        observed_actor_ids.add(actor_id)
+        actions_by_turn_actor[turn_actor_key] = actions_by_turn_actor.get(turn_actor_key, 0) + 1
+        response_state = response.get("state")
+        if isinstance(response_state, Mapping):
+            response_turn = turn_from_state_body(response_state, tier="scripted turn")
+            final_current_player_id = turn_current_player_id(response_turn, tier="scripted turn")
+            round_number = turn_number(response_turn, tier="scripted turn")
+            observed_current_player_ids.add(final_current_player_id)
+        if (
+            accepted_action_count >= SCRIPTED_TURN_MIN_ACCEPTED_ACTIONS
+            and len(observed_actor_ids) > 1
+            and len(observed_current_player_ids) > 1
+            and final_current_player_id == initial_current_player_id
+            and round_number >= initial_turn_number + player_count
+        ):
+            break
 
-    final_sequence = current_event_sequence(context, game_id, tier="scripted turn")
-    if accepted_action_count < 4 or final_sequence <= first_sequence:
+    final_state = http_json(context, "GET", f"/games/{game_id}/state", tier="scripted turn")
+    final_sequence = event_sequence_from_state_response(final_state, tier="scripted turn")
+    final_turn = turn_from_state_response(final_state, tier="scripted turn")
+    final_current_player_id = turn_current_player_id(final_turn, tier="scripted turn")
+    round_number = turn_number(final_turn, tier="scripted turn")
+    observed_current_player_ids.add(final_current_player_id)
+
+    if accepted_action_count < SCRIPTED_TURN_MIN_ACCEPTED_ACTIONS or final_sequence <= first_sequence:
         raise SmokeFailure(
             "scripted turn",
             f"game did not advance enough: actions={accepted_action_count}, "
             f"sequence {first_sequence}->{final_sequence}",
         )
+    if len(observed_current_player_ids) < 2:
+        raise SmokeFailure(
+            "scripted turn",
+            f"current_player_id did not change during smoke: {sorted(observed_current_player_ids)}",
+        )
+    if len(observed_actor_ids) < 2:
+        raise SmokeFailure(
+            "scripted turn",
+            f"accepted actions did not include multiple actors: observed_actor_ids={sorted(observed_actor_ids)}",
+        )
+    if final_current_player_id != initial_current_player_id or round_number < initial_turn_number + player_count:
+        raise SmokeFailure(
+            "scripted turn",
+            "round_number did not advance through a full player cycle: "
+            f"initial_current_player_id={initial_current_player_id}, "
+            f"final current_player_id={final_current_player_id}, "
+            f"turn {initial_turn_number}->{round_number}, players={player_count}",
+        )
+
     events = http_json(context, "GET", f"/games/{game_id}/events", tier="scripted turn")
-    if not events.get("events"):
+    event_rows = event_rows_from_response(events, tier="scripted turn")
+    if not event_rows:
         raise SmokeFailure("scripted turn", "accepted scripted actions did not produce events")
+    if not any(
+        turn_transition_event_advances_context(
+            event,
+            initial_turn_number=initial_turn_number,
+            initial_current_player_id=initial_current_player_id,
+        )
+        for event in event_rows
+    ):
+        raise SmokeFailure(
+            "scripted turn",
+            "TURN_ENDED or equivalent turn-transition event evidence was not found",
+        )
 
 
 def fake_ai_smoke(context: SmokeContext) -> None:
@@ -405,10 +481,83 @@ def create_game(
 
 def current_event_sequence(context: SmokeContext, game_id: str, *, tier: str) -> int:
     state = http_json(context, "GET", f"/games/{game_id}/state", tier=tier)
+    return event_sequence_from_state_response(state, tier=tier)
+
+
+def event_sequence_from_state_response(state: Mapping[str, Any], *, tier: str) -> int:
     sequence = state.get("event_sequence")
     if not isinstance(sequence, int):
         raise SmokeFailure(tier, f"state response has invalid event_sequence: {state}")
     return sequence
+
+
+def turn_from_state_response(state: Mapping[str, Any], *, tier: str) -> Mapping[str, Any]:
+    state_body = state.get("state")
+    if not isinstance(state_body, Mapping):
+        raise SmokeFailure(tier, "state response did not include a state object")
+    return turn_from_state_body(state_body, tier=tier)
+
+
+def turn_from_state_body(state_body: Mapping[str, Any], *, tier: str) -> Mapping[str, Any]:
+    turn = state_body.get("turn")
+    if not isinstance(turn, Mapping):
+        raise SmokeFailure(tier, "state response did not include turn data")
+    return turn
+
+
+def turn_current_player_id(turn: Mapping[str, Any], *, tier: str) -> str:
+    current_player_id = turn.get("current_player_id")
+    if not isinstance(current_player_id, str) or not current_player_id:
+        raise SmokeFailure(tier, f"turn data has invalid current_player_id: {turn}")
+    return current_player_id
+
+
+def turn_number(turn: Mapping[str, Any], *, tier: str) -> int:
+    value = turn.get("turn_number")
+    if not isinstance(value, int):
+        raise SmokeFailure(tier, f"turn data has invalid turn_number: {turn}")
+    return value
+
+
+def game_player_count(game: Mapping[str, Any], *, tier: str) -> int:
+    players = game.get("players")
+    if not isinstance(players, Sequence) or isinstance(players, (str, bytes, bytearray)):
+        raise SmokeFailure(tier, "created game did not return player records")
+    player_count = len(players)
+    if player_count < 2:
+        raise SmokeFailure(tier, f"scripted smoke needs at least two players, got {player_count}")
+    return player_count
+
+
+def event_rows_from_response(events: Mapping[str, Any], *, tier: str) -> list[Mapping[str, Any]]:
+    rows = events.get("events")
+    if not isinstance(rows, list):
+        raise SmokeFailure(tier, f"event response is malformed: {events}")
+    return [event for event in rows if isinstance(event, Mapping)]
+
+
+def turn_transition_event_advances_context(
+    event: Mapping[str, Any],
+    *,
+    initial_turn_number: int,
+    initial_current_player_id: str,
+) -> bool:
+    event_type = event.get("event_type")
+    if event_type not in TURN_TRANSITION_EVENT_TYPES:
+        return False
+    if event_type == "TURN_ENDED":
+        return True
+    payload = event.get("payload")
+    if not isinstance(payload, Mapping):
+        return False
+    next_turn_number = payload.get("turn_number")
+    next_current_player_id = payload.get("current_player_id")
+    return (
+        isinstance(next_turn_number, int)
+        and next_turn_number > initial_turn_number
+        and isinstance(next_current_player_id, str)
+        and next_current_player_id != initial_current_player_id
+    )
 
 
 def legal_actions(context: SmokeContext, game_id: str, actor_id: str, *, tier: str) -> list[Mapping[str, Any]]:
@@ -424,9 +573,22 @@ def legal_actions(context: SmokeContext, game_id: str, actor_id: str, *, tier: s
     return [action for action in actions if isinstance(action, Mapping)]
 
 
-def choose_scripted_action(actions: Sequence[Mapping[str, Any]], *, tier: str) -> Mapping[str, Any]:
+def choose_scripted_action(
+    actions: Sequence[Mapping[str, Any]],
+    *,
+    tier: str,
+    prefer_end_turn: bool = False,
+) -> Mapping[str, Any]:
     if not actions:
         raise SmokeFailure(tier, "no legal actions were returned")
+    if prefer_end_turn:
+        for action_type in SCRIPTED_RESOLUTION_PRIORITY:
+            for action in actions:
+                if action.get("type") == action_type:
+                    return action
+        for action in actions:
+            if action.get("type") == "END_TURN":
+                return action
     for action_type in ACTION_PRIORITY:
         for action in actions:
             if action.get("type") == action_type:

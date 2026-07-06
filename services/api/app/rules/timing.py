@@ -64,9 +64,13 @@ _BANKRUPTCY_ACTION_PHASES: Final = frozenset(
 _DEBT_ACTION_PHASES: Final = frozenset(
     phase for phase in TurnPhase if phase is not TurnPhase.GAME_OVER
 )
+_END_TURN_PHASES: Final = frozenset(
+    phase for phase in TurnPhase if phase is not TurnPhase.GAME_OVER
+)
 
 _ACTION_TIMING_WINDOWS: Final[dict[str, frozenset[TurnPhase]]] = {
     "ROLL_DICE": _ROLL_PHASES,
+    "END_TURN": _END_TURN_PHASES,
     "BUY_PROPERTY": _PURCHASE_OR_AUCTION_PHASES,
     "START_AUCTION": _PURCHASE_OR_AUCTION_PHASES,
     "BID_AUCTION": _PURCHASE_OR_AUCTION_PHASES,

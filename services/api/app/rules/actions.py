@@ -25,6 +25,7 @@ from app.rules.mechanics import (
     buy_property,
     close_auction,
     declare_bankruptcy,
+    end_turn,
     mortgage_property,
     pass_auction,
     pay_jail_fine,
@@ -54,6 +55,7 @@ SUPPORTED_ACTION_TYPES: Final[frozenset[str]] = frozenset(
         "PASS_AUCTION",
         "PAY_JAIL_FINE",
         "USE_GET_OUT_OF_JAIL_CARD",
+        "END_TURN",
         "BUY_HOUSE",
         "SELL_HOUSE",
         "MORTGAGE_PROPERTY",
@@ -277,6 +279,7 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
 
     if actor_id == state.turn.current_player_id:
         add("ROLL_DICE", description="Roll deterministic dice for the current turn.")
+        add("END_TURN", description="End the current player's turn.")
 
         if player.in_jail:
             if player.cash >= JAIL_FINE:
@@ -377,6 +380,8 @@ def validate_action(state: GameState, action: GameAction) -> ValidatedAction:
 
     if action.type == "ROLL_DICE":
         _validate_roll_timing(state, action.actor_id)
+    elif action.type == "END_TURN":
+        _validate_end_turn_timing(state, action.actor_id)
     elif action.type == "BUY_PROPERTY":
         _validate_purchase_action(state, actor, _required_str(payload, "property_id"), require_cash=True)
     elif action.type == "START_AUCTION":
@@ -447,6 +452,9 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
             dice_payload.die_2,
             event_id_prefix,
         )
+
+    if action.type == "END_TURN":
+        return end_turn(state, action.actor_id, event_id_prefix)
 
     if action.type == "BUY_PROPERTY":
         return buy_property(state, action.actor_id, _required_str(payload, "property_id"), event_id_prefix)
@@ -640,6 +648,10 @@ def _validate_payload_shape(action_type: str, payload: Mapping[str, object]) -> 
         _validate_allowed_fields(payload, ())
         return
 
+    if action_type == "END_TURN":
+        _validate_allowed_fields(payload, ())
+        return
+
     if action_type in {"BUY_PROPERTY", "START_AUCTION"}:
         _validate_allowed_fields(payload, ("property_id", "price"))
         _required_str(payload, "property_id")
@@ -713,6 +725,15 @@ def _validate_payload_shape(action_type: str, payload: Mapping[str, object]) -> 
 def _validate_roll_timing(state: GameState, actor_id: str) -> None:
     if state.active_auction is not None:
         _raise_issue("mistimed_action", "players cannot roll dice during an active auction", "type")
+    if actor_id != state.turn.current_player_id:
+        _raise_issue("mistimed_action", f"{actor_id} is not the current turn player", "actor_id")
+
+
+def _validate_end_turn_timing(state: GameState, actor_id: str) -> None:
+    if state.active_auction is not None:
+        _raise_issue("mistimed_action", "players cannot end a turn during an active auction", "type")
+    if state.active_payment is not None:
+        _raise_issue("mistimed_action", "players cannot end a turn with unresolved debt", "type")
     if actor_id != state.turn.current_player_id:
         _raise_issue("mistimed_action", f"{actor_id} is not the current turn player", "actor_id")
 
