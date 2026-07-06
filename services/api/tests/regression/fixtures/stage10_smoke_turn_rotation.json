@@ -1,0 +1,90 @@
+{
+  "fixture_version": 1,
+  "id": "stage10_smoke_turn_rotation",
+  "title": "Several-turn smoke replay rotates current player and advances turn number",
+  "source": ".codex-supervisor/phase10_stage106_review_after_end_turn_repair.txt",
+  "seed": "stage10-smoke-turn-rotation-seed",
+  "game_id": "stage10-smoke-turn-rotation-game",
+  "players": [
+    {
+      "id": "player-1",
+      "name": "Ada",
+      "kind": "human"
+    },
+    {
+      "id": "player-2",
+      "name": "Grace",
+      "kind": "human"
+    },
+    {
+      "id": "player-3",
+      "name": "Linus",
+      "kind": "ai"
+    }
+  ],
+  "event_log": [
+    {
+      "event_id": "stage10-smoke-turn-rotation-1",
+      "sequence": 1,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 2,
+        "current_player_index": 1,
+        "current_player_id": "player-2",
+        "phase": "START_TURN",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-smoke-turn-rotation-2",
+      "sequence": 2,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 3,
+        "current_player_index": 2,
+        "current_player_id": "player-3",
+        "phase": "START_TURN",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-smoke-turn-rotation-3",
+      "sequence": 3,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 4,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "START_TURN",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-smoke-turn-rotation-4",
+      "sequence": 4,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 5,
+        "current_player_index": 1,
+        "current_player_id": "player-2",
+        "phase": "START_TURN",
+        "consecutive_doubles": 0
+      }
+    }
+  ],
+  "reproduction": {
+    "rotation_source": "several-turn scripted smoke",
+    "initial_current_player_id": "player-1",
+    "observed_current_player_ids": ["player-1", "player-2", "player-3", "player-1", "player-2"],
+    "observed_turn_numbers": [1, 2, 3, 4, 5]
+  },
+  "expectation": {
+    "bug": "Scripted smoke turns must advance through real player rotation instead of stalling on one actor.",
+    "assertions": {
+      "final_current_player_id": "player-2",
+      "final_turn_number": 5,
+      "current_player_id": ["player-1", "player-2", "player-3", "player-1", "player-2"],
+      "turn_number": [1, 2, 3, 4, 5]
+    }
+  }
+}

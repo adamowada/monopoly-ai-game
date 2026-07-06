@@ -1,0 +1,60 @@
+{
+  "fixture_version": 1,
+  "id": "stage10_pending_immediate_obligation_settlement",
+  "title": "Pending immediate obligation remains due and enforceable",
+  "source": ".codex-supervisor/phase10_stage104_final_review_after_pending_repair.txt",
+  "seed": "stage10-pending-immediate-obligation-seed",
+  "game_id": "stage10-pending-immediate-obligation-game",
+  "players": [
+    {
+      "id": "player-1",
+      "name": "Ada",
+      "kind": "human"
+    },
+    {
+      "id": "player-2",
+      "name": "Grace",
+      "kind": "human"
+    }
+  ],
+  "event_log": [
+    {
+      "event_id": "stage10-pending-immediate-obligation-1",
+      "sequence": 1,
+      "type": "PROPERTY_OWNER_SET",
+      "payload": {
+        "property_id": "property_mediterranean_avenue",
+        "owner_id": "player-1"
+      }
+    }
+  ],
+  "reproduction": {
+    "trigger_context": {},
+    "obligation": {
+      "status": "pending",
+      "due_turn": null,
+      "due_condition": null,
+      "schedule": {
+        "trigger": {
+          "type": "immediate"
+        }
+      },
+      "terms": {
+        "settlement_action": "cash_transfer",
+        "from_player_id": "player-1",
+        "to_player_id": "player-2",
+        "amount": 90
+      }
+    }
+  },
+  "expectation": {
+    "bug": "Pending immediate obligations with no due_turn or due_condition must stay settleable.",
+    "assertions": {
+      "status": "pending",
+      "due_turn": null,
+      "due_condition": null,
+      "trigger_name": "immediate_trigger",
+      "matched": true
+    }
+  }
+}

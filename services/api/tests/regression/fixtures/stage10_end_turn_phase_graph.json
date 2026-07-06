@@ -1,0 +1,111 @@
+{
+  "fixture_version": 1,
+  "id": "stage10_end_turn_phase_graph",
+  "title": "END_TURN uses a valid phase graph and rejects reducer-invalid timing",
+  "source": ".codex-supervisor/phase10_stage106_review_after_end_turn_repair.txt",
+  "seed": "stage10-end-turn-phase-graph-seed",
+  "game_id": "stage10-end-turn-phase-graph-game",
+  "players": [
+    {
+      "id": "player-1",
+      "name": "Ada",
+      "kind": "human"
+    },
+    {
+      "id": "player-2",
+      "name": "Grace",
+      "kind": "human"
+    },
+    {
+      "id": "player-3",
+      "name": "Linus",
+      "kind": "ai"
+    }
+  ],
+  "event_log": [
+    {
+      "event_id": "stage10-end-turn-phase-graph-1",
+      "sequence": 1,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "PRE_ROLL_MANAGEMENT",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-end-turn-phase-graph-2",
+      "sequence": 2,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "ROLL_REQUIRED",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-end-turn-phase-graph-3",
+      "sequence": 3,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "MOVEMENT_RESOLUTION",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-end-turn-phase-graph-4",
+      "sequence": 4,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "SPACE_RESOLUTION",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-end-turn-phase-graph-5",
+      "sequence": 5,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "POST_ROLL_MANAGEMENT",
+        "consecutive_doubles": 0
+      }
+    }
+  ],
+  "reproduction": {
+    "legal_action": {
+      "actor_id": "player-1",
+      "type": "END_TURN",
+      "payload": {}
+    },
+    "illegal_prefix_sequence": 2,
+    "illegal_action": {
+      "actor_id": "player-1",
+      "type": "END_TURN",
+      "payload": {}
+    }
+  },
+  "expectation": {
+    "bug": "END_TURN must not surface InvalidEventError from reducer-invalid phases.",
+    "assertions": {
+      "final_replayed_phase": "POST_ROLL_MANAGEMENT",
+      "legal_end_turn_event_count": 2,
+      "legal_end_turn_phases": ["END_TURN", "START_TURN"],
+      "next_current_player_id": "player-2",
+      "next_turn_number": 2,
+      "illegal_rejection_code": "mistimed_action"
+    }
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "fixture_version": 1,
+  "id": "stage10_debt_payload_mismatch",
+  "title": "Forged debt settlement payload is rejected with debt_payload_mismatch",
+  "source": ".codex-supervisor/phase10_stage105_review_after_repair.txt",
+  "seed": "stage10-debt-payload-mismatch-seed",
+  "game_id": "stage10-debt-payload-mismatch-game",
+  "players": [
+    {
+      "id": "player-1",
+      "name": "Ada",
+      "kind": "human"
+    },
+    {
+      "id": "player-2",
+      "name": "Grace",
+      "kind": "human"
+    },
+    {
+      "id": "player-3",
+      "name": "Linus",
+      "kind": "ai"
+    }
+  ],
+  "event_log": [
+    {
+      "event_id": "stage10-debt-payload-mismatch-1",
+      "sequence": 1,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "PRE_ROLL_MANAGEMENT",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-debt-payload-mismatch-2",
+      "sequence": 2,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "ROLL_REQUIRED",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-debt-payload-mismatch-3",
+      "sequence": 3,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "MOVEMENT_RESOLUTION",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-debt-payload-mismatch-4",
+      "sequence": 4,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "SPACE_RESOLUTION",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-debt-payload-mismatch-5",
+      "sequence": 5,
+      "type": "TURN_STATE_SET",
+      "payload": {
+        "turn_number": 1,
+        "current_player_index": 0,
+        "current_player_id": "player-1",
+        "phase": "PAYMENT_RESOLUTION",
+        "consecutive_doubles": 0
+      }
+    },
+    {
+      "event_id": "stage10-debt-payload-mismatch-6",
+      "sequence": 6,
+      "type": "ACTIVE_PAYMENT_SET",
+      "payload": {
+        "active": true,
+        "debtor_id": "player-1",
+        "creditor_id": "player-2",
+        "amount_owed": 100,
+        "amount_paid": 0,
+        "reason": "rent",
+        "negotiation_allowed": false
+      }
+    }
+  ],
+  "reproduction": {
+    "forged_action": {
+      "actor_id": "player-1",
+      "type": "SETTLE_DEBT",
+      "payload": {
+        "debt_id": "forged-stage10-debt",
+        "creditor_player_id": "player-1",
+        "amount": 100
+      }
+    }
+  },
+  "expectation": {
+    "bug": "Forged debt identity fields must not be silently ignored or accepted.",
+    "assertions": {
+      "active_debtor_id": "player-1",
+      "active_creditor_id": "player-2",
+      "outstanding_amount": 100,
+      "rejection_code": "debt_payload_mismatch"
+    }
+  }
+}

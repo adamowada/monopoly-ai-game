@@ -214,11 +214,19 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
         outstanding = outstanding_debt_amount(state)
         settle_amount = min(player.cash, outstanding)
         if settle_amount > 0:
+            debt_id = _active_debt_payload_id(state)
+            debt_payload: dict[str, object] = {
+                "debt_id": debt_id,
+                "creditor_player_id": active_payment.creditor_id,
+                "amount": settle_amount,
+            }
             add(
                 "SETTLE_DEBT",
-                {"amount": settle_amount},
+                debt_payload,
                 schema=_object_schema(
                     {
+                        "debt_id": _const_string_schema(debt_id),
+                        "creditor_player_id": _const_nullable_string_schema(active_payment.creditor_id),
                         "amount": {
                             "type": "integer",
                             "minimum": 1,
@@ -718,8 +726,12 @@ def _validate_payload_shape(action_type: str, payload: Mapping[str, object]) -> 
         return
 
     if action_type == "SETTLE_DEBT":
-        _validate_allowed_fields(payload, ("amount",))
+        _validate_allowed_fields(payload, ("amount", "debt_id", "creditor_player_id"))
         _required_int(payload, "amount")
+        if "debt_id" in payload:
+            _required_str(payload, "debt_id")
+        if "creditor_player_id" in payload:
+            _optional_str_or_none(payload, "creditor_player_id")
 
 
 def _validate_roll_timing(state: GameState, actor_id: str) -> None:
@@ -867,6 +879,8 @@ def _validate_settle_debt_action(
     if actor.id != active_payment.debtor_id:
         _raise_issue("mistimed_action", "only the active debtor may settle debt", "actor_id")
 
+    _validate_debt_payload_identity(state, payload)
+
     amount = _required_int(payload, "amount")
     if amount <= 0:
         _raise_issue("malformed_action", "payload field amount must be a positive integer", "payload.amount")
@@ -876,6 +890,42 @@ def _validate_settle_debt_action(
         _raise_issue("illegal_action", "settlement amount exceeds debtor cash", "payload.amount")
     if amount > outstanding:
         _raise_issue("illegal_action", "settlement amount exceeds outstanding debt", "payload.amount")
+
+
+def _validate_debt_payload_identity(state: GameState, payload: Mapping[str, object]) -> None:
+    active_payment = state.active_payment
+    if active_payment is None:
+        return
+
+    if "debt_id" in payload and payload["debt_id"] != _active_debt_payload_id(state):
+        _raise_issue(
+            "debt_payload_mismatch",
+            "SETTLE_DEBT payload debt_id must match the active debt",
+            "payload.debt_id",
+        )
+    if "creditor_player_id" in payload and payload["creditor_player_id"] != active_payment.creditor_id:
+        _raise_issue(
+            "debt_payload_mismatch",
+            "SETTLE_DEBT payload creditor_player_id must match the active debt",
+            "payload.creditor_player_id",
+        )
+
+
+def _active_debt_payload_id(state: GameState) -> str:
+    active_payment = state.active_payment
+    if active_payment is None:
+        return "no-active-debt"
+    creditor_id = active_payment.creditor_id or "bank"
+    return (
+        "active-debt:"
+        f"{state.game_id}:"
+        f"{state.event_sequence}:"
+        f"{active_payment.debtor_id}:"
+        f"{creditor_id}:"
+        f"{active_payment.amount_owed}:"
+        f"{active_payment.amount_paid}:"
+        f"{active_payment.reason}"
+    )
 
 
 def _mechanic_accepts(
@@ -1132,6 +1182,10 @@ def _object_schema(
 
 def _const_string_schema(value: str) -> Mapping[str, object]:
     return {"type": "string", "const": value}
+
+
+def _const_nullable_string_schema(value: str | None) -> Mapping[str, object]:
+    return {"type": ["string", "null"], "enum": [value]}
 
 
 def _probe_prefix(state: GameState, action_type: str, object_id: str) -> str:
