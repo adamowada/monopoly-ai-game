@@ -1,13 +1,16 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { ArrowRightLeft, Bot, CalendarClock, FileText, History, Info, ListFilter, ShieldAlert } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowRightLeft, Bot, CalendarClock, FileText, History, Info, ListFilter, Loader2, ShieldAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { Button } from "../components/ui/button";
 import {
+  enforceContracts,
   readContractOutcomes,
   readContracts,
   readObligations,
+  type ContractEnforcementResult,
   type ContractOutcomeExplanation,
   type ContractRecord,
   type ObligationRecord,
@@ -250,6 +253,34 @@ function ErrorNote({ text }: Readonly<{ text: string }>) {
   return <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{text}</div>;
 }
 
+function pluralize(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function ContractEnforcementStatus({ result }: Readonly<{ result: ContractEnforcementResult }>) {
+  const text =
+    result.status === "rejected"
+      ? `Contract enforcement rejected: ${result.reason_code}`
+      : `Contract enforcement settled ${pluralize(
+          result.settled_obligation_ids.length,
+          "obligation",
+        )} and defaulted ${pluralize(result.defaulted_obligation_ids.length, "obligation")}.`;
+  return (
+    <div
+      aria-label="Contract enforcement status"
+      role="status"
+      className={cn(
+        "rounded-md border px-3 py-2 text-sm",
+        result.status === "rejected"
+          ? "border-rose-200 bg-rose-50 text-rose-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700",
+      )}
+    >
+      {text}
+    </div>
+  );
+}
+
 function ActiveContracts({
   contracts,
   game,
@@ -313,11 +344,17 @@ function ActiveContracts({
 
 function UpcomingObligations({
   game,
+  enforcingObligationId,
+  isEnforcing,
   isLoading,
+  onEnforce,
   obligations,
 }: Readonly<{
   game: GameMetadata;
+  enforcingObligationId: string | null;
+  isEnforcing: boolean;
   isLoading: boolean;
+  onEnforce: (obligation: ObligationRecord) => void;
   obligations: ObligationRecord[];
 }>) {
   const upcoming = obligations.filter((obligation) => upcomingStatuses.has(obligation.status));
@@ -356,6 +393,20 @@ function UpcomingObligations({
                 <p>{dueText(obligation)}</p>
                 <p>{obligationAssetText(obligation)}</p>
                 <p>Counterparty {playerName(game, obligation.counterparty_player_id)}</p>
+              </div>
+              <div className="mt-3">
+                <Button
+                  onClick={() => onEnforce(obligation)}
+                  disabled={isLoading || isEnforcing}
+                  className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+                >
+                  {enforcingObligationId === obligation.id ? (
+                    <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                  ) : (
+                    <ArrowRightLeft aria-hidden="true" className="size-3.5" />
+                  )}
+                  {enforcingObligationId === obligation.id ? "Enforcing..." : "Enforce obligation"}
+                </Button>
               </div>
             </article>
           ))
@@ -575,6 +626,8 @@ export function ContractsPanel({
   gameId,
   rejectedActions,
 }: ContractsPanelProps) {
+  const queryClient = useQueryClient();
+  const [enforcementResult, setEnforcementResult] = useState<ContractEnforcementResult | null>(null);
   const contractsQuery = useQuery({
     queryKey: ["contracts", gameId],
     queryFn: () => readContracts({ gameId, baseUrl: apiBaseUrl }),
@@ -603,15 +656,45 @@ export function ContractsPanel({
     () => buildLogEntries({ deals, events, game, rejectedActions }),
     [deals, events, game, rejectedActions],
   );
+  const enforceContractsMutation = useMutation({
+    mutationFn: (obligation: ObligationRecord) =>
+      enforceContracts({
+        gameId,
+        baseUrl: apiBaseUrl,
+        triggerContext: {
+          source: "contracts_panel",
+          contract_id: obligation.contract_id,
+          obligation_id: obligation.id,
+        },
+      }),
+    onSuccess: async (result) => {
+      setEnforcementResult(result);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["contracts", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["obligations", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["contract-outcomes", gameId] }),
+        queryClient.invalidateQueries({ queryKey: ["events", gameId] }),
+      ]);
+    },
+  });
 
   return (
     <section aria-label="Contracts obligations panel" className="grid content-start gap-4">
       {contractsQuery.isError || obligationsQuery.isError || outcomesQuery.isError || dealsQuery.isError ? (
         <ErrorNote text="Contracts, obligations, outcomes, or deal records are unavailable from the API." />
       ) : null}
+      {enforceContractsMutation.isError ? <ErrorNote text="Contract enforcement request failed." /> : null}
+      {enforcementResult ? <ContractEnforcementStatus result={enforcementResult} /> : null}
 
       <ActiveContracts contracts={contracts} game={game} isLoading={contractsQuery.isLoading} />
-      <UpcomingObligations game={game} isLoading={obligationsQuery.isLoading} obligations={obligations} />
+      <UpcomingObligations
+        enforcingObligationId={enforceContractsMutation.isPending ? (enforceContractsMutation.variables?.id ?? null) : null}
+        game={game}
+        isEnforcing={enforceContractsMutation.isPending}
+        isLoading={obligationsQuery.isLoading}
+        obligations={obligations}
+        onEnforce={(obligation) => enforceContractsMutation.mutate(obligation)}
+      />
       <SettlementHistory isLoading={obligationsQuery.isLoading} obligations={obligations} />
       <ContractOutcomeExplanations isLoading={outcomesQuery.isLoading} outcomes={outcomes} />
       <FullGameLog entries={logEntries} />
