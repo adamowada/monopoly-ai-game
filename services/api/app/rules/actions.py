@@ -15,8 +15,8 @@ from app.rules.debt import (
     outstanding_debt_amount,
     settle_debt_with_cash,
 )
-from app.rules.event_capture import capture_rule_events
-from app.rules.events import DiceRolledPayload, GameEvent
+from app.rules.event_capture import capture_rule_events, record_rule_event
+from app.rules.events import DiceRolledPayload, GameEvent, TurnStateSetPayload
 from app.rules.mechanics import (
     JAIL_FINE,
     IllegalRuleActionError,
@@ -35,6 +35,8 @@ from app.rules.mechanics import (
     unmortgage_property,
     use_get_out_of_jail_card,
 )
+from app.rules.phases import TurnPhase
+from app.rules.reducer import apply_event
 from app.rules.rng import generate_dice_roll_event
 from app.rules.static_data import (
     BoardSpace,
@@ -64,6 +66,25 @@ SUPPORTED_ACTION_TYPES: Final[frozenset[str]] = frozenset(
         "SETTLE_DEBT",
     }
 )
+_ROLL_ACTION_POST_ROLL_PATHS: Final[dict[TurnPhase, tuple[TurnPhase, ...]]] = {
+    TurnPhase.START_TURN: (
+        TurnPhase.PRE_ROLL_MANAGEMENT,
+        TurnPhase.ROLL_REQUIRED,
+        TurnPhase.MOVEMENT_RESOLUTION,
+        TurnPhase.SPACE_RESOLUTION,
+        TurnPhase.POST_ROLL_MANAGEMENT,
+    ),
+    TurnPhase.ROLL_REQUIRED: (
+        TurnPhase.MOVEMENT_RESOLUTION,
+        TurnPhase.SPACE_RESOLUTION,
+        TurnPhase.POST_ROLL_MANAGEMENT,
+    ),
+    TurnPhase.MOVEMENT_RESOLUTION: (
+        TurnPhase.SPACE_RESOLUTION,
+        TurnPhase.POST_ROLL_MANAGEMENT,
+    ),
+    TurnPhase.SPACE_RESOLUTION: (TurnPhase.POST_ROLL_MANAGEMENT,),
+}
 
 
 class _ActionAdder(Protocol):
@@ -453,13 +474,14 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
             action.actor_id,
         )
         dice_payload = cast(DiceRolledPayload, dice_event.payload)
-        return apply_dice_roll(
+        rolled_state = apply_dice_roll(
             state,
             action.actor_id,
             dice_payload.die_1,
             dice_payload.die_2,
             event_id_prefix,
         )
+        return _advance_roll_action_to_post_roll_management(rolled_state, event_id_prefix)
 
     if action.type == "END_TURN":
         return end_turn(state, action.actor_id, event_id_prefix)
@@ -532,6 +554,35 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
         )
 
     _raise_issue("unknown_action", f"unknown action type {action.type}", "type")
+
+
+def _advance_roll_action_to_post_roll_management(state: GameState, event_id_prefix: str) -> GameState:
+    try:
+        current_phase = TurnPhase(state.turn.phase)
+    except ValueError:
+        return state
+
+    phase_path = _ROLL_ACTION_POST_ROLL_PATHS.get(current_phase)
+    if phase_path is None:
+        return state
+
+    next_state = state
+    for next_phase in phase_path:
+        event = GameEvent(
+            event_id=f"{event_id_prefix}-{next_state.event_sequence + 1}",
+            sequence=next_state.event_sequence + 1,
+            type="TURN_STATE_SET",
+            payload=TurnStateSetPayload(
+                turn_number=next_state.turn.turn_number,
+                current_player_index=next_state.turn.current_player_index,
+                current_player_id=next_state.turn.current_player_id,
+                phase=next_phase.value,
+                consecutive_doubles=next_state.turn.consecutive_doubles,
+            ),
+        )
+        record_rule_event(event)
+        next_state = apply_event(next_state, event)
+    return next_state
 
 
 def execute_action(state: GameState, action: GameAction, event_id_prefix: str) -> ActionExecutionResult:

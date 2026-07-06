@@ -81,6 +81,7 @@ class _FakeScriptedSmokeApi:
         self.player_ids = ("player-1", "player-2")
         self.current_player_index = 0
         self.turn_number = 1
+        self.phase = "START_TURN"
         self.sequence = 0
         self.events: list[dict[str, object]] = []
 
@@ -119,7 +120,7 @@ class _FakeScriptedSmokeApi:
                     "turn_number": self.turn_number,
                     "current_player_index": self.current_player_index,
                     "current_player_id": self.current_player_id,
-                    "phase": "START_TURN",
+                    "phase": self.phase,
                 }
             },
         }
@@ -128,7 +129,7 @@ class _FakeScriptedSmokeApi:
         state = self._state_response()
         return {
             "actor_id": self.current_player_id,
-            "type": "END_TURN" if self.rotates_turns else "ROLL_DICE",
+            "type": "END_TURN" if self.rotates_turns and self.phase != "START_TURN" else "ROLL_DICE",
             "payload": {},
             "expected_state_hash": state["state_hash"],
             "expected_event_sequence": state["event_sequence"],
@@ -138,18 +139,21 @@ class _FakeScriptedSmokeApi:
         actor_id = str(action["actor_id"])
         action_type = str(action["type"])
         self.sequence += 1
-        if action_type == "END_TURN" and self.rotates_turns:
+        if action_type == "END_TURN" and self.rotates_turns and self.phase != "START_TURN":
             self.current_player_index = (self.current_player_index + 1) % len(self.player_ids)
             self.turn_number += 1
+            self.phase = "START_TURN"
             event_type = "TURN_STATE_SET"
             event_payload: dict[str, object] = {
                 "turn_number": self.turn_number,
                 "current_player_index": self.current_player_index,
                 "current_player_id": self.current_player_id,
-                "phase": "START_TURN",
+                "phase": self.phase,
                 "consecutive_doubles": 0,
             }
         else:
+            if action_type == "ROLL_DICE" and self.rotates_turns:
+                self.phase = "POST_ROLL_MANAGEMENT"
             event_type = "DICE_ROLLED"
             event_payload = {"player_id": actor_id, "total": 7}
         event = {

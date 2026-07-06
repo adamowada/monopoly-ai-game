@@ -47,7 +47,6 @@ END_TURN_ENTRY_PHASES = frozenset(
 )
 END_TURN_COMMIT_PHASES = frozenset(
     {
-        TurnPhase.START_TURN,
         TurnPhase.END_TURN,
         *END_TURN_ENTRY_PHASES,
     }

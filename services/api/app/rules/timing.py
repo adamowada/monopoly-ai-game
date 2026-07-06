@@ -66,7 +66,6 @@ _DEBT_ACTION_PHASES: Final = frozenset(
 )
 _END_TURN_PHASES: Final = frozenset(
     {
-        TurnPhase.START_TURN,
         TurnPhase.POST_ROLL_MANAGEMENT,
         TurnPhase.NEGOTIATION_WINDOW,
         TurnPhase.END_TURN,

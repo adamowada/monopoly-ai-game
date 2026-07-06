@@ -220,20 +220,37 @@ def test_legal_actions_are_serializable_and_include_state_guards() -> None:
     assert all(isinstance(action.schema, Mapping) for action in legal_actions)
 
 
-def test_initial_state_exposes_roll_and_bankruptcy_but_not_purchase() -> None:
+def test_initial_state_exposes_roll_and_bankruptcy_but_not_end_turn_or_purchase() -> None:
     state = _initial_state()
 
     legal_types = _types(list_legal_actions(state, "player-1"))
 
-    assert "END_TURN" in legal_types
+    assert "END_TURN" not in legal_types, "mandatory roll window must not expose END_TURN"
     assert "ROLL_DICE" in legal_types
     assert "DECLARE_BANKRUPTCY" in legal_types
     assert "BUY_PROPERTY" not in legal_types
     assert "START_AUCTION" not in legal_types
 
 
-def test_end_turn_rotates_to_next_active_player_and_advances_turn_number() -> None:
-    state = _initial_state(count=3)
+def test_end_turn_from_start_turn_is_rejected_without_state_mutation() -> None:
+    state = _initial_state(count=2)
+    action = _action(state, "player-1", "END_TURN")
+
+    assert "END_TURN" not in _types(
+        list_legal_actions(state, "player-1")
+    ), "mandatory roll window must not expose END_TURN"
+    with pytest.raises(ActionValidationError) as exc_info:
+        validate_action(state, action)
+    assert _issue_codes(exc_info.value) == {"mistimed_action"}
+
+    _assert_rejection_does_not_mutate(state, action, "mistimed_action")
+    assert state.turn.current_player_id == "player-1"
+    assert state.turn.turn_number == 1
+    assert state.rng.dice_roll_count == 0
+
+
+def test_end_turn_phase_rotates_to_next_active_player_and_advances_turn_number() -> None:
+    state = _state_in_phase(_initial_state(count=3), TurnPhase.END_TURN)
 
     next_state = apply_action(state, _action(state, "player-1", "END_TURN"), "end-turn")
 
@@ -247,10 +264,15 @@ def test_end_turn_rotates_to_next_active_player_and_advances_turn_number() -> No
 
 
 def test_end_turn_skips_bankrupt_players_and_wraps_after_full_cycle() -> None:
-    state = _set_bankrupt(_initial_state(count=3), "player-2")
+    state = _state_in_phase(_set_bankrupt(_initial_state(count=3), "player-2"), TurnPhase.END_TURN)
 
     second_turn = apply_action(state, _action(state, "player-1", "END_TURN"), "end-turn")
-    full_cycle = apply_action(second_turn, _action(second_turn, "player-3", "END_TURN"), "end-turn")
+    third_player_end_window = _state_in_phase(second_turn, TurnPhase.END_TURN)
+    full_cycle = apply_action(
+        third_player_end_window,
+        _action(third_player_end_window, "player-3", "END_TURN"),
+        "end-turn",
+    )
 
     assert second_turn.turn.current_player_id == "player-3"
     assert second_turn.turn.current_player_index == 2
@@ -532,4 +554,6 @@ def test_roll_dice_action_uses_deterministic_rng_and_records_dice_event() -> Non
 
     assert next_state_a.rng.dice_roll_count == 1
     assert next_state_a.players[0].position == next_state_b.players[0].position
+    assert next_state_a.turn.phase == "POST_ROLL_MANAGEMENT"
+    assert "END_TURN" in _types(list_legal_actions(next_state_a, "player-1"))
     assert next_state_a.applied_event_ids[0] == "roll-1"
