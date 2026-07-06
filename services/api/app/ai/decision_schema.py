@@ -16,11 +16,42 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    RootModel,
+    ValidationError,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 
 
 MALFORMED_AI_OUTPUT_REASON_CODE = "malformed_ai_output"
 _FIELD_JOINER = "".join
+
+
+def _normalize_codex_json_object(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("value must be a valid JSON object string") from exc
+        if not isinstance(decoded, Mapping):
+            raise ValueError("value must decode to a JSON object")
+        return dict(decoded)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return value
+
+
+CodexJsonObject = Annotated[
+    dict[str, Any],
+    BeforeValidator(_normalize_codex_json_object),
+    WithJsonSchema({"type": "string"}),
+]
 
 DECISION_TYPES: tuple[str, ...] = (
     "action_decision",
@@ -64,7 +95,9 @@ class _SchemaModel(BaseModel):
 
 class AIActionPayload(_SchemaModel):
     type: str = Field(min_length=1, description="Game action type selected by the AI.")
-    payload: dict[str, Any] = Field(description="Game action payload to validate before mutation.")
+    payload: CodexJsonObject = Field(
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
 
 class NegotiationMessagePayload(_SchemaModel):
@@ -73,7 +106,10 @@ class NegotiationMessagePayload(_SchemaModel):
         description="Optional specific recipient for a negotiation message.",
     )
     body: str = Field(min_length=1, max_length=4000, description="Negotiation text to send.")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: CodexJsonObject = Field(
+        default_factory=dict,
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
 
 class OpenNegotiationPayload(_SchemaModel):
@@ -82,7 +118,10 @@ class OpenNegotiationPayload(_SchemaModel):
         max_length=5,
         json_schema_extra={"uniqueItems": True},
     )
-    context: dict[str, Any] = Field(default_factory=dict)
+    context: CodexJsonObject = Field(
+        default_factory=dict,
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
     @field_validator("participant_player_ids")
     @classmethod
@@ -94,13 +133,19 @@ class OpenNegotiationPayload(_SchemaModel):
 
 class DealProposalPayload(_SchemaModel):
     recipient_player_ids: list[UUID] = Field(min_length=1)
-    terms: dict[str, Any] = Field(min_length=1)
+    terms: CodexJsonObject = Field(
+        min_length=1,
+        description="Structured deal terms encoded as a JSON object string by Codex.",
+    )
     message: str | None = Field(default=None, min_length=1)
 
 
 class CounterofferPayload(_SchemaModel):
     responds_to_deal_id: UUID
-    terms: dict[str, Any] = Field(min_length=1)
+    terms: CodexJsonObject = Field(
+        min_length=1,
+        description="Structured counteroffer terms encoded as a JSON object string by Codex.",
+    )
     message: str | None = Field(default=None, min_length=1)
 
 
@@ -134,7 +179,10 @@ class MemoryUpdatePayload(_SchemaModel):
     category: MemoryCategory
     importance: int = Field(ge=0, le=10)
     content: str = Field(min_length=1)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: CodexJsonObject = Field(
+        default_factory=dict,
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
 
 class _DecisionBase(_SchemaModel):

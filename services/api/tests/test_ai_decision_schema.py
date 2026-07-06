@@ -226,6 +226,92 @@ def test_decision_specific_schema_is_single_strict_object_for_codex_response_for
         assert set(object_schema.get("required", ())) == set(properties)
 
 
+def test_action_decision_output_schema_keeps_dynamic_payload_expressible() -> None:
+    schema = output_schema("action_decision")
+    payload_schema = schema["properties"]["action"]["properties"]["payload"]
+
+    assert payload_schema["type"] == "string"
+    assert payload_schema.get("properties") is None
+    assert payload_schema.get("additionalProperties") is None
+
+
+def test_deal_proposal_output_schema_keeps_dynamic_terms_expressible() -> None:
+    schema = output_schema("deal_proposal")
+    terms_schema = schema["properties"]["deal"]["properties"]["terms"]
+
+    assert terms_schema["type"] == "string"
+    assert terms_schema.get("properties") is None
+    assert terms_schema.get("additionalProperties") is None
+
+
+def test_codex_boundary_action_payload_json_string_normalizes_to_dict() -> None:
+    raw_output = {
+        **_base("action_decision"),
+        "expected_state_hash": "state-hash-7-2",
+        "expected_event_sequence": 12,
+        "action": {
+            "type": "BID_AUCTION",
+            "payload": json.dumps(
+                {
+                    "property_id": "property_mediterranean_avenue",
+                    "amount": 80,
+                    "source": {"kind": "codex-boundary"},
+                }
+            ),
+        },
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+    dumped = parsed.root.model_dump(mode="json")
+
+    assert dumped["action"]["payload"] == {
+        "property_id": "property_mediterranean_avenue",
+        "amount": 80,
+        "source": {"kind": "codex-boundary"},
+    }
+
+
+def test_codex_boundary_deal_terms_json_string_normalizes_to_dict() -> None:
+    raw_output = {
+        **_base("deal_proposal"),
+        "negotiation_id": NEGOTIATION_ID,
+        "deal": {
+            "recipient_player_ids": [RECIPIENT_ID],
+            "terms": json.dumps(
+                {
+                    "terms": [
+                        {
+                            "type": "deferred_cash_payment",
+                            "from_player_id": PLAYER_ID,
+                            "to_player_id": RECIPIENT_ID,
+                            "amount": 125,
+                            "due_turn": 4,
+                        }
+                    ],
+                    "metadata": {"codex_boundary": True},
+                }
+            ),
+            "message": "Pay later for immediate position.",
+        },
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+    dumped = parsed.root.model_dump(mode="json")
+
+    assert dumped["deal"]["terms"] == {
+        "terms": [
+            {
+                "type": "deferred_cash_payment",
+                "from_player_id": PLAYER_ID,
+                "to_player_id": RECIPIENT_ID,
+                "amount": 125,
+                "due_turn": 4,
+            }
+        ],
+        "metadata": {"codex_boundary": True},
+    }
+
+
 def test_open_negotiation_parses_without_negotiation_id() -> None:
     raw_output = {
         **_base("open_negotiation"),

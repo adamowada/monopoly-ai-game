@@ -24,8 +24,8 @@ class AcceptanceFailure(RuntimeError):
 def main() -> int:
     started = False
     try:
-        run(["docker", "compose", "up", "--build", "--detach"], timeout=1800)
         started = True
+        run(["docker", "compose", "up", "--build", "--detach"], timeout=1800)
         wait_for_json(API_HEALTH_URL, expected={"status": "ok"}, timeout_seconds=180)
         wait_for_http(WEB_URL, timeout_seconds=180)
         run_final_browser_spec()

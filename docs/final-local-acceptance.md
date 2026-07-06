@@ -27,7 +27,7 @@ Phase 11 Stage 11.6 verifies the local product from a clean Docker Compose boot 
 
 Passing local evidence on 2026-07-06:
 
-- `pnpm run review`: passed after starting the local compose Postgres service for API integration tests. Result included 61 web unit tests, 25 web e2e tests with 1 expected skip, 421 API tests, and product smoke.
+- `pnpm run review`: passed after starting the local compose Postgres service for API integration tests. Result included the web unit suite, Playwright e2e suite with the expected skip, API test suite, and product smoke.
 - `RUN_LIVE_CODEX_AI=1 pnpm run test:smoke:live`: passed with `live Codex AI smoke ok: action_decision`.
 - `uv run --no-sync python scripts/final_local_acceptance.py`: passed from `docker compose up --build`, waited for `http://localhost:3000` and API health, ran `final-local-acceptance.spec.ts`, and cleaned up compose containers.
 
