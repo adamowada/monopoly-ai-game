@@ -243,6 +243,8 @@ class RejectedAIOutput:
     expected_state_hash: str | None
     parsed_output: Any | None
     audit_payload: Mapping[str, Any]
+    no_substitute_move: bool
+    substitute_move: Any | None
 
     def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
         errors = [error.model_dump(mode=mode) for error in self.validation_errors]
@@ -258,8 +260,8 @@ class RejectedAIOutput:
             "decision_type": self.decision_type,
             "expected_state_hash": self.expected_state_hash,
             "parsed_output": self.parsed_output,
-            no_path_key: True,
-            fallback_key: None,
+            no_path_key: self.no_substitute_move,
+            fallback_key: self.substitute_move,
             "audit_payload": dict(self.audit_payload),
         }
 
@@ -316,6 +318,8 @@ def reject_malformed_ai_output(
     expected_state_hash = _mapping_field(decoded, "expected_state_hash")
     errors = tuple(validation_error.errors)
     error_payload = [error.model_dump(mode="json") for error in errors]
+    no_substitute_move = True
+    substitute_move = None
     audit_payload = {
         "status": "rejected",
         "reason_code": MALFORMED_AI_OUTPUT_REASON_CODE,
@@ -326,8 +330,8 @@ def reject_malformed_ai_output(
         "raw_output": raw_output_text,
         "parsed_output": decoded,
         "validation_errors": error_payload,
-        _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"]): True,
-        _FIELD_JOINER(["sub", "stitute_", "move"]): None,
+        _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"]): no_substitute_move,
+        _FIELD_JOINER(["sub", "stitute_", "move"]): substitute_move,
     }
 
     return RejectedAIOutput(
@@ -341,6 +345,8 @@ def reject_malformed_ai_output(
         expected_state_hash=expected_state_hash,
         parsed_output=decoded,
         audit_payload=audit_payload,
+        no_substitute_move=no_substitute_move,
+        substitute_move=substitute_move,
     )
 
 

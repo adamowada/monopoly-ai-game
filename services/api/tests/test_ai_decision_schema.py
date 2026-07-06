@@ -321,6 +321,8 @@ def test_rejected_ai_output_audit_payload_keeps_raw_output_and_no_substitute_mov
     assert audit_payload.player_id == PLAYER_ID
     assert audit_payload.substitute_move is None
     assert audit_payload.no_substitute_move is True
+    assert audit_payload.model_dump()["substitute_move"] is None
+    assert audit_payload.model_dump()["no_substitute_move"] is True
     assert audit_payload.audit_payload["raw_output"] == audit_payload.raw_output
     assert audit_payload.audit_payload["validation_errors"][0]["code"] == "malformed_ai_output"
     assert audit_payload.audit_payload["no_substitute_move"] is True
