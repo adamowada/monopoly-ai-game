@@ -17,7 +17,7 @@
     "test:unit": "uv run --no-sync python scripts/phase0_check.py unit && uv run --no-sync python scripts/scaffold_check.py unit && pnpm run test:web && pnpm run test:api",
     "test:integration": "uv run --no-sync python scripts/phase0_check.py integration && uv run --no-sync python scripts/scaffold_check.py integration",
     "test:e2e": "uv run --no-sync python scripts/phase0_check.py e2e && uv run --no-sync python scripts/scaffold_check.py e2e",
-    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke && uv run --no-sync python scripts/scaffold_check.py smoke",
+    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke && uv run --no-sync python scripts/scaffold_check.py smoke && uv run --no-sync python scripts/product_smoke.py",
     "test:smoke:live": "node -e \"console.log(process.env.RUN_LIVE_CODEX_AI === '1' ? 'RUN_LIVE_CODEX_AI=1 live Codex AI smoke enabled' : 'RUN_LIVE_CODEX_AI not set; live smoke will skip')\" && uv run --project services/api --python 3.14.6 python services/api/scripts/live_codex_ai_smoke.py",
     "test:scaffold": "uv run --no-sync python scripts/scaffold_check.py check",
     "test:stack": "uv run --no-sync python scripts/docker_stack_check.py",

@@ -16,7 +16,7 @@ REQUIRED_SCRIPT_COMMANDS = {
     "test:unit": "uv run --no-sync python scripts/phase0_check.py unit && uv run --no-sync python scripts/scaffold_check.py unit && pnpm run test:web && pnpm run test:api",
     "test:integration": "uv run --no-sync python scripts/phase0_check.py integration && uv run --no-sync python scripts/scaffold_check.py integration",
     "test:e2e": "uv run --no-sync python scripts/phase0_check.py e2e && uv run --no-sync python scripts/scaffold_check.py e2e",
-    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke && uv run --no-sync python scripts/scaffold_check.py smoke",
+    "test:smoke": "uv run --no-sync python scripts/phase0_check.py smoke && uv run --no-sync python scripts/scaffold_check.py smoke && uv run --no-sync python scripts/product_smoke.py",
     "test:scaffold": "uv run --no-sync python scripts/scaffold_check.py check",
     "test:web": "pnpm --filter @monopoly-ai-game/web run test",
     "test:api": "pnpm --filter @monopoly-ai-game/api run test",
