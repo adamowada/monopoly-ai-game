@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 import tracemalloc
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -241,6 +241,91 @@ def test_stage_11_4_codex_subprocess_timeout_cleanup_terminates_child_tree(
             )
 
         child_pid = _read_pid(child_pid_file)
+        assert child_pid is not None
+        assert _wait_for_pid_exit(child_pid, timeout_seconds=5)
+    finally:
+        if child_pid is None:
+            child_pid = _read_pid(child_pid_file)
+        if child_pid is not None and _pid_is_running(child_pid):
+            _kill_pid_tree(child_pid)
+
+
+def test_stage_11_4_codex_subprocess_failure_cleanup_terminates_child_tree(
+    tmp_path: Path,
+) -> None:
+    # failed subprocess cleanup: a failed parent with returncode=7 must not leave a child.
+    child_script = tmp_path / "failed_parent_child_worker.py"
+    parent_script = tmp_path / "failed_parent_worker.py"
+    heartbeat_file = tmp_path / "failed_parent_child_heartbeat.txt"
+    child_pid_file = tmp_path / "failed_parent_child.pid"
+
+    child_script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import os",
+                "import sys",
+                "import time",
+                "from pathlib import Path",
+                "heartbeat = Path(sys.argv[1])",
+                "pid_file = Path(sys.argv[2])",
+                "pid_file.write_text(str(os.getpid()), encoding='utf-8')",
+                "for _ in range(1200):",
+                "    heartbeat.write_text(str(time.time()), encoding='utf-8')",
+                "    time.sleep(0.05)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    parent_script.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import subprocess",
+                "import sys",
+                "import time",
+                "from pathlib import Path",
+                "child_script = Path(sys.argv[1])",
+                "heartbeat = Path(sys.argv[2])",
+                "pid_file = Path(sys.argv[3])",
+                "child = subprocess.Popen(",
+                "    [sys.executable, str(child_script), str(heartbeat), str(pid_file)],",
+                "    stdin=subprocess.DEVNULL,",
+                "    stdout=subprocess.DEVNULL,",
+                "    stderr=subprocess.DEVNULL,",
+                ")",
+                "deadline = time.time() + 5",
+                "while not pid_file.exists() and time.time() < deadline:",
+                "    time.sleep(0.01)",
+                "print(child.pid, flush=True)",
+                "sys.exit(7)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    runner = CodexSubprocessRunner()
+    child_pid: int | None = None
+    try:
+        result = runner.run(
+            [
+                sys.executable,
+                str(parent_script),
+                str(child_script),
+                str(heartbeat_file),
+                str(child_pid_file),
+            ],
+            stdin="",
+            timeout_seconds=5,
+            output_last_message_path=None,
+        )
+
+        child_pid = _read_pid(child_pid_file)
+        if child_pid is None and result.stdout.strip():
+            child_pid = int(result.stdout.strip())
+        assert result.returncode == 7
         assert child_pid is not None
         assert _wait_for_pid_exit(child_pid, timeout_seconds=5)
     finally:

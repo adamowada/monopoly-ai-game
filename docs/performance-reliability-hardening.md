@@ -67,13 +67,13 @@ Measured browser signals and thresholds:
 - Windows subprocesses start with `CREATE_NEW_PROCESS_GROUP`.
 - POSIX subprocesses start in a new session.
 - Timeout cleanup terminates the process tree, waits for exit, and raises `CodexExecTimeoutError`.
-- The Stage 11.4 backend test launches a parent process that creates a child worker and verifies the child exits after timeout cleanup.
+- failed subprocess cleanup terminates the process tree before returning the nonzero return code.
+- Stage 11.4 backend tests launch real parent processes that create child workers, then verify the child exits after timeout cleanup and after a failed parent exits with return code 7.
 
-This specifically guards against orphaned AI subprocesses after Codex timeout or failure.
+This specifically guards against orphaned AI subprocesses after Codex timeout and failed subprocess exits.
 
 ## Residual risks
 
 - Browser performance thresholds are calibrated for local Chromium/Next.js dev server runs. A very slow machine could need threshold adjustment, but the spec records multiple independent signals instead of relying on one timing value.
 - The long-game simulation is deterministic stress coverage, not a full strategic end-to-end game with live Codex AI calls.
 - Snapshot interval 25 balances write volume and replay tail length for local play; unusually heavy audit extensions may need another tuning pass.
-

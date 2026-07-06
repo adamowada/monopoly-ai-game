@@ -13,6 +13,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -136,20 +137,27 @@ class CodexSubprocessRunner:
             list(command),
             **popen_kwargs,
         )
+        windows_job_handle = _create_windows_job_for_process(process) if os.name == "nt" else None
         try:
-            stdout, stderr = process.communicate(input=stdin, timeout=timeout_seconds)
-        except subprocess.TimeoutExpired as exc:
-            _terminate_process_tree(process)
-            raise CodexExecTimeoutError(timeout_seconds) from exc
+            try:
+                stdout, stderr = process.communicate(input=stdin, timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+                raise CodexExecTimeoutError(timeout_seconds) from exc
 
-        returncode = process.returncode
-        if returncode is None:
-            returncode = process.wait()
-        return CodexExecProcessResult(
-            returncode=int(returncode),
-            stdout=stdout or "",
-            stderr=stderr or "",
-        )
+            returncode = process.returncode
+            if returncode is None:
+                returncode = process.wait()
+            if int(returncode) != 0:
+                _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+            return CodexExecProcessResult(
+                returncode=int(returncode),
+                stdout=stdout or "",
+                stderr=stderr or "",
+            )
+        finally:
+            if windows_job_handle is not None:
+                _close_windows_handle(windows_job_handle)
 
 
 def write_ai_output_schema_file(path: Path | str = DEFAULT_AI_SCHEMA_FILE) -> Path:
@@ -945,34 +953,167 @@ def _coerce_uuid(value: UUID | str) -> UUID:
     return UUID(str(value))
 
 
-def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
-    if process.poll() is not None:
-        return
-
+def _terminate_process_tree(
+    process: subprocess.Popen[str],
+    *,
+    windows_job_handle: int | None = None,
+) -> None:
     if os.name == "nt":
-        _terminate_windows_process_tree(process)
+        _terminate_windows_process_tree(process, windows_job_handle=windows_job_handle)
         return
 
     _terminate_posix_process_tree(process)
 
 
-def _terminate_windows_process_tree(process: subprocess.Popen[str]) -> None:
-    subprocess.run(
-        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+def _terminate_windows_process_tree(
+    process: subprocess.Popen[str],
+    *,
+    windows_job_handle: int | None,
+) -> None:
+    if windows_job_handle is not None:
+        _terminate_windows_job_object(windows_job_handle)
+
+    descendant_pids = set(_windows_descendant_process_ids(process.pid))
+    if process.poll() is None:
+        _taskkill_windows_process_tree(process.pid)
+    else:
+        for pid in descendant_pids:
+            _taskkill_windows_process_tree(pid)
+
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=5)
 
+    remaining_pids = descendant_pids | set(_windows_descendant_process_ids(process.pid))
+    for pid in remaining_pids:
+        if _windows_process_is_running(pid):
+            _taskkill_windows_process_tree(pid)
+    _wait_for_windows_processes_exit(remaining_pids, timeout_seconds=5)
+
+
+def _create_windows_job_for_process(process: subprocess.Popen[str]) -> int | None:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+
+    job_handle = kernel32.CreateJobObjectW(None, None)
+    if not job_handle:
+        return None
+
+    process_handle = getattr(process, "_handle", None)
+    if process_handle is None or not kernel32.AssignProcessToJobObject(
+        job_handle,
+        process_handle,
+    ):
+        kernel32.CloseHandle(job_handle)
+        return None
+    return int(job_handle)
+
+
+def _terminate_windows_job_object(job_handle: int) -> None:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    kernel32.TerminateJobObject.restype = ctypes.c_int
+    kernel32.TerminateJobObject(job_handle, 1)
+
+
+def _close_windows_handle(handle: int) -> None:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    kernel32.CloseHandle(handle)
+
+
+def _taskkill_windows_process_tree(pid: int) -> None:
+    subprocess.run(
+        ["taskkill", "/PID", str(pid), "/T", "/F"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _windows_descendant_process_ids(root_pid: int) -> list[int]:
+    script = r"""
+$RootProcessId = __ROOT_PROCESS_ID__
+$processes = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId
+$pending = @($RootProcessId)
+$seen = @{}
+while ($pending.Count -gt 0) {
+    $next = @()
+    foreach ($current in $pending) {
+        foreach ($process in $processes) {
+            if ([int]$process.ParentProcessId -eq [int]$current) {
+                $childPid = [int]$process.ProcessId
+                if (-not $seen.ContainsKey($childPid)) {
+                    $seen[$childPid] = $true
+                    Write-Output $childPid
+                    $next += $childPid
+                }
+            }
+        }
+    }
+    $pending = $next
+}
+""".replace("__ROOT_PROCESS_ID__", str(int(root_pid)))
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    descendant_pids: list[int] = []
+    for line in completed.stdout.splitlines():
+        try:
+            descendant_pids.append(int(line.strip()))
+        except ValueError:
+            continue
+    return descendant_pids
+
+
+def _wait_for_windows_processes_exit(pids: set[int], *, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if all(not _windows_process_is_running(pid) for pid in pids):
+            return True
+        time.sleep(0.05)
+    return all(not _windows_process_is_running(pid) for pid in pids)
+
+
+def _windows_process_is_running(pid: int) -> bool:
+    completed = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return str(pid) in completed.stdout
+
 
 def _terminate_posix_process_tree(process: subprocess.Popen[str]) -> None:
+    process_group_id = process.pid
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(process_group_id, signal.SIGTERM)
     except ProcessLookupError:
         return
     except PermissionError:
@@ -980,17 +1121,39 @@ def _terminate_posix_process_tree(process: subprocess.Popen[str]) -> None:
 
     try:
         process.wait(timeout=5)
-        return
     except subprocess.TimeoutExpired:
         pass
 
+    if _wait_for_posix_process_group_exit(process_group_id, timeout_seconds=5):
+        return
+
     try:
-        os.killpg(process.pid, signal.SIGKILL)
+        os.killpg(process_group_id, signal.SIGKILL)
     except ProcessLookupError:
         return
     except PermissionError:
         process.kill()
     process.wait(timeout=5)
+    _wait_for_posix_process_group_exit(process_group_id, timeout_seconds=5)
+
+
+def _wait_for_posix_process_group_exit(process_group_id: int, *, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process_group_id, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        time.sleep(0.05)
+    try:
+        os.killpg(process_group_id, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return False
 
 
 __all__ = [
