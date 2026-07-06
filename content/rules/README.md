@@ -1,7 +1,9 @@
 # Rules Source Data
 
-This directory is reserved for local rule, card, and property source data.
+This directory contains local rule, card, property, deviation, and contract example source data.
 
-Later phases will add reproducible source files for board spaces, property values, rent tables,
-Chance and Community Chest card effects, and documented rule deviations. Stage 1.1 only establishes
-the content area and its purpose.
+Files:
+
+- `classic_monopoly.json`: classic board, property, rent, card, and bank inventory data.
+- `house_rules_and_deviations.json`: documented local deviations and house-rule notes.
+- `contract_examples.json`: structured examples for negotiated financial instruments.

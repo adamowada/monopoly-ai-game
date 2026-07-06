@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, TypeAlias
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -42,6 +42,7 @@ from app.rules.timing import ACTION_TIMING_WINDOWS
 
 
 CONTEXT_PACK_SCHEMA_VERSION = "ai-context-pack-v1"
+RETRIEVAL_AUDIT_CONTEXT_ID_KEY = "retrieval_audit_context_id"
 VISIBLE_MEMORY_SCOPES = frozenset({"public", "table", "audit"})
 ACTIVE_NEGOTIATION_STATUSES = ("opened", "active", "countered", "accepted")
 AIContextPack: TypeAlias = dict[str, Any]
@@ -77,7 +78,7 @@ def build_ai_context_pack(
         "game_id": state.game_id,
         "player_id": actor_id,
         "caller_request_context": _json_safe(caller_request_context or {}),
-        "public_game_state": _public_game_state_summary(state),
+        "public_game_state": public_game_state_summary(state),
         "timing": _timing_context(state, legal_actions),
         "legal_actions": legal_actions,
         "negotiation_context": {
@@ -129,6 +130,9 @@ async def build_ai_context_pack_from_db(
     caller_request_context: Mapping[str, Any] | None = None,
     rule_snippets: Sequence[Mapping[str, Any]] = (),
     max_memory_snippets: int = 12,
+    retrieval_query_text: str | None = None,
+    max_retrieval_snippets: int = 6,
+    audit_retrieval: bool = True,
     memory_compaction_threshold: int = MEMORY_COMPACTION_THRESHOLD,
     max_negotiations: int = 10,
     max_negotiation_messages: int = 40,
@@ -149,6 +153,9 @@ async def build_ai_context_pack_from_db(
                 caller_request_context=caller_request_context,
                 rule_snippets=rule_snippets,
                 max_memory_snippets=max_memory_snippets,
+                retrieval_query_text=retrieval_query_text,
+                max_retrieval_snippets=max_retrieval_snippets,
+                audit_retrieval=audit_retrieval,
                 memory_compaction_threshold=memory_compaction_threshold,
                 max_negotiations=max_negotiations,
                 max_negotiation_messages=max_negotiation_messages,
@@ -166,6 +173,9 @@ async def build_ai_context_pack_from_db(
         caller_request_context=caller_request_context,
         rule_snippets=rule_snippets,
         max_memory_snippets=max_memory_snippets,
+        retrieval_query_text=retrieval_query_text,
+        max_retrieval_snippets=max_retrieval_snippets,
+        audit_retrieval=audit_retrieval,
         memory_compaction_threshold=memory_compaction_threshold,
         max_negotiations=max_negotiations,
         max_negotiation_messages=max_negotiation_messages,
@@ -185,6 +195,9 @@ async def _build_ai_context_pack_from_db_in_transaction(
     caller_request_context: Mapping[str, Any] | None,
     rule_snippets: Sequence[Mapping[str, Any]],
     max_memory_snippets: int,
+    retrieval_query_text: str | None,
+    max_retrieval_snippets: int,
+    audit_retrieval: bool,
     memory_compaction_threshold: int,
     max_negotiations: int,
     max_negotiation_messages: int,
@@ -238,8 +251,24 @@ async def _build_ai_context_pack_from_db_in_transaction(
     )
     contract_rows = await _load_contract_rows(session, game_id=game_uuid)
     obligation_rows = await _load_obligation_rows(session, game_id=game_uuid)
+    (
+        retrieval_rule_snippets,
+        retrieval_memory_rows,
+        retrieval_audit_context_id,
+    ) = await _load_retrieved_context_rows(
+        session,
+        game_id=game_uuid,
+        player_id=player_uuid,
+        state=state,
+        decision_type=decision_type,
+        caller_request_context=caller_request_context,
+        retrieval_query_text=retrieval_query_text,
+        phase=state.turn.phase.value,
+        limit=max_retrieval_snippets,
+        audit=audit_retrieval,
+    )
 
-    return build_ai_context_pack(
+    pack = build_ai_context_pack(
         state,
         player_id=player_uuid,
         decision_type=decision_type,
@@ -250,9 +279,175 @@ async def _build_ai_context_pack_from_db_in_transaction(
         deals=deal_rows,
         contracts=contract_rows,
         obligations=obligation_rows,
-        memory_snippets=memory_rows,
-        rule_snippets=rule_snippets,
+        memory_snippets=_merge_memory_rows(memory_rows, retrieval_memory_rows),
+        rule_snippets=[*rule_snippets, *retrieval_rule_snippets],
     )
+    if retrieval_audit_context_id is not None:
+        pack[RETRIEVAL_AUDIT_CONTEXT_ID_KEY] = retrieval_audit_context_id
+    return _json_safe(pack)
+
+
+async def _load_retrieved_context_rows(
+    session: AsyncSession,
+    *,
+    game_id: UUID,
+    player_id: UUID,
+    state: GameState,
+    decision_type: str,
+    caller_request_context: Mapping[str, Any] | None,
+    retrieval_query_text: str | None,
+    phase: str,
+    limit: int,
+    audit: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
+    if limit < 1:
+        return [], [], None
+
+    query_text = _context_retrieval_query_text(
+        retrieval_query_text=retrieval_query_text,
+        caller_request_context=caller_request_context,
+        state=state,
+        player_id=player_id,
+        decision_type=decision_type,
+    )
+    if not query_text:
+        return [], [], None
+
+    retrieval_audit_context_id = await _next_retrieval_audit_context_id(
+        session,
+        game_id=game_id,
+        player_id=player_id,
+        decision_type=decision_type,
+        phase=phase,
+        query_text=query_text,
+    )
+
+    from app.rag.retrieval import refresh_rag_index_entries, search_retrieval
+
+    await refresh_rag_index_entries(session, game_id=game_id)
+    rule_results = await search_retrieval(
+        session,
+        query_text=query_text,
+        game_id=game_id,
+        player_id=player_id,
+        phase=phase,
+        source_types=("rules", "house_rules", "contract_examples"),
+        limit=limit,
+        query_context={
+            "source": "build_ai_context_pack_from_db",
+            "decision_type": decision_type,
+            "phase": phase,
+            "retrieval_section": "rules",
+            RETRIEVAL_AUDIT_CONTEXT_ID_KEY: retrieval_audit_context_id,
+        },
+        audit=audit,
+    )
+    memory_results = await search_retrieval(
+        session,
+        query_text=query_text,
+        game_id=game_id,
+        player_id=player_id,
+        phase=phase,
+        source_types=("ai_memory",),
+        limit=min(limit, 4),
+        query_context={
+            "source": "build_ai_context_pack_from_db",
+            "decision_type": decision_type,
+            "phase": phase,
+            "retrieval_section": "memory",
+            RETRIEVAL_AUDIT_CONTEXT_ID_KEY: retrieval_audit_context_id,
+        },
+        audit=audit,
+    )
+
+    rule_snippets = [
+        result.to_rule_snippet()
+        for result in rule_results
+    ]
+    memory_rows = [
+        result.to_memory_row()
+        for result in memory_results
+    ]
+    return rule_snippets, memory_rows, retrieval_audit_context_id
+
+
+async def _next_retrieval_audit_context_id(
+    session: AsyncSession,
+    *,
+    game_id: UUID,
+    player_id: UUID,
+    decision_type: str,
+    phase: str,
+    query_text: str,
+) -> str:
+    return str(uuid4())
+
+
+def _context_retrieval_query_text(
+    *,
+    retrieval_query_text: str | None,
+    caller_request_context: Mapping[str, Any] | None,
+    state: GameState,
+    player_id: UUID,
+    decision_type: str,
+) -> str:
+    explicit = _nonempty_string(retrieval_query_text)
+    if explicit is not None:
+        return explicit
+
+    context = _mapping(caller_request_context)
+    for key in ("retrieval_query", "retrieval_query_text", "query_text", "focus"):
+        value = _nonempty_string(context.get(key))
+        if value is not None:
+            return value
+
+    legal_action_types = sorted(
+        {
+            str(action.type)
+            for action in list_legal_actions(state, str(player_id))
+        }
+    )
+    current_player = next(
+        (player for player in state.players if player.id == str(player_id)),
+        None,
+    )
+    parts = [
+        decision_type,
+        state.turn.phase.value,
+        *(str(action_type) for action_type in legal_action_types),
+    ]
+    if current_player is not None:
+        parts.extend([current_player.name, f"cash {current_player.cash}"])
+    return " ".join(part for part in parts if part)
+
+
+def _merge_memory_rows(
+    base_rows: Sequence[Mapping[str, Any]],
+    retrieval_rows: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    rows_by_id: dict[str, dict[str, Any]] = {}
+    ordered_ids: list[str] = []
+    anonymous_rows: list[Mapping[str, Any]] = []
+    for row in [*base_rows, *retrieval_rows]:
+        row_id = _string_or_none(row.get("id"))
+        if row_id is None:
+            anonymous_rows.append(row)
+            continue
+        if row_id not in rows_by_id:
+            ordered_ids.append(row_id)
+            rows_by_id[row_id] = dict(row)
+            continue
+        merged = dict(rows_by_id[row_id])
+        merged.update({key: value for key, value in row.items() if value is not None})
+        rows_by_id[row_id] = merged
+    return [rows_by_id[row_id] for row_id in ordered_ids] + list(anonymous_rows)
+
+
+def _nonempty_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    return text if text else None
 
 
 async def _load_ai_profile(
@@ -394,7 +589,7 @@ async def _load_obligation_rows(
     return [dict(row) for row in result.mappings().all()]
 
 
-def _public_game_state_summary(state: GameState) -> dict[str, Any]:
+def public_game_state_summary(state: GameState) -> dict[str, Any]:
     data = load_classic_monopoly_data()
     spaces_by_position = {space.position: space for space in data.board}
     properties_by_id = {property_data.id: property_data for property_data in data.properties}
@@ -618,13 +813,10 @@ def _rule_snippets(
     legal_actions: Sequence[Mapping[str, Any]],
     state: GameState,
 ) -> list[dict[str, Any]]:
-    if rule_snippets:
-        return [_json_safe(dict(snippet)) for snippet in rule_snippets]
-
     legal_action_types = sorted(
         {str(action["type"]) for action in legal_actions if isinstance(action.get("type"), str)}
     )
-    return [
+    default_snippets = [
         {
             "id": "backend-rules-authority",
             "source": "backend",
@@ -638,6 +830,10 @@ def _rule_snippets(
                 f"these backend-generated legal action types: {', '.join(legal_action_types)}."
             ),
         },
+    ]
+    return [
+        *default_snippets,
+        *[_json_safe(dict(snippet)) for snippet in rule_snippets],
     ]
 
 
@@ -784,7 +980,9 @@ def _json_safe(value: Any) -> Any:
 __all__ = [
     "AIContextPack",
     "CONTEXT_PACK_SCHEMA_VERSION",
+    "RETRIEVAL_AUDIT_CONTEXT_ID_KEY",
     "VISIBLE_MEMORY_SCOPES",
     "build_ai_context_pack",
     "build_ai_context_pack_from_db",
+    "public_game_state_summary",
 ]

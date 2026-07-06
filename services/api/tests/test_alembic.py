@@ -13,6 +13,7 @@ API_ROOT = Path(__file__).resolve().parents[1]
 FOUNDATION_REVISION = "0001_create_foundation_metadata"
 STAGE_41_REVISION = "0002_create_domain_audit_schema"
 STAGE_45_REVISION = "0003_add_action_idempotency_keys"
+STAGE_92_REVISION = "0004_add_rag_index_entries"
 REQUIRED_DOMAIN_TABLES = {
     "games",
     "players",
@@ -29,6 +30,7 @@ REQUIRED_DOMAIN_TABLES = {
     "ai_decisions",
     "ai_self_dialogue",
     "ai_memory_entries",
+    "rag_index_entries",
     "retrieval_records",
 }
 REQUIRED_TABLES = {"foundation_metadata", *REQUIRED_DOMAIN_TABLES}
@@ -51,18 +53,18 @@ def unique_constraint_columns(table_name: str) -> set[tuple[str, ...]]:
     }
 
 
-def test_alembic_head_includes_stage_41_domain_audit_schema() -> None:
+def test_alembic_head_includes_stage_9_2_rag_index_schema() -> None:
     config = Config(str(API_ROOT / "alembic.ini"))
     script = ScriptDirectory.from_config(config)
 
     head = script.get_current_head()
 
-    assert head == STAGE_45_REVISION
+    assert head == STAGE_92_REVISION
     assert head != FOUNDATION_REVISION
     revision = script.get_revision(head)
     assert revision is not None
-    assert revision.down_revision == STAGE_41_REVISION
-    assert "action idempotency keys" in (revision.module.__doc__ or "")
+    assert revision.down_revision == STAGE_45_REVISION
+    assert "rag index entries" in (revision.module.__doc__ or "")
 
 
 def test_foundation_metadata_table_is_in_sqlalchemy_metadata() -> None:
@@ -131,6 +133,15 @@ def test_stage_41_metadata_defines_required_indexes_and_constraints() -> None:
         "game_id",
         "player_id",
         "created_at",
+    )
+    assert index_columns("rag_index_entries", "ix_rag_index_entries_game_player_phase") == (
+        "game_id",
+        "player_id",
+        "phase",
+    )
+    assert index_columns("rag_index_entries", "ix_rag_index_entries_source") == (
+        "source_type",
+        "source_id",
     )
     assert index_columns("ai_decisions", "ix_ai_decisions_game_player_created_at") == (
         "game_id",

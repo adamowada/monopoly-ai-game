@@ -7,6 +7,8 @@ from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.core.paths import resolve_content_rules_dir
+
 
 DeckName: TypeAlias = Literal["chance", "community_chest"]
 PropertyKind: TypeAlias = Literal["street", "railroad", "utility"]
@@ -24,7 +26,7 @@ BoardSpaceType: TypeAlias = Literal[
 ]
 EffectValue: TypeAlias = str | int | bool
 
-RULES_DATA_PATH = Path(__file__).resolve().parents[4] / "content" / "rules" / "classic_monopoly.json"
+RULES_DATA_PATH = resolve_content_rules_dir(Path(__file__)) / "classic_monopoly.json"
 
 
 class StaticDataModel(BaseModel):
