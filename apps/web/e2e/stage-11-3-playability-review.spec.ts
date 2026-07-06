@@ -249,14 +249,12 @@ test("stage-11-3-mixed-ai-playthrough: mixed human/AI players, Start auction Bid
     await expect(auction).toContainText(/Passed players|Auction result/);
   }
 
-  const auctionStepAi = auction.getByRole("button", { name: "Step AI" });
-  const stepAiCount = await auctionStepAi.count();
-  if (stepAiCount > 0) {
-    const stepAiButton = auctionStepAi.nth(0);
-    if (await stepAiButton.isEnabled()) {
-      await stepAiButton.click();
-    }
-  }
+  const graceAuctionControls = auction.getByRole("group", { name: "Grace auction controls" });
+  const stepAiButton = graceAuctionControls.getByRole("button", { name: "Step AI" });
+  await expect(stepAiButton).toHaveCount(1);
+  await expect(stepAiButton).toBeVisible();
+  await expect(stepAiButton).toBeEnabled();
+  await stepAiButton.click();
   await expect(auction).toContainText(/Current high bidder/);
   await expect(aiAudit).toContainText("AI audit");
   await expect(aiAudit).toContainText("Decision history");
