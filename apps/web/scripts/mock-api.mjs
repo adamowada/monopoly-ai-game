@@ -1497,6 +1497,47 @@ function rejectAction(game, action, reasonCode, message, field = "expected_state
   return rejectedPayload(record, action);
 }
 
+function debtPayloadMismatch(game, action) {
+  if (action.type !== "SETTLE_DEBT") {
+    return null;
+  }
+  const debt = game.pending_debt;
+  const actor = playerById(game, action.actor_id);
+  if (!debt || !actor || debt.debtor_player_id !== actor.id) {
+    return null;
+  }
+  const payload = isObject(action.payload) ? action.payload : {};
+  if (payload.debt_id !== debt.id) {
+    return {
+      field: "payload.debt_id",
+      message: "SETTLE_DEBT payload debt_id must match the pending debt",
+    };
+  }
+  if (payload.creditor_player_id !== debt.creditor_player_id) {
+    return {
+      field: "payload.creditor_player_id",
+      message: "SETTLE_DEBT payload creditor_player_id must match the pending debt",
+    };
+  }
+  if (payload.amount !== debt.amount) {
+    return {
+      field: "payload.amount",
+      message: "SETTLE_DEBT payload amount must match the pending debt",
+    };
+  }
+  return null;
+}
+
+function rejectDebtPayloadMismatch(game, action, mismatch = debtPayloadMismatch(game, action)) {
+  return rejectAction(
+    game,
+    action,
+    "debt_payload_mismatch",
+    mismatch?.message ?? "SETTLE_DEBT payload must match the pending debt",
+    mismatch?.field ?? "payload",
+  );
+}
+
 function acceptBuyProperty(game, action) {
   const actor = playerById(game, action.actor_id);
   const propertyId = action.payload.property_id;
@@ -1535,6 +1576,10 @@ function acceptSettleDebt(game, action) {
   const actor = playerById(game, action.actor_id);
   if (!debt || !actor || debt.debtor_player_id !== actor.id) {
     return rejectAction(game, action, "illegal_action", "there is no payable debt for this actor", "type");
+  }
+  const mismatch = debtPayloadMismatch(game, action);
+  if (mismatch) {
+    return rejectDebtPayloadMismatch(game, action, mismatch);
   }
   const creditor = playerById(game, debt.creditor_player_id);
   if (!creditor) {
@@ -2310,6 +2355,15 @@ function applyMockAiStep(game, payload) {
 function actionMatchesLegalAction(candidate, action) {
   if (candidate.type !== action.type) {
     return false;
+  }
+  if (candidate.type === "SETTLE_DEBT") {
+    const candidatePayload = isObject(candidate.payload) ? candidate.payload : {};
+    const actionPayload = isObject(action.payload) ? action.payload : {};
+    return (
+      candidatePayload.debt_id === actionPayload.debt_id &&
+      candidatePayload.creditor_player_id === actionPayload.creditor_player_id &&
+      candidatePayload.amount === actionPayload.amount
+    );
   }
   const candidatePropertyId = isObject(candidate.payload) ? candidate.payload.property_id : undefined;
   const actionPropertyId = isObject(action.payload) ? action.payload.property_id : undefined;
@@ -3180,6 +3234,11 @@ const server = createServer(async (request, response) => {
       }
 
       const legalActions = legalActionsFor(game, action.actor_id);
+      const debtMismatch = debtPayloadMismatch(game, action);
+      if (debtMismatch) {
+        json(response, 422, rejectDebtPayloadMismatch(game, action, debtMismatch));
+        return;
+      }
       if (!legalActions.some((candidate) => actionMatchesLegalAction(candidate, action))) {
         json(response, 422, rejectAction(game, action, "illegal_action", `${action.type} is not currently legal`, "type"));
         return;

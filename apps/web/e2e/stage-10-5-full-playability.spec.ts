@@ -126,6 +126,89 @@ test("completes a 2-human-player full-table browser round", async ({ page }) => 
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 });
 
+test("rejects forged debt settlement payload without mutating payment state", async ({ page }) => {
+  const gameId = await createGame(page, "stage-10-5-two-human-full-round-forged-debt", twoHumanPlayers);
+
+  await clickTurnControl(page, "Roll dice");
+  await clickTurnControl(page, "Buy property");
+  await clickTurnControl(page, "End turn");
+
+  await expectActivePlayer(page, "Grace");
+  await clickTurnControl(page, "Roll dice");
+  await expect(page.getByRole("region", { name: "Turn controls" }).getByRole("button", { name: "Settle debt" })).toBeEnabled();
+
+  const before = await readMockJson<{
+    state_hash: string;
+    event_sequence: number;
+    state: {
+      pending_debt: {
+        id: string;
+        debtor_player_id: string;
+        creditor_player_id: string;
+        amount: number;
+      };
+      players: { id: string; cash: number }[];
+    };
+  }>(page, `/games/${gameId}/state`);
+  const debtorBefore = before.state.players.find((player) => player.id === before.state.pending_debt.debtor_player_id);
+  const creditorBefore = before.state.players.find((player) => player.id === before.state.pending_debt.creditor_player_id);
+  expect(debtorBefore).toBeTruthy();
+  expect(creditorBefore).toBeTruthy();
+
+  const forged = await page.request.post(`${mockApiBaseUrl}/games/${gameId}/actions`, {
+    headers: {
+      "Idempotency-Key": `forged-settle-debt-${Date.now()}`,
+    },
+    data: {
+      actor_id: before.state.pending_debt.debtor_player_id,
+      type: "SETTLE_DEBT",
+      payload: {
+        debt_id: `${before.state.pending_debt.id}-forged`,
+        creditor_player_id: before.state.pending_debt.debtor_player_id,
+        amount: before.state.pending_debt.amount + 1,
+      },
+      expected_state_hash: before.state_hash,
+      expected_event_sequence: before.event_sequence,
+    },
+  });
+  expect(forged.status()).toBe(422);
+  expect(await forged.json()).toMatchObject({
+    status: "rejected",
+    reason_code: "debt_payload_mismatch",
+  });
+
+  const after = await readMockJson<{
+    state_hash: string;
+    event_sequence: number;
+    state: {
+      pending_debt: {
+        id: string;
+        debtor_player_id: string;
+        creditor_player_id: string;
+        amount: number;
+      };
+      players: { id: string; cash: number }[];
+    };
+  }>(page, `/games/${gameId}/state`);
+  expect(after.state_hash).toBe(before.state_hash);
+  expect(after.event_sequence).toBe(before.event_sequence);
+  expect(after.state.pending_debt).toEqual(before.state.pending_debt);
+  expect(after.state.players.find((player) => player.id === debtorBefore?.id)?.cash).toBe(debtorBefore?.cash);
+  expect(after.state.players.find((player) => player.id === creditorBefore?.id)?.cash).toBe(creditorBefore?.cash);
+
+  const audit = await readMockJson<{
+    rejected_actions: { reason_code: string; payload: { debt_id?: string; creditor_player_id?: string; amount?: number } }[];
+  }>(page, `/games/${gameId}/rejected-actions`);
+  expect(audit.rejected_actions[0]).toMatchObject({
+    reason_code: "debt_payload_mismatch",
+    payload: {
+      debt_id: `${before.state.pending_debt.id}-forged`,
+      creditor_player_id: before.state.pending_debt.debtor_player_id,
+      amount: before.state.pending_debt.amount + 1,
+    },
+  });
+});
+
 test("completes a 5-player mixed human/fake-AI full-table browser round", async ({ page }) => {
   await createGame(page, "stage-10-5-five-player-mixed-round", mixedPlayers);
 
