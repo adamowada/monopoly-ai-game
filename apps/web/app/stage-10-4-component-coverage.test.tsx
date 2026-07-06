@@ -4,7 +4,7 @@ import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AiAuditPanel } from "./ai-audit-panel";
-import { ContractsPanel } from "./contracts-panel";
+import { canSettleObligation, ContractsPanel } from "./contracts-panel";
 import { ClassicGameBoard } from "./game-board";
 import { GamePlaySurface } from "./game-play-surface";
 import { GameSetupPanel } from "./game-setup";
@@ -314,6 +314,22 @@ function obligationsFixture(): ObligationRecord[] {
       triggering_event_id: null,
       settled_at: null,
       created_at: "2026-07-04T00:02:00.000Z",
+    },
+    {
+      id: "obligation-future-stage-10-4",
+      game_id: gameId,
+      contract_id: "contract-stage-10-4",
+      obligated_player_id: adaId,
+      counterparty_player_id: graceId,
+      status: "scheduled",
+      due_turn: 9,
+      due_condition: "future Boardwalk rent collection",
+      amount: 25,
+      asset_summary: "$25 scheduled rent-share transfer",
+      transfer_summary: null,
+      triggering_event_id: null,
+      settled_at: null,
+      created_at: "2026-07-04T00:02:30.000Z",
     },
     {
       id: "obligation-settled-stage-10-4",
@@ -903,6 +919,16 @@ describe("Stage 10.4 frontend component coverage", () => {
   it("contract panel renders obligations and submits enforcement payloads", async () => {
     const enforcementDeferred = deferred<Response>();
     const settleContractEndpoint = `${apiBaseUrl}/games/${gameId}/contracts/contract-stage-10-4/settle`;
+    const obligations = obligationsFixture();
+    const dueObligationRecord = obligations.find((obligation) => obligation.id === "obligation-upcoming-stage-10-4");
+    const futureObligationRecord = obligations.find((obligation) => obligation.id === "obligation-future-stage-10-4");
+    if (!dueObligationRecord || !futureObligationRecord) {
+      throw new Error("Stage 10.4 obligation fixture is incomplete.");
+    }
+    expect(dueObligationRecord.status === "due").toBe(true);
+    expect(canSettleObligation(dueObligationRecord)).toBe(true);
+    expect(canSettleObligation(futureObligationRecord)).toBe(false);
+
     const fetchMock = vi.fn<typeof fetch>((input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -911,7 +937,7 @@ describe("Stage 10.4 frontend component coverage", () => {
         return jsonResponse({ contracts: [contractFixture()] });
       }
       if (url === `${apiBaseUrl}/games/${gameId}/obligations` && method === "GET") {
-        return jsonResponse({ obligations: obligationsFixture() });
+        return jsonResponse({ obligations });
       }
       if (url === `${apiBaseUrl}/games/${gameId}/contracts/outcomes` && method === "GET") {
         return jsonResponse({ outcomes: contractOutcomesFixture() });
@@ -942,6 +968,26 @@ describe("Stage 10.4 frontend component coverage", () => {
     const obligation = within(panel).getByRole("article", { name: "Obligation obligation-upcoming-stage-10-4" });
     expect(obligation).toHaveTextContent("due_turn 6");
     expect(obligation).toHaveTextContent("$50 rent-share transfer");
+
+    const futureObligation = within(panel).getByRole("article", { name: "Obligation obligation-future-stage-10-4" });
+    expect(futureObligation).toHaveTextContent("scheduled");
+    expect(futureObligation).toHaveTextContent("due_turn 9");
+    expect(futureObligation).toHaveTextContent("$25 scheduled rent-share transfer");
+    expect(futureObligation).toHaveTextContent("Settlement unavailable until this obligation is due.");
+    const futureControl = within(futureObligation).getByRole("button", { name: "Unavailable until due" });
+    expect(futureControl).toBeDisabled();
+
+    fireEvent.click(futureControl);
+    expect(
+      fetchMock.mock.calls.filter(([url, init]) => String(url) === settleContractEndpoint && init?.method === "POST"),
+    ).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      settleContractEndpoint,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ obligation_id: "obligation-future-stage-10-4" }),
+      }),
+    );
 
     fireEvent.click(within(obligation).getByRole("button", { name: "Enforce obligation" }));
 

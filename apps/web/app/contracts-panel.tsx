@@ -126,6 +126,10 @@ function dueText(obligation: ObligationRecord): string {
   return parts.join(" / ") || "due condition not set";
 }
 
+export function canSettleObligation(obligation: ObligationRecord): boolean {
+  return obligation.status === "due";
+}
+
 function eventKind(event: AcceptedEvent): LogFilter {
   if (event.event_type.includes("AI")) {
     return "ai";
@@ -376,40 +380,58 @@ function UpcomingObligations({
         ) : upcoming.length === 0 ? (
           <EmptyState text="No upcoming obligations returned by the API." />
         ) : (
-          upcoming.map((obligation) => (
-            <article
-              key={obligation.id}
-              aria-label={`Obligation ${obligation.id}`}
-              className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <h3 className="font-semibold text-neutral-950">obligation_id {obligation.id}</h3>
-                <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
-                  {obligation.status}
-                </span>
-              </div>
-              <div className="mt-3 grid gap-1 text-xs text-neutral-700">
-                <p>contract_id {obligation.contract_id}</p>
-                <p>{dueText(obligation)}</p>
-                <p>{obligationAssetText(obligation)}</p>
-                <p>Counterparty {playerName(game, obligation.counterparty_player_id)}</p>
-              </div>
-              <div className="mt-3">
-                <Button
-                  onClick={() => onEnforce(obligation)}
-                  disabled={isLoading || isEnforcing}
-                  className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
-                >
-                  {enforcingObligationId === obligation.id ? (
-                    <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
-                  ) : (
-                    <ArrowRightLeft aria-hidden="true" className="size-3.5" />
-                  )}
-                  {enforcingObligationId === obligation.id ? "Enforcing..." : "Enforce obligation"}
-                </Button>
-              </div>
-            </article>
-          ))
+          upcoming.map((obligation) => {
+            const canSettle = canSettleObligation(obligation);
+            const isCurrentEnforcement = enforcingObligationId === obligation.id;
+            const unavailableDescriptionId = `obligation-${obligation.id}-settlement-unavailable`;
+
+            return (
+              <article
+                key={obligation.id}
+                aria-label={`Obligation ${obligation.id}`}
+                className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <h3 className="font-semibold text-neutral-950">obligation_id {obligation.id}</h3>
+                  <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+                    {obligation.status}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-1 text-xs text-neutral-700">
+                  <p>contract_id {obligation.contract_id}</p>
+                  <p>{dueText(obligation)}</p>
+                  <p>{obligationAssetText(obligation)}</p>
+                  <p>Counterparty {playerName(game, obligation.counterparty_player_id)}</p>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  <Button
+                    aria-describedby={!canSettle ? unavailableDescriptionId : undefined}
+                    onClick={() => {
+                      if (canSettle) {
+                        onEnforce(obligation);
+                      }
+                    }}
+                    disabled={isLoading || isEnforcing || !canSettle}
+                    className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+                  >
+                    {isCurrentEnforcement ? (
+                      <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                    ) : canSettle ? (
+                      <ArrowRightLeft aria-hidden="true" className="size-3.5" />
+                    ) : (
+                      <ShieldAlert aria-hidden="true" className="size-3.5" />
+                    )}
+                    {isCurrentEnforcement ? "Enforcing..." : canSettle ? "Enforce obligation" : "Unavailable until due"}
+                  </Button>
+                  {!canSettle ? (
+                    <p id={unavailableDescriptionId} className="text-xs text-neutral-600">
+                      Settlement unavailable until this obligation is due.
+                    </p>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
     </section>
@@ -679,6 +701,11 @@ export function ContractsPanel({
       ]);
     },
   });
+  const enforceDueObligation = (obligation: ObligationRecord) => {
+    if (canSettleObligation(obligation)) {
+      enforceContractsMutation.mutate(obligation);
+    }
+  };
 
   return (
     <section aria-label="Contracts obligations panel" className="grid content-start gap-4">
@@ -695,7 +722,7 @@ export function ContractsPanel({
         isEnforcing={enforceContractsMutation.isPending}
         isLoading={obligationsQuery.isLoading}
         obligations={obligations}
-        onEnforce={(obligation) => enforceContractsMutation.mutate(obligation)}
+        onEnforce={enforceDueObligation}
       />
       <SettlementHistory isLoading={obligationsQuery.isLoading} obligations={obligations} />
       <ContractOutcomeExplanations isLoading={outcomesQuery.isLoading} outcomes={outcomes} />
