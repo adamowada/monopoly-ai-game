@@ -16,13 +16,13 @@ No unimplemented required mechanics.
 | 32 houses and 12 hotels | Implemented | Static bank inventory validation and scarcity invariants enforce the supply. |
 | Passing GO | Implemented | Movement pays 200 when forward movement crosses or lands beyond GO. |
 | Dice rolls and deterministic RNG | Implemented | Accepted dice events store dice values and roll counters. |
-| Doubles and triple-doubles jail behavior | Implemented | Doubles count is tracked; third consecutive doubles sends the player to jail. |
+| Doubles and triple-doubles jail behavior | Implemented | Doubles count is tracked; public legal actions require the same player to roll again after non-third doubles, and third consecutive doubles sends the player to jail. |
 | Jail roll attempts, doubles release, mandatory third-failure fine, fine payment, and jail-card use | Implemented | Jail mechanics and legal actions expose roll, fine, and card choices. |
 | Buying unowned property | Implemented | Roll landing now enters `PURCHASE_OR_AUCTION`; buying advances to post-roll management. |
 | Auctions | Implemented | Start, bid, pass, automatic close, no-bid close, winner payment, and property transfer are enforced. |
 | Rent calculation and payment | Implemented | Landing on owned property creates structured active debt; settlement transfers cash or permits bankruptcy. |
 | Taxes | Implemented | Landing on tax spaces creates structured bank debt. |
-| Chance and Community Chest card effects | Implemented | Card draw events, deck counters, movement, bank payments, player transfers, repairs, jail cards, and go-to-jail effects are enforced. |
+| Chance and Community Chest card effects | Implemented | Card draw events, deck counters, movement, nearest-railroad/nearest-utility special rents, bank payments, player transfers, repairs, jail cards, and go-to-jail effects are enforced. |
 | Mortgages and unmortgages | Implemented | Mortgages pay mortgage value; unmortgages charge principal plus 10% rounded up. |
 | Even building rule | Implemented | Buy/sell improvement checks enforce even build and reverse-even sale rules. |
 | Selling houses and hotels | Implemented | Sell actions pay half house cost and update bank inventory. |
@@ -35,7 +35,6 @@ No unimplemented required mechanics.
 - AI failures are not resolved by fallback moves. This is an intentional local-project deviation required by `PLANS.md`; invalid or unavailable AI output is rejected or can block mandatory AI action flow.
 - Structured negotiations and financial instruments extend classic Monopoly trading. This is intentional local-project functionality and does not replace required classic mechanics.
 - Negotiation windows can expire through deterministic cutoff rules. Expiration does not invent a move, transfer assets, or bypass backend validation.
-- Nearest-utility Chance rent uses the triggering deterministic roll total when resolved through the public roll path, rather than introducing an extra dice roll prompt. This preserves deterministic no-fallback action flow while still enforcing the special 10x utility card rent.
 
 ## Edge-Case Review
 
@@ -57,7 +56,7 @@ Reviewed bankruptcy to bank, bankruptcy to creditor, active debt creditor infere
 
 ### Card effects
 
-Reviewed deck data, card draw counters, discard handling, movement cards, nearest railroad/utility cards, bank payments, player payments, building repairs, jail cards, and go-to-jail cards. Stage 11.1 fixed public roll card resolution and get-out-of-jail card accounting so held cards are removed from discard while held and returned when used or released by bankruptcy.
+Reviewed deck data, card draw counters, discard handling, movement cards, nearest railroad/utility cards, bank payments, player payments, building repairs, jail cards, and go-to-jail cards. Stage 11.1 fixed public roll card resolution and get-out-of-jail card accounting so held cards are removed from discard while held and returned when used or released by bankruptcy. Nearest-utility Chance rent now records a fresh deterministic dice roll for the special 10x rent, and nearest-utility/nearest-railroad card rents use the structured active-payment debt window.
 
 ### House scarcity
 
@@ -71,6 +70,9 @@ Reviewed even build, reverse-even sell, hotel conversion, hotel sellback, no-hou
 - Tax landings now create structured bank debt.
 - Go To Jail landings now send the player to jail.
 - Chance and Community Chest landings now draw and apply cards through accepted events.
+- Chance nearest-utility rent now uses a fresh deterministic dice roll for the special 10x card rent.
+- Chance nearest-utility and nearest-railroad rents now create structured active-payment debt instead of direct cash deltas.
+- Non-third doubles now keep the same player in the legal public roll flow and block ending the turn until the extra roll is taken.
 - Buying property, settling payment, and resolved auctions now complete their timing windows.
 - Held get-out-of-jail cards are no longer duplicated in deck discard and are returned to discard when used or released by bankruptcy.
 

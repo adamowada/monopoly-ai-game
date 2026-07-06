@@ -244,6 +244,78 @@ def test_stage_11_1_regression_card_draw_applies_effect_and_preserves_jail_card_
     assert "card_chance_get_out_of_jail" in used.decks.chance.discard_pile
 
 
+def test_stage_11_1_regression_chance_nearest_utility_uses_fresh_roll_and_active_debt() -> None:
+    # nearest utility card rent must use an extra roll and an active_payment debt window.
+    state = _set_position(_initial_state(), "player-1", 13)
+    state = _set_cash(state, "player-1", 20)
+    state = _own(state, "property_water_works", "player-2")
+    state = _put_card_on_top(state, "chance", "card_chance_nearest_utility")
+
+    rolled = apply_action(state, _action(state, "player-1", "ROLL_DICE"), "stage-11-1-utility-card")
+
+    assert _player(rolled, "player-1").position == 28
+    assert rolled.rng.dice_roll_count == 2
+    assert rolled.turn.phase == TurnPhase.PAYMENT_RESOLUTION
+    assert rolled.active_payment is not None
+    assert rolled.active_payment.debtor_id == "player-1"
+    assert rolled.active_payment.creditor_id == "player-2"
+    assert rolled.active_payment.amount_owed == 60
+    assert rolled.active_payment.reason == "card_rent:property_water_works"
+    assert _player(rolled, "player-1").cash == 20
+    assert _player(rolled, "player-2").cash == 1500
+    assert {"SETTLE_DEBT", "DECLARE_BANKRUPTCY"}.issubset(_legal_types(rolled, "player-1"))
+
+
+def test_stage_11_1_regression_chance_nearest_railroad_uses_active_debt() -> None:
+    state = _set_position(_initial_state(), "player-1", 13)
+    state = _set_cash(state, "player-1", 20)
+    state = _own(state, "property_b_and_o_railroad", "player-2")
+    state = _put_card_on_top(state, "chance", "card_chance_nearest_railroad_a")
+
+    rolled = apply_action(state, _action(state, "player-1", "ROLL_DICE"), "stage-11-1-railroad-card")
+
+    assert _player(rolled, "player-1").position == 25
+    assert rolled.turn.phase == TurnPhase.PAYMENT_RESOLUTION
+    assert rolled.active_payment is not None
+    assert rolled.active_payment.debtor_id == "player-1"
+    assert rolled.active_payment.creditor_id == "player-2"
+    assert rolled.active_payment.amount_owed == 50
+    assert rolled.active_payment.reason == "card_rent:property_b_and_o_railroad"
+    assert _player(rolled, "player-1").cash == 20
+    assert _player(rolled, "player-2").cash == 1500
+    assert {"SETTLE_DEBT", "DECLARE_BANKRUPTCY"}.issubset(_legal_types(rolled, "player-1"))
+
+
+def test_stage_11_1_regression_public_doubles_flow_allows_same_player_to_roll_again() -> None:
+    state = _set_position(
+        create_initial_game_state(
+            seed="doubles-seed-0",
+            players=_player_setups(2),
+            game_id="stage-11-1-doubles",
+        ),
+        "player-1",
+        18,
+    )
+
+    rolled = apply_action(state, _action(state, "player-1", "ROLL_DICE"), "stage-11-1-doubles-roll")
+
+    assert _player(rolled, "player-1").position == 20
+    assert rolled.turn.phase == TurnPhase.POST_ROLL_MANAGEMENT
+    assert rolled.turn.current_player_id == "player-1"
+    assert rolled.turn.consecutive_doubles == 1
+    assert "ROLL_DICE" in _legal_types(rolled, "player-1")
+    assert "END_TURN" not in _legal_types(rolled, "player-1")
+
+    second_roll = apply_action(
+        rolled,
+        _action(rolled, "player-1", "ROLL_DICE"),
+        "stage-11-1-doubles-second-roll",
+    )
+
+    assert second_roll.turn.current_player_id == "player-1"
+    assert second_roll.rng.dice_roll_count == 2
+
+
 def test_stage_11_1_regression_mortgage_and_house_scarcity_rules_stay_enforced() -> None:
     state = _own(_initial_state(), "property_mediterranean_avenue", "player-1")
     state = _own(state, "property_baltic_avenue", "player-1")

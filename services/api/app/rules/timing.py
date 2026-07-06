@@ -156,7 +156,17 @@ def timing_issue_for_action(
             field="type",
         )
 
-    if not is_action_type_allowed_in_phase(action_type, phase):
+    pending_doubles_roll = _is_pending_doubles_roll(state, actor_id)
+    if action_type == "END_TURN" and pending_doubles_roll:
+        return ActionTimingIssue(
+            code="mistimed_action",
+            message="END_TURN is not legal while a doubles roll is pending",
+            field="type",
+        )
+
+    if not is_action_type_allowed_in_phase(action_type, phase) and not (
+        action_type == "ROLL_DICE" and pending_doubles_roll
+    ):
         return ActionTimingIssue(
             code="mistimed_action",
             message=f"{action_type} is not legal during {phase.value}",
@@ -186,6 +196,14 @@ def timing_issue_for_action(
         )
 
     return None
+
+
+def _is_pending_doubles_roll(state: GameState, actor_id: str | None) -> bool:
+    return (
+        state.turn.phase == TurnPhase.POST_ROLL_MANAGEMENT
+        and state.turn.consecutive_doubles > 0
+        and actor_id == state.turn.current_player_id
+    )
 
 
 def _parse_phase(phase: TurnPhase | str) -> TurnPhase | None:

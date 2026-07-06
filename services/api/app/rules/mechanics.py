@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from app.rules.events import (
+    ActivePaymentSetPayload,
     ActiveAuctionSetPayload,
     BankInventorySetPayload,
     DeckStateSetPayload,
@@ -154,6 +155,8 @@ def end_turn(state: GameState, player_id: str, event_id_prefix: str) -> GameStat
     current_phase = TurnPhase(state.turn.phase)
     if current_phase not in END_TURN_COMMIT_PHASES:
         raise IllegalRuleActionError(f"players cannot end a turn during {current_phase.value}")
+    if state.turn.consecutive_doubles > 0:
+        raise IllegalRuleActionError("players cannot end a turn while a doubles roll is pending")
 
     stream = _EventStream(event_id_prefix)
     if current_phase in END_TURN_ENTRY_PHASES:
@@ -290,6 +293,7 @@ def apply_card_effect(
     event_id_prefix: str,
     *,
     dice_total: int | None = None,
+    apply_card_rent: bool = True,
 ) -> GameState:
     _active_player_by_id(state, player_id)
     card = _card_data(card_id)
@@ -314,12 +318,23 @@ def apply_card_effect(
             return state
         ownership = _property_ownership(state, target.property_id)
         multiplier = _effect_int(effect, "rent_multiplier_if_owned", default=1)
-        if ownership.owner_id is not None and ownership.owner_id != player_id and dice_total is not None:
+        if (
+            apply_card_rent
+            and ownership.owner_id is not None
+            and ownership.owner_id != player_id
+            and dice_total is not None
+        ):
             if dice_total <= 0:
                 raise IllegalRuleActionError("dice total must be positive for utility card rent")
             rent = dice_total * multiplier
-            state = _adjust_cash(stream, state, player_id, -rent)
-            state = _adjust_cash(stream, state, ownership.owner_id, rent)
+            state = _pay_card_rent_or_create_debt(
+                stream,
+                state,
+                debtor_id=player_id,
+                creditor_id=ownership.owner_id,
+                amount=rent,
+                reason=f"card_rent:{target.property_id}",
+            )
         return state
 
     if effect_type == "advance_to_nearest_railroad":
@@ -329,11 +344,17 @@ def apply_card_effect(
             return state
         ownership = _property_ownership(state, target.property_id)
         multiplier = _effect_int(effect, "rent_multiplier_if_owned", default=1)
-        if ownership.owner_id is not None and ownership.owner_id != player_id:
+        if apply_card_rent and ownership.owner_id is not None and ownership.owner_id != player_id:
             rent = calculate_rent(state, target.property_id) * multiplier
             if rent > 0:
-                state = _adjust_cash(stream, state, player_id, -rent)
-                state = _adjust_cash(stream, state, ownership.owner_id, rent)
+                state = _pay_card_rent_or_create_debt(
+                    stream,
+                    state,
+                    debtor_id=player_id,
+                    creditor_id=ownership.owner_id,
+                    amount=rent,
+                    reason=f"card_rent:{target.property_id}",
+                )
         return state
 
     if effect_type == "collect_from_bank":
@@ -816,6 +837,35 @@ def _set_consecutive_doubles(stream: _EventStream, state: GameState, count: int)
             consecutive_doubles=count,
         ),
     )
+
+
+def _pay_card_rent_or_create_debt(
+    stream: _EventStream,
+    state: GameState,
+    *,
+    debtor_id: str,
+    creditor_id: str,
+    amount: int,
+    reason: str,
+) -> GameState:
+    debtor = _player_by_id(state, debtor_id)
+    if debtor.cash < amount:
+        return stream.apply(
+            state,
+            "ACTIVE_PAYMENT_SET",
+            ActivePaymentSetPayload(
+                active=True,
+                debtor_id=debtor_id,
+                creditor_id=creditor_id,
+                amount_owed=amount,
+                amount_paid=0,
+                reason=reason,
+                negotiation_allowed=True,
+            ),
+        )
+
+    state = _adjust_cash(stream, state, debtor_id, -amount)
+    return _adjust_cash(stream, state, creditor_id, amount)
 
 
 def _set_property_owner(
