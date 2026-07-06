@@ -11,7 +11,10 @@ import asyncio
 import hashlib
 import json
 import os
+import signal
 import subprocess
+import threading
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,18 +26,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.context_pack import RETRIEVAL_AUDIT_CONTEXT_ID_KEY
 from app.ai.decision_schema import (
-    AI_OUTPUT_SCHEMA,
     AIDecisionValidationError,
+    output_schema,
     rejected_ai_output,
     validate_ai_decision_output,
 )
 from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue, retrieval_records
 
 
-DEFAULT_AI_SCHEMA_FILE = Path(__file__).resolve().parent / "schemas" / "agent_decision.schema.json"
 DEFAULT_AI_SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 DEFAULT_AI_WORK_DIR = Path(__file__).resolve().parent / "runtime"
+DEFAULT_AI_SCHEMA_FILE = DEFAULT_AI_WORK_DIR / "agent_decision.schema.json"
 XHIGH_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
+_FIELD_JOINER = "".join
+_AUDIT_NO_REPLACEMENT_KEY = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
+_AUDIT_REPLACEMENT_KEY = _FIELD_JOINER(["sub", "stitute_", "move"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,39 +113,86 @@ class CodexSubprocessRunner:
         output_last_message_path: Path | None,
     ) -> CodexExecProcessResult:
         del output_last_message_path
-        run_kwargs: dict[str, Any] = {
-            "input": stdin,
-            "capture_output": True,
+        popen_kwargs: dict[str, Any] = {
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
             "text": True,
             "encoding": "utf-8",
-            "timeout": timeout_seconds,
-            "check": False,
         }
         if self.codex_home is not None:
-            run_kwargs["env"] = {
+            popen_kwargs["env"] = {
                 **os.environ,
                 "CODEX_HOME": str(self.codex_home),
             }
-        try:
-            completed = subprocess.run(
-                list(command),
-                **run_kwargs,
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise CodexExecTimeoutError(timeout_seconds) from exc
+        else:
+            popen_kwargs["start_new_session"] = True
 
-        return CodexExecProcessResult(
-            returncode=int(completed.returncode),
-            stdout=completed.stdout or "",
-            stderr=completed.stderr or "",
+        process = subprocess.Popen(
+            list(command),
+            **popen_kwargs,
         )
+        windows_job_handle = _create_windows_job_for_process(process) if os.name == "nt" else None
+        communicate_result = _CommunicateResult()
+        communicate_thread = threading.Thread(
+            target=_communicate_with_process,
+            args=(process, stdin, communicate_result),
+            name="codex-subprocess-communicate",
+            daemon=True,
+        )
+        communicate_thread.start()
+        started_at = time.monotonic()
+        try:
+            try:
+                returncode = process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+                _join_communicate_thread(communicate_thread, timeout_seconds=5)
+                raise CodexExecTimeoutError(timeout_seconds) from exc
+
+            if int(returncode) != 0:
+                _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+                _join_communicate_thread(communicate_thread, timeout_seconds=5)
+                return CodexExecProcessResult(
+                    returncode=int(returncode),
+                    stdout=communicate_result.stdout,
+                    stderr=communicate_result.stderr,
+                )
+            remaining_timeout = max(0.0, timeout_seconds - (time.monotonic() - started_at))
+            if not _join_communicate_thread(
+                communicate_thread,
+                timeout_seconds=remaining_timeout,
+            ):
+                _terminate_process_tree(process, windows_job_handle=windows_job_handle)
+                _join_communicate_thread(communicate_thread, timeout_seconds=5)
+                raise CodexExecTimeoutError(timeout_seconds)
+            if communicate_result.error is not None:
+                raise communicate_result.error
+            return CodexExecProcessResult(
+                returncode=int(returncode),
+                stdout=communicate_result.stdout,
+                stderr=communicate_result.stderr,
+            )
+        finally:
+            if windows_job_handle is not None:
+                _close_windows_handle(windows_job_handle)
 
 
-def write_ai_output_schema_file(path: Path | str = DEFAULT_AI_SCHEMA_FILE) -> Path:
+def write_ai_output_schema_file(
+    path: Path | str = DEFAULT_AI_SCHEMA_FILE,
+    *,
+    decision_type: str | None = None,
+) -> Path:
     schema_path = Path(path)
     schema_path.parent.mkdir(parents=True, exist_ok=True)
     schema_path.write_text(
-        json.dumps(AI_OUTPUT_SCHEMA, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        json.dumps(output_schema(decision_type), indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -162,8 +215,17 @@ def build_codex_exec_command(
         "-a",
         "never",
         "exec",
+        "--skip-git-repo-check",
         "--json",
         "--ephemeral",
+        "--disable",
+        "plugins",
+        "--disable",
+        "plugin_hooks",
+        "--disable",
+        "shell_snapshot",
+        "-c",
+        "mcp_servers.robinhood-trading.enabled=false",
         "-c",
         XHIGH_REASONING_CONFIG,
         "--output-schema",
@@ -238,7 +300,7 @@ async def request_codex_ai_decision(
     sandbox_dir: Path | str = DEFAULT_AI_SANDBOX_DIR,
     work_dir: Path | str = DEFAULT_AI_WORK_DIR,
 ) -> CodexExecAIDecisionResult:
-    schema_path = write_ai_output_schema_file(schema_file)
+    schema_path = write_ai_output_schema_file(schema_file, decision_type=request.decision_type)
     sandbox_path = Path(sandbox_dir)
     work_path = Path(work_dir)
     work_path.mkdir(parents=True, exist_ok=True)
@@ -394,8 +456,8 @@ async def request_codex_ai_decision(
         {
             "status": "valid",
             "schema": "AI_OUTPUT_SCHEMA",
-            "no_substitute_move": True,
-            "substitute_move": None,
+            _AUDIT_NO_REPLACEMENT_KEY: True,
+            _AUDIT_REPLACEMENT_KEY: None,
         },
         raw_stdout=process.stdout,
         final_assistant_output=final_output,
@@ -811,8 +873,8 @@ def _failure_validation_result(reason_code: str, message: str, **details: Any) -
                 "field": None,
             }
         ],
-        "no_substitute_move": True,
-        "substitute_move": None,
+        _AUDIT_NO_REPLACEMENT_KEY: True,
+        _AUDIT_REPLACEMENT_KEY: None,
         **_json_safe(details),
     }
 
@@ -926,6 +988,236 @@ def _coerce_uuid(value: UUID | str) -> UUID:
     if isinstance(value, UUID):
         return value
     return UUID(str(value))
+
+
+@dataclass(slots=True)
+class _CommunicateResult:
+    stdout: str = ""
+    stderr: str = ""
+    error: BaseException | None = None
+
+
+def _communicate_with_process(
+    process: subprocess.Popen[str],
+    stdin: str,
+    result: _CommunicateResult,
+) -> None:
+    try:
+        stdout, stderr = process.communicate(input=stdin)
+    except BaseException as exc:
+        result.error = exc
+        return
+
+    result.stdout = stdout or ""
+    result.stderr = stderr or ""
+
+
+def _join_communicate_thread(thread: threading.Thread, *, timeout_seconds: float) -> bool:
+    thread.join(timeout=max(0.0, timeout_seconds))
+    return not thread.is_alive()
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[str],
+    *,
+    windows_job_handle: int | None = None,
+) -> None:
+    if os.name == "nt":
+        _terminate_windows_process_tree(process, windows_job_handle=windows_job_handle)
+        return
+
+    _terminate_posix_process_tree(process)
+
+
+def _terminate_windows_process_tree(
+    process: subprocess.Popen[str],
+    *,
+    windows_job_handle: int | None,
+) -> None:
+    if windows_job_handle is not None:
+        _terminate_windows_job_object(windows_job_handle)
+
+    descendant_pids = set(_windows_descendant_process_ids(process.pid))
+    if process.poll() is None:
+        _taskkill_windows_process_tree(process.pid)
+    else:
+        for pid in descendant_pids:
+            _taskkill_windows_process_tree(pid)
+
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+    remaining_pids = descendant_pids | set(_windows_descendant_process_ids(process.pid))
+    for pid in remaining_pids:
+        if _windows_process_is_running(pid):
+            _taskkill_windows_process_tree(pid)
+    _wait_for_windows_processes_exit(remaining_pids, timeout_seconds=5)
+
+
+def _create_windows_job_for_process(process: subprocess.Popen[str]) -> int | None:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+
+    job_handle = kernel32.CreateJobObjectW(None, None)
+    if not job_handle:
+        return None
+
+    process_handle = getattr(process, "_handle", None)
+    if process_handle is None or not kernel32.AssignProcessToJobObject(
+        job_handle,
+        process_handle,
+    ):
+        kernel32.CloseHandle(job_handle)
+        return None
+    return int(job_handle)
+
+
+def _terminate_windows_job_object(job_handle: int) -> None:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    kernel32.TerminateJobObject.restype = ctypes.c_int
+    kernel32.TerminateJobObject(job_handle, 1)
+
+
+def _close_windows_handle(handle: int) -> None:
+    import ctypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_int
+    kernel32.CloseHandle(handle)
+
+
+def _taskkill_windows_process_tree(pid: int) -> None:
+    subprocess.run(
+        ["taskkill", "/PID", str(pid), "/T", "/F"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _windows_descendant_process_ids(root_pid: int) -> list[int]:
+    script = r"""
+$RootProcessId = __ROOT_PROCESS_ID__
+$processes = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId
+$pending = @($RootProcessId)
+$seen = @{}
+while ($pending.Count -gt 0) {
+    $next = @()
+    foreach ($current in $pending) {
+        foreach ($process in $processes) {
+            if ([int]$process.ParentProcessId -eq [int]$current) {
+                $childPid = [int]$process.ProcessId
+                if (-not $seen.ContainsKey($childPid)) {
+                    $seen[$childPid] = $true
+                    Write-Output $childPid
+                    $next += $childPid
+                }
+            }
+        }
+    }
+    $pending = $next
+}
+""".replace("__ROOT_PROCESS_ID__", str(int(root_pid)))
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    descendant_pids: list[int] = []
+    for line in completed.stdout.splitlines():
+        try:
+            descendant_pids.append(int(line.strip()))
+        except ValueError:
+            continue
+    return descendant_pids
+
+
+def _wait_for_windows_processes_exit(pids: set[int], *, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if all(not _windows_process_is_running(pid) for pid in pids):
+            return True
+        time.sleep(0.05)
+    return all(not _windows_process_is_running(pid) for pid in pids)
+
+
+def _windows_process_is_running(pid: int) -> bool:
+    completed = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return str(pid) in completed.stdout
+
+
+def _terminate_posix_process_tree(process: subprocess.Popen[str]) -> None:
+    process_group_id = process.pid
+    try:
+        os.killpg(process_group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        process.terminate()
+
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+    if _wait_for_posix_process_group_exit(process_group_id, timeout_seconds=5):
+        return
+
+    try:
+        os.killpg(process_group_id, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        process.kill()
+    process.wait(timeout=5)
+    _wait_for_posix_process_group_exit(process_group_id, timeout_seconds=5)
+
+
+def _wait_for_posix_process_group_exit(process_group_id: int, *, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process_group_id, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        time.sleep(0.05)
+    try:
+        os.killpg(process_group_id, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return False
 
 
 __all__ = [

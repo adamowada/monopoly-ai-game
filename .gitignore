@@ -39,6 +39,7 @@ reports/
 # Docker, Postgres, and local runtime state
 postgres-data/
 docker-data/
+services/api/app/ai/runtime/
 *.pid
 *.sqlite
 *.sqlite3

@@ -28,12 +28,12 @@ async function proposeSampleDeal(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Add sample complex instruments" }).click();
   await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Contract preview");
   await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Complex instruments");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("cash_transfer");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("property_transfer");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("loan");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("option");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("immediate_cash_transfer");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("deferred_cash_payment");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("interest_bearing_debt");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("property_purchase_option");
   await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("rent_share");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("risk_transfer");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("insurance_payout");
   await page.getByRole("button", { name: "Propose deal" }).click();
 }
 

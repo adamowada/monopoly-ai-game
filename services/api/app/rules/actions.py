@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, NoReturn, Protocol, cast
+from typing import Any, Final, NoReturn, Protocol, cast
 
 from app.rules.atomic import is_atomic_section_active
 from app.rules.debt import (
@@ -16,13 +16,21 @@ from app.rules.debt import (
     settle_debt_with_cash,
 )
 from app.rules.event_capture import capture_rule_events, record_rule_event
-from app.rules.events import DiceRolledPayload, GameEvent, TurnStateSetPayload
+from app.rules.events import (
+    ActivePaymentSetPayload,
+    CardDrawnPayload,
+    DiceRolledPayload,
+    GameEvent,
+    TurnStateSetPayload,
+)
 from app.rules.mechanics import (
     JAIL_FINE,
     IllegalRuleActionError,
+    apply_card_effect,
     apply_dice_roll,
     buy_house,
     buy_property,
+    calculate_rent,
     close_auction,
     declare_bankruptcy,
     end_turn,
@@ -31,13 +39,14 @@ from app.rules.mechanics import (
     pay_jail_fine,
     place_auction_bid,
     sell_house,
+    send_player_to_jail,
     start_auction,
     unmortgage_property,
     use_get_out_of_jail_card,
 )
 from app.rules.phases import TurnPhase
 from app.rules.reducer import apply_event
-from app.rules.rng import generate_dice_roll_event
+from app.rules.rng import generate_card_draw_event, generate_dice_roll_event
 from app.rules.static_data import (
     BoardSpace,
     CardData,
@@ -66,24 +75,26 @@ SUPPORTED_ACTION_TYPES: Final[frozenset[str]] = frozenset(
         "SETTLE_DEBT",
     }
 )
-_ROLL_ACTION_POST_ROLL_PATHS: Final[dict[TurnPhase, tuple[TurnPhase, ...]]] = {
+_ROLL_ACTION_SPACE_RESOLUTION_PATHS: Final[dict[TurnPhase, tuple[TurnPhase, ...]]] = {
     TurnPhase.START_TURN: (
         TurnPhase.PRE_ROLL_MANAGEMENT,
         TurnPhase.ROLL_REQUIRED,
         TurnPhase.MOVEMENT_RESOLUTION,
         TurnPhase.SPACE_RESOLUTION,
-        TurnPhase.POST_ROLL_MANAGEMENT,
     ),
     TurnPhase.ROLL_REQUIRED: (
         TurnPhase.MOVEMENT_RESOLUTION,
         TurnPhase.SPACE_RESOLUTION,
-        TurnPhase.POST_ROLL_MANAGEMENT,
     ),
     TurnPhase.MOVEMENT_RESOLUTION: (
         TurnPhase.SPACE_RESOLUTION,
-        TurnPhase.POST_ROLL_MANAGEMENT,
     ),
-    TurnPhase.SPACE_RESOLUTION: (TurnPhase.POST_ROLL_MANAGEMENT,),
+    TurnPhase.JAIL_RESOLUTION: (
+        TurnPhase.ROLL_REQUIRED,
+        TurnPhase.MOVEMENT_RESOLUTION,
+        TurnPhase.SPACE_RESOLUTION,
+    ),
+    TurnPhase.SPACE_RESOLUTION: (),
 }
 
 
@@ -468,26 +479,33 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
     payload = _payload_mapping(action)
 
     if action.type == "ROLL_DICE":
+        action_state = _prepare_pending_doubles_roll(state, action.actor_id, event_id_prefix)
         dice_event = generate_dice_roll_event(
-            state,
-            f"{event_id_prefix}-{state.event_sequence + 1}",
+            action_state,
+            f"{event_id_prefix}-{action_state.event_sequence + 1}",
             action.actor_id,
         )
         dice_payload = cast(DiceRolledPayload, dice_event.payload)
         rolled_state = apply_dice_roll(
-            state,
+            action_state,
             action.actor_id,
             dice_payload.die_1,
             dice_payload.die_2,
             event_id_prefix,
         )
-        return _advance_roll_action_to_post_roll_management(rolled_state, event_id_prefix)
+        return _advance_roll_action_after_landing(
+            rolled_state,
+            action.actor_id,
+            event_id_prefix,
+            dice_total=dice_payload.total,
+        )
 
     if action.type == "END_TURN":
         return end_turn(state, action.actor_id, event_id_prefix)
 
     if action.type == "BUY_PROPERTY":
-        return buy_property(state, action.actor_id, _required_str(payload, "property_id"), event_id_prefix)
+        next_state = buy_property(state, action.actor_id, _required_str(payload, "property_id"), event_id_prefix)
+        return _complete_resolved_timing_window(next_state, event_id_prefix)
 
     if action.type == "START_AUCTION":
         return start_auction(state, _required_str(payload, "property_id"), event_id_prefix)
@@ -546,43 +564,303 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
         return next_state
 
     if action.type == "SETTLE_DEBT":
-        return settle_debt_with_cash(
+        next_state = settle_debt_with_cash(
             state,
             action.actor_id,
             _required_int(payload, "amount"),
             event_id_prefix,
         )
+        return _complete_resolved_timing_window(next_state, event_id_prefix)
 
     _raise_issue("unknown_action", f"unknown action type {action.type}", "type")
 
 
-def _advance_roll_action_to_post_roll_management(state: GameState, event_id_prefix: str) -> GameState:
+def _advance_roll_action_after_landing(
+    state: GameState,
+    actor_id: str,
+    event_id_prefix: str,
+    *,
+    dice_total: int,
+) -> GameState:
     try:
         current_phase = TurnPhase(state.turn.phase)
     except ValueError:
         return state
 
-    phase_path = _ROLL_ACTION_POST_ROLL_PATHS.get(current_phase)
+    phase_path = _ROLL_ACTION_SPACE_RESOLUTION_PATHS.get(current_phase)
     if phase_path is None:
         return state
 
     next_state = state
     for next_phase in phase_path:
-        event = GameEvent(
-            event_id=f"{event_id_prefix}-{next_state.event_sequence + 1}",
-            sequence=next_state.event_sequence + 1,
-            type="TURN_STATE_SET",
-            payload=TurnStateSetPayload(
-                turn_number=next_state.turn.turn_number,
-                current_player_index=next_state.turn.current_player_index,
-                current_player_id=next_state.turn.current_player_id,
-                phase=next_phase.value,
-                consecutive_doubles=next_state.turn.consecutive_doubles,
-            ),
+        next_state = _set_turn_phase(next_state, next_phase, event_id_prefix)
+    return _resolve_landed_space(
+        next_state,
+        actor_id,
+        event_id_prefix,
+        dice_total=dice_total,
+        resolution_depth=0,
+    )
+
+
+def _resolve_landed_space(
+    state: GameState,
+    actor_id: str,
+    event_id_prefix: str,
+    *,
+    dice_total: int,
+    resolution_depth: int,
+    skip_rent_for_property_id: str | None = None,
+) -> GameState:
+    if resolution_depth > 4:
+        _raise_issue("illegal_action", "card resolution exceeded the maximum deterministic depth", "type")
+
+    player = _player_by_id(state, actor_id)
+    if player is None:
+        _raise_issue("illegal_action", f"unknown actor {actor_id}", "actor_id")
+
+    space = _space_for_position(player.position)
+    if space.type == "go_to_jail":
+        state = send_player_to_jail(state, actor_id, event_id_prefix)
+        return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+    if space.type == "tax":
+        if space.amount is None:
+            _raise_issue("illegal_action", f"{space.id} does not define a tax amount", "type")
+        state = _set_active_payment(
+            state,
+            event_id_prefix,
+            debtor_id=actor_id,
+            creditor_id=None,
+            amount=space.amount,
+            reason=f"tax:{space.id}",
+            negotiation_allowed=False,
         )
-        record_rule_event(event)
-        next_state = apply_event(next_state, event)
-    return next_state
+        return _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+
+    if space.type in {"chance", "community_chest"}:
+        if space.deck is None:
+            _raise_issue("illegal_action", f"{space.id} does not define a card deck", "type")
+        return _draw_apply_and_resolve_card(
+            state,
+            actor_id,
+            event_id_prefix,
+            deck=space.deck,
+            dice_total=dice_total,
+            resolution_depth=resolution_depth,
+        )
+
+    if space.property_id is not None:
+        ownership = _property_ownership(state, space.property_id)
+        if ownership.owner_id is None:
+            return _set_turn_phase(state, TurnPhase.PURCHASE_OR_AUCTION, event_id_prefix)
+        if ownership.owner_id == actor_id or ownership.mortgaged:
+            return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+        if skip_rent_for_property_id == space.property_id:
+            return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+        property_data = _property_data(space.property_id)
+        rent_dice_total = dice_total if property_data.kind == "utility" else None
+        rent = calculate_rent(state, space.property_id, dice_total=rent_dice_total)
+        if rent <= 0:
+            return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+        state = _set_active_payment(
+            state,
+            event_id_prefix,
+            debtor_id=actor_id,
+            creditor_id=ownership.owner_id,
+            amount=rent,
+            reason=f"rent:{space.property_id}",
+            negotiation_allowed=True,
+        )
+        return _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+
+    return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+
+def _draw_apply_and_resolve_card(
+    state: GameState,
+    actor_id: str,
+    event_id_prefix: str,
+    *,
+    deck: str,
+    dice_total: int,
+    resolution_depth: int,
+) -> GameState:
+    draw_event = generate_card_draw_event(
+        state,
+        f"{event_id_prefix}-{state.event_sequence + 1}",
+        cast(Any, deck),
+    )
+    record_rule_event(draw_event)
+    state = apply_event(state, draw_event)
+    if not isinstance(draw_event.payload, CardDrawnPayload):
+        raise TypeError("card draw event payload must be CardDrawnPayload")
+    card = _card_data(draw_event.payload.card_id)
+    effect_type = card.effect.get("type")
+
+    state = apply_card_effect(
+        state,
+        actor_id,
+        card.id,
+        event_id_prefix,
+        dice_total=dice_total,
+        apply_card_rent=False,
+    )
+
+    if effect_type == "go_to_jail":
+        return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+    if effect_type in {"advance_to_nearest_railroad", "advance_to_nearest_utility"}:
+        return _resolve_nearest_card_landing(
+            state,
+            actor_id,
+            event_id_prefix,
+            card=card,
+            dice_total=dice_total,
+            resolution_depth=resolution_depth + 1,
+        )
+
+    if effect_type in {"advance_to", "move_relative"}:
+        return _resolve_landed_space(
+            state,
+            actor_id,
+            event_id_prefix,
+            dice_total=dice_total,
+            resolution_depth=resolution_depth + 1,
+        )
+
+    return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+
+def _resolve_nearest_card_landing(
+    state: GameState,
+    actor_id: str,
+    event_id_prefix: str,
+    *,
+    card: CardData,
+    dice_total: int,
+    resolution_depth: int,
+) -> GameState:
+    player = _player_by_id(state, actor_id)
+    if player is None:
+        _raise_issue("illegal_action", f"unknown actor {actor_id}", "actor_id")
+
+    target_space = _space_for_position(player.position)
+    if target_space.property_id is None:
+        return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+    ownership = _property_ownership(state, target_space.property_id)
+    if ownership.owner_id is None or ownership.owner_id == actor_id or ownership.mortgaged:
+        return _resolve_landed_space(
+            state,
+            actor_id,
+            event_id_prefix,
+            dice_total=dice_total,
+            resolution_depth=resolution_depth,
+            skip_rent_for_property_id=target_space.property_id,
+        )
+
+    effect_type = card.effect.get("type")
+    multiplier = _card_effect_int(card, "rent_multiplier_if_owned", default=1)
+    if effect_type == "advance_to_nearest_utility":
+        dice_event = generate_dice_roll_event(
+            state,
+            f"{event_id_prefix}-{state.event_sequence + 1}",
+            actor_id,
+        )
+        record_rule_event(dice_event)
+        state = apply_event(state, dice_event)
+        dice_payload = cast(DiceRolledPayload, dice_event.payload)
+        rent = dice_payload.total * multiplier
+    elif effect_type == "advance_to_nearest_railroad":
+        rent = calculate_rent(state, target_space.property_id) * multiplier
+    else:
+        _raise_issue("illegal_action", f"unsupported nearest card effect {effect_type}", "type")
+
+    if rent <= 0:
+        return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+    state = _set_active_payment(
+        state,
+        event_id_prefix,
+        debtor_id=actor_id,
+        creditor_id=ownership.owner_id,
+        amount=rent,
+        reason=f"card_rent:{target_space.property_id}",
+        negotiation_allowed=True,
+    )
+    return _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+
+
+def _set_active_payment(
+    state: GameState,
+    event_id_prefix: str,
+    *,
+    debtor_id: str,
+    creditor_id: str | None,
+    amount: int,
+    reason: str,
+    negotiation_allowed: bool,
+) -> GameState:
+    event = GameEvent(
+        event_id=f"{event_id_prefix}-{state.event_sequence + 1}",
+        sequence=state.event_sequence + 1,
+        type="ACTIVE_PAYMENT_SET",
+        payload=ActivePaymentSetPayload(
+            active=True,
+            debtor_id=debtor_id,
+            creditor_id=creditor_id,
+            amount_owed=amount,
+            amount_paid=0,
+            reason=reason,
+            negotiation_allowed=negotiation_allowed,
+        ),
+    )
+    record_rule_event(event)
+    return apply_event(state, event)
+
+
+def _set_turn_phase(state: GameState, phase: TurnPhase, event_id_prefix: str) -> GameState:
+    if state.turn.phase == phase:
+        return state
+    event = GameEvent(
+        event_id=f"{event_id_prefix}-{state.event_sequence + 1}",
+        sequence=state.event_sequence + 1,
+        type="TURN_STATE_SET",
+        payload=TurnStateSetPayload(
+            turn_number=state.turn.turn_number,
+            current_player_index=state.turn.current_player_index,
+            current_player_id=state.turn.current_player_id,
+            phase=phase.value,
+            consecutive_doubles=state.turn.consecutive_doubles,
+        ),
+    )
+    record_rule_event(event)
+    return apply_event(state, event)
+
+
+def _complete_resolved_timing_window(state: GameState, event_id_prefix: str) -> GameState:
+    try:
+        current_phase = TurnPhase(state.turn.phase)
+    except ValueError:
+        return state
+
+    if current_phase == TurnPhase.PURCHASE_OR_AUCTION and state.active_auction is None:
+        return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+    if current_phase == TurnPhase.PAYMENT_RESOLUTION and state.active_payment is None:
+        return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+    return state
+
+
+def _prepare_pending_doubles_roll(state: GameState, actor_id: str, event_id_prefix: str) -> GameState:
+    if (
+        state.turn.phase == TurnPhase.POST_ROLL_MANAGEMENT
+        and state.turn.consecutive_doubles > 0
+        and actor_id == state.turn.current_player_id
+    ):
+        return _set_turn_phase(state, TurnPhase.ROLL_REQUIRED, event_id_prefix)
+    return state
 
 
 def execute_action(state: GameState, action: GameAction, event_id_prefix: str) -> ActionExecutionResult:
@@ -797,6 +1075,8 @@ def _validate_end_turn_timing(state: GameState, actor_id: str) -> None:
         _raise_issue("mistimed_action", "players cannot end a turn during an active auction", "type")
     if state.active_payment is not None:
         _raise_issue("mistimed_action", "players cannot end a turn with unresolved debt", "type")
+    if state.turn.phase == TurnPhase.POST_ROLL_MANAGEMENT and state.turn.consecutive_doubles > 0:
+        _raise_issue("mistimed_action", "players cannot end a turn while a doubles roll is pending", "type")
     if actor_id != state.turn.current_player_id:
         _raise_issue("mistimed_action", f"{actor_id} is not the current turn player", "actor_id")
 
@@ -1017,12 +1297,12 @@ def _close_auction_if_resolved(state: GameState, event_id_prefix: str) -> GameSt
     unpassed_player_ids = active_player_ids - set(auction.passed_player_ids)
     if auction.high_bidder_id is None:
         if not unpassed_player_ids:
-            return close_auction(state, event_id_prefix)
+            return _complete_resolved_timing_window(close_auction(state, event_id_prefix), event_id_prefix)
         return state
 
     unresolved_competitors = unpassed_player_ids - {auction.high_bidder_id}
     if not unresolved_competitors:
-        return close_auction(state, event_id_prefix)
+        return _complete_resolved_timing_window(close_auction(state, event_id_prefix), event_id_prefix)
     return state
 
 
@@ -1103,6 +1383,13 @@ def _required_int(payload: Mapping[str, object], field_name: str) -> int:
     value = payload[field_name]
     if not isinstance(value, int) or isinstance(value, bool):
         _raise_issue("malformed_action", f"payload field {field_name} must be an integer", f"payload.{field_name}")
+    return value
+
+
+def _card_effect_int(card: CardData, field_name: str, *, default: int) -> int:
+    value = card.effect.get(field_name, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        _raise_issue("illegal_action", f"{card.id} effect field {field_name} must be an integer", "type")
     return value
 
 

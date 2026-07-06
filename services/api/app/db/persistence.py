@@ -16,7 +16,7 @@ from app.rules.reducer import InvalidEventError, apply_event
 from app.rules.state import GameState
 
 
-DEFAULT_SNAPSHOT_INTERVAL = 2
+DEFAULT_SNAPSHOT_INTERVAL = 25
 
 
 class EventPersistenceError(RuntimeError):

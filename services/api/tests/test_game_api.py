@@ -370,6 +370,13 @@ async def test_negotiations_and_deals_create_minimal_durable_records(
         assert deal["status"] == "proposed"
         assert deal["negotiation_id"] == negotiation["id"]
         assert deal["terms"] == {"cash_offer": 10}
+        deals_response = await client.get(f"/games/{game_id}/deals")
+        assert deals_response.status_code == 200
+        listed_deals = deals_response.json()["deals"]
+        assert len(listed_deals) == 1
+        assert listed_deals[0]["id"] == deal["id"]
+        assert listed_deals[0]["negotiation_id"] == negotiation["id"]
+        assert listed_deals[0]["status"] == "proposed"
         assert await table_count(session_factory, negotiations, str(game_id)) == 1
         assert await table_count(session_factory, deals, str(game_id)) == 1
     finally:

@@ -12,6 +12,23 @@ const propertyData = classicData.properties;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
+const supportedDealTermKinds = new Set([
+  "cash_transfer",
+  "property_transfer",
+  "loan",
+  "option",
+  "rent_share",
+  "risk_transfer",
+  "immediate_cash_transfer",
+  "immediate_property_transfer",
+  "deferred_cash_payment",
+  "installment_loan",
+  "interest_bearing_debt",
+  "collateralized_loan",
+  "property_purchase_option",
+  "insurance_payout",
+  "conditional_obligation",
+]);
 
 const corsHeaders = {
   "access-control-allow-headers": "accept, content-type, Idempotency-Key",
@@ -286,7 +303,6 @@ function configurePropertyManagementSeed(game) {
     return;
   }
   const ada = game.players[0]?.id ?? null;
-  const grace = game.players[1]?.id ?? null;
   game.current_phase = "PRE_ROLL_MANAGEMENT";
   setPropertyOwnership(game, "property_mediterranean_avenue", {
     owner_id: ada,
@@ -303,14 +319,14 @@ function configurePropertyManagementSeed(game) {
     hotels: 0,
   });
   setPropertyOwnership(game, "property_park_place", {
-    owner_id: grace,
+    owner_id: ada,
     mortgaged: true,
     houses: 0,
     hotel: false,
     hotels: 0,
   });
   setPropertyOwnership(game, "property_boardwalk", {
-    owner_id: grace,
+    owner_id: ada,
     mortgaged: false,
     houses: 0,
     hotel: true,
@@ -898,6 +914,26 @@ function validParticipantIds(game, participantIds) {
   );
 }
 
+function negotiationTopicFromPayload(payload) {
+  if (typeof payload.topic === "string") {
+    return payload.topic.trim();
+  }
+  if (isObject(payload.context) && typeof payload.context.topic === "string") {
+    return payload.context.topic.trim();
+  }
+  return "";
+}
+
+function negotiationContextFromPayload(payload) {
+  if (typeof payload.context === "string") {
+    return payload.context.trim();
+  }
+  if (isObject(payload.context) && typeof payload.context.body === "string") {
+    return payload.context.body.trim();
+  }
+  return "";
+}
+
 function validateCreateNegotiationPayload(game, payload) {
   if (!isObject(payload)) {
     return negotiationValidationError("malformed_negotiation", "request body must be a JSON object", "body");
@@ -915,7 +951,7 @@ function validateCreateNegotiationPayload(game, payload) {
   if (!payload.participant_player_ids.includes(payload.opened_by_player_id)) {
     return negotiationValidationError("invalid_participant", "opened_by_player_id must be a participant", "opened_by_player_id");
   }
-  if (typeof payload.topic !== "string" || payload.topic.trim().length === 0) {
+  if (negotiationTopicFromPayload(payload).length === 0) {
     return negotiationValidationError("missing_topic", "topic is required", "topic");
   }
   return null;
@@ -949,10 +985,7 @@ function validateMessagePayload(game, negotiation, payload) {
 }
 
 function isValidTerm(term) {
-  return (
-    isObject(term) &&
-    ["cash_transfer", "property_transfer", "loan", "option", "rent_share", "risk_transfer"].includes(term.kind)
-  );
+  return isObject(term) && supportedDealTermKinds.has(term.kind);
 }
 
 function validateDealPayload(game, payload) {
@@ -1067,7 +1100,12 @@ function acceptDealRecord(game, deal) {
 }
 
 function firstCashTransferTerm(deal) {
-  return deal.terms.find((term) => term.kind === "cash_transfer" && Number.isInteger(term.amount)) ?? null;
+  return (
+    deal.terms.find(
+      (term) =>
+        (term.kind === "cash_transfer" || term.kind === "immediate_cash_transfer") && Number.isInteger(term.amount),
+    ) ?? null
+  );
 }
 
 function createStage105ContractFromDeal(game, deal, dealEvent) {
@@ -1294,6 +1332,7 @@ function propertyManagementLegalActionsFor(game) {
   const mediterranean = propertyOwnership(game, "property_mediterranean_avenue");
   const baltic = propertyOwnership(game, "property_baltic_avenue");
   const parkPlace = propertyOwnership(game, "property_park_place");
+  const boardwalk = propertyOwnership(game, "property_boardwalk");
   const readingRailroad = propertyOwnership(game, "property_reading_railroad");
   const actions = [];
   if (mediterranean?.owner_id === activePlayer(game)?.id && !mediterranean.mortgaged && mediterranean.houses === 0 && !mediterranean.hotel) {
@@ -1304,6 +1343,9 @@ function propertyManagementLegalActionsFor(game) {
   }
   if (parkPlace?.owner_id === activePlayer(game)?.id && parkPlace.mortgaged) {
     actions.push(legalAction(game, "UNMORTGAGE_PROPERTY", { property_id: "property_park_place", cost: 220 }));
+  }
+  if (boardwalk?.owner_id === activePlayer(game)?.id && !boardwalk.mortgaged && (boardwalk.hotel || boardwalk.houses > 0)) {
+    actions.push(legalAction(game, "SELL_HOUSE", { property_id: "property_boardwalk", proceeds: 100 }));
   }
   if (isStage105Seed(game.seed) && readingRailroad?.owner_id === activePlayer(game)?.id && !readingRailroad.mortgaged) {
     actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_reading_railroad", proceeds: 100 }));
@@ -2827,8 +2869,8 @@ const server = createServer(async (request, response) => {
         const negotiation = createNegotiationRecord(game, {
           opened_by_player_id: payload.opened_by_player_id,
           participant_player_ids: [...new Set(payload.participant_player_ids)],
-          topic: payload.topic.trim(),
-          context: typeof payload.context === "string" ? payload.context.trim() : "",
+          topic: negotiationTopicFromPayload(payload),
+          context: negotiationContextFromPayload(payload),
         });
         json(response, 201, { status: "ok", negotiation });
         return;

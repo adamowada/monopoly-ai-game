@@ -52,6 +52,7 @@ VALID_PHASE_TRANSITIONS: Final[dict[TurnPhase, tuple[TurnPhase, ...]]] = {
         TurnPhase.BANKRUPTCY_RESOLUTION,
     ),
     TurnPhase.POST_ROLL_MANAGEMENT: (
+        TurnPhase.ROLL_REQUIRED,
         TurnPhase.NEGOTIATION_WINDOW,
         TurnPhase.END_TURN,
         TurnPhase.BANKRUPTCY_RESOLUTION,

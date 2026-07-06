@@ -102,6 +102,10 @@ function negotiationFixture(patch: Partial<Negotiation> = {}): Negotiation {
     context: "Ada wants a rail trade.",
     status: "opened",
     round_number: 1,
+    pending_deal_id: null,
+    current_deal_id: null,
+    acceptances: {},
+    invalidated_acceptances: {},
     created_at: createdAt,
     updated_at: createdAt,
     ...patch,
@@ -120,7 +124,7 @@ function dealFixture(patch: Partial<Deal> = {}): Deal {
     status: "proposed",
     terms: [
       {
-        kind: "cash_transfer",
+        kind: "immediate_cash_transfer",
         from_player_id: adaId,
         to_player_id: graceId,
         amount: 100,
@@ -182,10 +186,14 @@ function createNegotiationFetchMock({
         game_id: gameId,
         opened_by_player_id: body.opened_by_player_id,
         participant_player_ids: body.participant_player_ids,
-        topic: body.topic,
-        context: body.context,
+        topic: body.context?.topic ?? body.topic,
+        context: body.context?.body ?? body.context,
         status: "opened",
         round_number: 1,
+        pending_deal_id: null,
+        current_deal_id: null,
+        acceptances: {},
+        invalidated_acceptances: {},
         created_at: createdAt,
         updated_at: createdAt,
       };
@@ -248,6 +256,10 @@ function createNegotiationFetchMock({
           context: "Linus starts a negotiation.",
           status: "opened",
           round_number: 1,
+          pending_deal_id: null,
+          current_deal_id: null,
+          acceptances: {},
+          invalidated_acceptances: {},
           created_at: createdAt,
           updated_at: createdAt,
         };
@@ -351,7 +363,14 @@ describe("NegotiationPanel", () => {
     const preview = screen.getByRole("region", { name: "Contract preview" });
     expect(preview).toHaveTextContent("Contract preview");
     expect(preview).toHaveTextContent("Complex instruments");
-    for (const termKind of ["cash_transfer", "property_transfer", "loan", "option", "rent_share", "risk_transfer"]) {
+    for (const termKind of [
+      "immediate_cash_transfer",
+      "deferred_cash_payment",
+      "interest_bearing_debt",
+      "property_purchase_option",
+      "rent_share",
+      "insurance_payout",
+    ]) {
       expect(preview).toHaveTextContent(termKind);
     }
 
@@ -360,7 +379,7 @@ describe("NegotiationPanel", () => {
     const deal = await screen.findByRole("region", { name: "Deal v1" });
     expect(deal).toHaveTextContent("Deal v1");
     expect(deal).toHaveTextContent("Proposed");
-    expect(deal).toHaveTextContent("cash_transfer");
+    expect(deal).toHaveTextContent("immediate_cash_transfer");
 
     const dealSubmission = fetchMock.mock.calls.find(
       ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/deals` && init?.method === "POST",
@@ -370,12 +389,12 @@ describe("NegotiationPanel", () => {
       negotiation_id: "neg-1",
       parent_deal_id: null,
       terms: expect.arrayContaining([
-        expect.objectContaining({ kind: "cash_transfer" }),
-        expect.objectContaining({ kind: "property_transfer" }),
-        expect.objectContaining({ kind: "loan" }),
-        expect.objectContaining({ kind: "option" }),
+        expect.objectContaining({ kind: "immediate_cash_transfer" }),
+        expect.objectContaining({ kind: "deferred_cash_payment" }),
+        expect.objectContaining({ kind: "interest_bearing_debt" }),
+        expect.objectContaining({ kind: "property_purchase_option" }),
         expect.objectContaining({ kind: "rent_share" }),
-        expect.objectContaining({ kind: "risk_transfer" }),
+        expect.objectContaining({ kind: "insurance_payout" }),
       ]),
     });
   });

@@ -34,11 +34,10 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
-      # codex-auth: mount the host Codex auth directory read-only for live AI turns.
+      # codex-home: mount the host Codex home so live codex exec can read auth and write runtime state.
       - type: bind
         source: "${CODEX_HOST_HOME:-C:/Users/adams/.codex}"
         target: /root/.codex
-        read_only: true
         bind:
           create_host_path: false
     depends_on:

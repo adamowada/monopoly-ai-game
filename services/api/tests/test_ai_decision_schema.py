@@ -11,6 +11,7 @@ from app.ai.decision_schema import (
     AIDecisionValidationError,
     DECISION_TYPES,
     MALFORMED_AI_OUTPUT_REASON_CODE,
+    output_schema,
     rejected_ai_output,
     validate_ai_decision_output,
 )
@@ -173,6 +174,144 @@ def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
     assert "rationale" in serialized
 
 
+def test_schema_export_closes_all_objects_for_codex_response_format() -> None:
+    def walk(node: object) -> list[dict[str, Any]]:
+        if isinstance(node, dict):
+            found = [node] if node.get("type") == "object" else []
+            for value in node.values():
+                found.extend(walk(value))
+            return found
+        if isinstance(node, list):
+            found: list[dict[str, Any]] = []
+            for value in node:
+                found.extend(walk(value))
+            return found
+        return []
+
+    object_schemas = walk(AI_OUTPUT_SCHEMA)
+
+    assert object_schemas
+    assert all(schema.get("additionalProperties") is False for schema in object_schemas)
+
+
+def test_decision_specific_schema_is_single_strict_object_for_codex_response_format() -> None:
+    schema = output_schema("action_decision")
+
+    assert schema["type"] == "object"
+    assert "oneOf" not in schema
+    assert "$defs" not in schema
+    assert schema["properties"]["decision_type"]["const"] == "action_decision"
+
+    def walk(node: object) -> list[dict[str, Any]]:
+        if isinstance(node, dict):
+            assert "$ref" not in node
+            found = [node] if node.get("type") == "object" else []
+            for value in node.values():
+                found.extend(walk(value))
+            return found
+        if isinstance(node, list):
+            found: list[dict[str, Any]] = []
+            for value in node:
+                found.extend(walk(value))
+            return found
+        return []
+
+    object_schemas = walk(schema)
+
+    assert object_schemas
+    for object_schema in object_schemas:
+        assert object_schema.get("additionalProperties") is False
+        properties = object_schema.get("properties")
+        assert isinstance(properties, dict)
+        assert set(object_schema.get("required", ())) == set(properties)
+
+
+def test_action_decision_output_schema_keeps_dynamic_payload_expressible() -> None:
+    schema = output_schema("action_decision")
+    payload_schema = schema["properties"]["action"]["properties"]["payload"]
+
+    assert payload_schema["type"] == "string"
+    assert payload_schema.get("properties") is None
+    assert payload_schema.get("additionalProperties") is None
+
+
+def test_deal_proposal_output_schema_keeps_dynamic_terms_expressible() -> None:
+    schema = output_schema("deal_proposal")
+    terms_schema = schema["properties"]["deal"]["properties"]["terms"]
+
+    assert terms_schema["type"] == "string"
+    assert terms_schema.get("properties") is None
+    assert terms_schema.get("additionalProperties") is None
+
+
+def test_codex_boundary_action_payload_json_string_normalizes_to_dict() -> None:
+    raw_output = {
+        **_base("action_decision"),
+        "expected_state_hash": "state-hash-7-2",
+        "expected_event_sequence": 12,
+        "action": {
+            "type": "BID_AUCTION",
+            "payload": json.dumps(
+                {
+                    "property_id": "property_mediterranean_avenue",
+                    "amount": 80,
+                    "source": {"kind": "codex-boundary"},
+                }
+            ),
+        },
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+    dumped = parsed.root.model_dump(mode="json")
+
+    assert dumped["action"]["payload"] == {
+        "property_id": "property_mediterranean_avenue",
+        "amount": 80,
+        "source": {"kind": "codex-boundary"},
+    }
+
+
+def test_codex_boundary_deal_terms_json_string_normalizes_to_dict() -> None:
+    raw_output = {
+        **_base("deal_proposal"),
+        "negotiation_id": NEGOTIATION_ID,
+        "deal": {
+            "recipient_player_ids": [RECIPIENT_ID],
+            "terms": json.dumps(
+                {
+                    "terms": [
+                        {
+                            "type": "deferred_cash_payment",
+                            "from_player_id": PLAYER_ID,
+                            "to_player_id": RECIPIENT_ID,
+                            "amount": 125,
+                            "due_turn": 4,
+                        }
+                    ],
+                    "metadata": {"codex_boundary": True},
+                }
+            ),
+            "message": "Pay later for immediate position.",
+        },
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+    dumped = parsed.root.model_dump(mode="json")
+
+    assert dumped["deal"]["terms"] == {
+        "terms": [
+            {
+                "type": "deferred_cash_payment",
+                "from_player_id": PLAYER_ID,
+                "to_player_id": RECIPIENT_ID,
+                "amount": 125,
+                "due_turn": 4,
+            }
+        ],
+        "metadata": {"codex_boundary": True},
+    }
+
+
 def test_open_negotiation_parses_without_negotiation_id() -> None:
     raw_output = {
         **_base("open_negotiation"),
@@ -321,6 +460,8 @@ def test_rejected_ai_output_audit_payload_keeps_raw_output_and_no_substitute_mov
     assert audit_payload.player_id == PLAYER_ID
     assert audit_payload.substitute_move is None
     assert audit_payload.no_substitute_move is True
+    assert audit_payload.model_dump()["substitute_move"] is None
+    assert audit_payload.model_dump()["no_substitute_move"] is True
     assert audit_payload.audit_payload["raw_output"] == audit_payload.raw_output
     assert audit_payload.audit_payload["validation_errors"][0]["code"] == "malformed_ai_output"
     assert audit_payload.audit_payload["no_substitute_move"] is True

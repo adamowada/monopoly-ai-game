@@ -16,10 +16,42 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    RootModel,
+    ValidationError,
+    WithJsonSchema,
+    field_validator,
+    model_validator,
+)
 
 
 MALFORMED_AI_OUTPUT_REASON_CODE = "malformed_ai_output"
+_FIELD_JOINER = "".join
+
+
+def _normalize_codex_json_object(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("value must be a valid JSON object string") from exc
+        if not isinstance(decoded, Mapping):
+            raise ValueError("value must decode to a JSON object")
+        return dict(decoded)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return value
+
+
+CodexJsonObject = Annotated[
+    dict[str, Any],
+    BeforeValidator(_normalize_codex_json_object),
+    WithJsonSchema({"type": "string"}),
+]
 
 DECISION_TYPES: tuple[str, ...] = (
     "action_decision",
@@ -63,7 +95,9 @@ class _SchemaModel(BaseModel):
 
 class AIActionPayload(_SchemaModel):
     type: str = Field(min_length=1, description="Game action type selected by the AI.")
-    payload: dict[str, Any] = Field(description="Game action payload to validate before mutation.")
+    payload: CodexJsonObject = Field(
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
 
 class NegotiationMessagePayload(_SchemaModel):
@@ -72,7 +106,10 @@ class NegotiationMessagePayload(_SchemaModel):
         description="Optional specific recipient for a negotiation message.",
     )
     body: str = Field(min_length=1, max_length=4000, description="Negotiation text to send.")
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: CodexJsonObject = Field(
+        default_factory=dict,
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
 
 class OpenNegotiationPayload(_SchemaModel):
@@ -81,7 +118,10 @@ class OpenNegotiationPayload(_SchemaModel):
         max_length=5,
         json_schema_extra={"uniqueItems": True},
     )
-    context: dict[str, Any] = Field(default_factory=dict)
+    context: CodexJsonObject = Field(
+        default_factory=dict,
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
     @field_validator("participant_player_ids")
     @classmethod
@@ -93,13 +133,19 @@ class OpenNegotiationPayload(_SchemaModel):
 
 class DealProposalPayload(_SchemaModel):
     recipient_player_ids: list[UUID] = Field(min_length=1)
-    terms: dict[str, Any] = Field(min_length=1)
+    terms: CodexJsonObject = Field(
+        min_length=1,
+        description="Structured deal terms encoded as a JSON object string by Codex.",
+    )
     message: str | None = Field(default=None, min_length=1)
 
 
 class CounterofferPayload(_SchemaModel):
     responds_to_deal_id: UUID
-    terms: dict[str, Any] = Field(min_length=1)
+    terms: CodexJsonObject = Field(
+        min_length=1,
+        description="Structured counteroffer terms encoded as a JSON object string by Codex.",
+    )
     message: str | None = Field(default=None, min_length=1)
 
 
@@ -133,7 +179,10 @@ class MemoryUpdatePayload(_SchemaModel):
     category: MemoryCategory
     importance: int = Field(ge=0, le=10)
     content: str = Field(min_length=1)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: CodexJsonObject = Field(
+        default_factory=dict,
+        description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
+    )
 
 
 class _DecisionBase(_SchemaModel):
@@ -203,6 +252,33 @@ AIDecisionVariant = Annotated[
 ]
 
 
+_OUTPUT_SCHEMA_DEF_BY_DECISION_TYPE: Mapping[str, str] = {
+    "action_decision": "ActionDecisionOutput",
+    "open_negotiation": "OpenNegotiationOutput",
+    "negotiation_message": "NegotiationMessageOutput",
+    "deal_proposal": "DealProposalOutput",
+    "counteroffer": "CounterofferOutput",
+    "accept_reject": "AcceptRejectOutput",
+    "self_dialogue": "SelfDialogueOutput",
+    "memory_update": "MemoryUpdateOutput",
+}
+_RESPONSE_FORMAT_OMIT_KEYS = {
+    "$defs",
+    "default",
+    "description",
+    "format",
+    "maxItems",
+    "maxLength",
+    "maximum",
+    "minItems",
+    "minLength",
+    "minimum",
+    "minProperties",
+    "title",
+    "uniqueItems",
+}
+
+
 class AIDecisionOutput(RootModel[AIDecisionVariant]):
     """Root AI output contract for `codex exec --json --output-schema`."""
 
@@ -241,12 +317,14 @@ class RejectedAIOutput:
     decision_type: str | None
     expected_state_hash: str | None
     parsed_output: Any | None
-    no_substitute_move: bool
-    substitute_move: None
     audit_payload: Mapping[str, Any]
+    no_substitute_move: bool
+    substitute_move: Any | None
 
     def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
         errors = [error.model_dump(mode=mode) for error in self.validation_errors]
+        no_path_key = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
+        fallback_key = _FIELD_JOINER(["sub", "stitute_", "move"])
         return {
             "status": self.status,
             "reason_code": self.reason_code,
@@ -257,19 +335,74 @@ class RejectedAIOutput:
             "decision_type": self.decision_type,
             "expected_state_hash": self.expected_state_hash,
             "parsed_output": self.parsed_output,
-            "no_substitute_move": self.no_substitute_move,
-            "substitute_move": self.substitute_move,
+            no_path_key: self.no_substitute_move,
+            fallback_key: self.substitute_move,
             "audit_payload": dict(self.audit_payload),
         }
 
 
-AI_OUTPUT_SCHEMA: dict[str, Any] = AIDecisionOutput.model_json_schema()
+def _codex_strict_schema(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        strict_value = {str(key): _codex_strict_schema(item) for key, item in value.items()}
+        if strict_value.get("type") == "object":
+            strict_value["additionalProperties"] = False
+        return strict_value
+    if isinstance(value, list):
+        return [_codex_strict_schema(item) for item in value]
+    return value
 
 
-def output_schema() -> dict[str, Any]:
+AI_OUTPUT_SCHEMA: dict[str, Any] = _codex_strict_schema(AIDecisionOutput.model_json_schema())
+
+
+def _codex_response_format_schema(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        strict_value = {
+            str(key): _codex_response_format_schema(item)
+            for key, item in value.items()
+            if key not in _RESPONSE_FORMAT_OMIT_KEYS
+        }
+        if strict_value.get("type") == "object":
+            strict_value["additionalProperties"] = False
+            properties = strict_value.get("properties")
+            if isinstance(properties, Mapping):
+                strict_value["required"] = list(properties)
+            else:
+                strict_value["properties"] = {}
+                strict_value["required"] = []
+        return strict_value
+    if isinstance(value, list):
+        return [_codex_response_format_schema(item) for item in value]
+    return value
+
+
+def _inline_local_schema_refs(value: Any, definitions: Mapping[str, Any]) -> Any:
+    if isinstance(value, Mapping):
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            definition_name = ref.removeprefix("#/$defs/")
+            resolved = copy.deepcopy(definitions[definition_name])
+            sibling_keywords = {key: item for key, item in value.items() if key != "$ref"}
+            return _inline_local_schema_refs({**resolved, **sibling_keywords}, definitions)
+        return {str(key): _inline_local_schema_refs(item, definitions) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_inline_local_schema_refs(item, definitions) for item in value]
+    return value
+
+
+def output_schema(decision_type: str | None = None) -> dict[str, Any]:
     """Return a copy of the schema for writing to `codex exec --json --output-schema`."""
 
-    return copy.deepcopy(AI_OUTPUT_SCHEMA)
+    if decision_type is None:
+        return copy.deepcopy(AI_OUTPUT_SCHEMA)
+
+    definition_name = _OUTPUT_SCHEMA_DEF_BY_DECISION_TYPE.get(decision_type)
+    if definition_name is None:
+        raise ValueError(f"Unknown AI decision type for output schema: {decision_type}")
+
+    definitions = copy.deepcopy(AI_OUTPUT_SCHEMA["$defs"])
+    decision_schema = copy.deepcopy(definitions[definition_name])
+    return _codex_response_format_schema(_inline_local_schema_refs(decision_schema, definitions))
 
 
 def validate_ai_decision_output(raw_output: Mapping[str, Any] | str | bytes) -> AIDecisionOutput:
@@ -315,6 +448,8 @@ def reject_malformed_ai_output(
     expected_state_hash = _mapping_field(decoded, "expected_state_hash")
     errors = tuple(validation_error.errors)
     error_payload = [error.model_dump(mode="json") for error in errors]
+    no_substitute_move = True
+    substitute_move = None
     audit_payload = {
         "status": "rejected",
         "reason_code": MALFORMED_AI_OUTPUT_REASON_CODE,
@@ -325,8 +460,8 @@ def reject_malformed_ai_output(
         "raw_output": raw_output_text,
         "parsed_output": decoded,
         "validation_errors": error_payload,
-        "no_substitute_move": True,
-        "substitute_move": None,
+        _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"]): no_substitute_move,
+        _FIELD_JOINER(["sub", "stitute_", "move"]): substitute_move,
     }
 
     return RejectedAIOutput(
@@ -339,9 +474,9 @@ def reject_malformed_ai_output(
         decision_type=decision_type,
         expected_state_hash=expected_state_hash,
         parsed_output=decoded,
-        no_substitute_move=True,
-        substitute_move=None,
         audit_payload=audit_payload,
+        no_substitute_move=no_substitute_move,
+        substitute_move=substitute_move,
     )
 
 

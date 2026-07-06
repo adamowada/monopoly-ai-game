@@ -35,6 +35,7 @@ from app.ai.orchestrator import (
     CodexExecRunner,
     CodexExecTimeoutError,
     CodexSubprocessRunner,
+    DEFAULT_AI_SCHEMA_FILE,
     build_codex_exec_command,
     build_prompt,
     parse_codex_jsonl_events,
@@ -366,7 +367,10 @@ def decision_request(fixture: OrchestratorFixture) -> CodexExecAIDecisionRequest
 
 def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) -> None:
     evidence = "Codex exec command forces no approval prompts"
-    schema_path = write_ai_output_schema_file(tmp_path / "agent_decision.schema.json")
+    schema_path = write_ai_output_schema_file(
+        tmp_path / "agent_decision.schema.json",
+        decision_type="action_decision",
+    )
     sandbox_dir = tmp_path / "ai-sandbox"
     last_message_path = tmp_path / "last-message.json"
 
@@ -378,30 +382,54 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
     )
 
     assert command[:4] == ["codex", "-a", "never", "exec"], evidence
+    assert "--skip-git-repo-check" in command
     assert "--json" in command
     assert "--ephemeral" in command
-    assert command[command.index("-c") + 1] == 'model_reasoning_effort="xhigh"'
+    assert command.count("--disable") == 3
+    assert "plugins" in command
+    assert "plugin_hooks" in command
+    assert "shell_snapshot" in command
+    config_values = [command[index + 1] for index, value in enumerate(command[:-1]) if value == "-c"]
+    assert "mcp_servers.robinhood-trading.enabled=false" in config_values
+    assert 'model_reasoning_effort="xhigh"' in config_values
     assert command[command.index("--output-schema") + 1] == str(schema_path)
     assert command[command.index("-C") + 1] == str(sandbox_dir)
     assert command[command.index("--output-last-message") + 1] == str(last_message_path)
     assert command[-1] == "-"
-    assert json.loads(schema_path.read_text(encoding="utf-8"))["title"] == "AIDecisionOutput"
+    written_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert written_schema["type"] == "object"
+    assert written_schema["properties"]["decision_type"]["const"] == "action_decision"
+    assert "oneOf" not in written_schema
+    assert "$defs" not in written_schema
+
+
+def test_default_schema_file_is_runtime_generated_not_checked_in_schema() -> None:
+    assert DEFAULT_AI_SCHEMA_FILE.parent.name == "runtime"
+    assert DEFAULT_AI_SCHEMA_FILE.name == "agent_decision.schema.json"
+
+
+def test_default_runtime_schema_file_is_ignored_by_git() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    runtime_schema_path = DEFAULT_AI_SCHEMA_FILE.resolve().relative_to(repo_root)
+
+    completed = subprocess.run(
+        ["git", "check-ignore", "-q", "--", runtime_schema_path.as_posix()],
+        cwd=repo_root,
+        check=False,
+    )
+
+    assert completed.returncode == 0
 
 
 def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_run(command: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def fake_popen(command: Sequence[str], **kwargs: Any) -> "_CompletedFakePopen":
         captured["command"] = list(command)
         captured["kwargs"] = kwargs
-        return subprocess.CompletedProcess(
-            args=list(command),
-            returncode=0,
-            stdout='{"type":"session_configured"}\n',
-            stderr="",
-        )
+        return _CompletedFakePopen(captured)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     result = CodexSubprocessRunner().run(
         ["codex", "exec", "--json", "-"],
@@ -411,10 +439,18 @@ def test_subprocess_wrapper_uses_stdin_stdout_timeout_and_json_mode(monkeypatch:
     )
 
     assert captured["command"] == ["codex", "exec", "--json", "-"]
-    assert captured["kwargs"]["input"] == "prompt on stdin"
-    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["stdin"] == subprocess.PIPE
+    assert captured["kwargs"]["stdout"] == subprocess.PIPE
+    assert captured["kwargs"]["stderr"] == subprocess.PIPE
     assert captured["kwargs"]["text"] is True
-    assert captured["kwargs"]["timeout"] == 3
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    if os.name == "nt":
+        assert captured["kwargs"]["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        assert captured["kwargs"]["start_new_session"] is True
+    assert captured["communicate"]["input"] == "prompt on stdin"
+    assert captured["communicate"]["timeout"] is None
+    assert captured["wait_timeout"] == 3
     assert result.stdout == '{"type":"session_configured"}\n'
     assert result.stderr == ""
     assert result.returncode == 0
@@ -429,17 +465,12 @@ def test_subprocess_wrapper_passes_configured_codex_home_and_preserves_environme
     monkeypatch.setenv("CODEX_HOME", "inherited-codex-home")
     monkeypatch.setenv("MONOPOLY_CODEX_HOME_TEST_ENV", "preserved")
 
-    def fake_run(command: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def fake_popen(command: Sequence[str], **kwargs: Any) -> "_CompletedFakePopen":
         captured["command"] = list(command)
         captured["kwargs"] = kwargs
-        return subprocess.CompletedProcess(
-            args=list(command),
-            returncode=0,
-            stdout='{"type":"session_configured"}\n',
-            stderr="",
-        )
+        return _CompletedFakePopen(captured)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     result = CodexSubprocessRunner(codex_home=configured_codex_home).run(
         ["codex", "exec", "--json", "-"],
@@ -453,6 +484,30 @@ def test_subprocess_wrapper_passes_configured_codex_home_and_preserves_environme
     assert env["CODEX_HOME"] == str(configured_codex_home)
     assert env["MONOPOLY_CODEX_HOME_TEST_ENV"] == "preserved"
     assert result.returncode == 0
+
+
+class _CompletedFakePopen:
+    returncode = 0
+
+    def __init__(self, captured: dict[str, Any]) -> None:
+        self._captured = captured
+
+    def communicate(self, input: str | None = None, timeout: float | None = None) -> tuple[str, str]:
+        self._captured["communicate"] = {"input": input, "timeout": timeout}
+        return '{"type":"session_configured"}\n', ""
+
+    def wait(self, timeout: float | None = None) -> int:
+        self._captured["wait_timeout"] = timeout
+        return self.returncode
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self._captured["killed"] = True
+
+    def terminate(self) -> None:
+        self._captured["terminated"] = True
 
 
 def test_prompt_construction_keeps_caller_context_without_building_stage_7_4_pack() -> None:

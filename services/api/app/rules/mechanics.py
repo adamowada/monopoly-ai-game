@@ -4,8 +4,10 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from app.rules.events import (
+    ActivePaymentSetPayload,
     ActiveAuctionSetPayload,
     BankInventorySetPayload,
+    DeckStateSetPayload,
     DiceRolledPayload,
     GameEvent,
     GameEventPayload,
@@ -153,6 +155,8 @@ def end_turn(state: GameState, player_id: str, event_id_prefix: str) -> GameStat
     current_phase = TurnPhase(state.turn.phase)
     if current_phase not in END_TURN_COMMIT_PHASES:
         raise IllegalRuleActionError(f"players cannot end a turn during {current_phase.value}")
+    if state.turn.consecutive_doubles > 0:
+        raise IllegalRuleActionError("players cannot end a turn while a doubles roll is pending")
 
     stream = _EventStream(event_id_prefix)
     if current_phase in END_TURN_ENTRY_PHASES:
@@ -287,6 +291,9 @@ def apply_card_effect(
     player_id: str,
     card_id: str,
     event_id_prefix: str,
+    *,
+    dice_total: int | None = None,
+    apply_card_rent: bool = True,
 ) -> GameState:
     _active_player_by_id(state, player_id)
     card = _card_data(card_id)
@@ -306,7 +313,29 @@ def apply_card_effect(
 
     if effect_type == "advance_to_nearest_utility":
         target = _nearest_space_of_type(state, player_id, "utility")
-        return _move_player_to_position(stream, state, player_id, target.position, collect_go_salary=False)
+        state = _move_player_to_position(stream, state, player_id, target.position, collect_go_salary=False)
+        if target.property_id is None:
+            return state
+        ownership = _property_ownership(state, target.property_id)
+        multiplier = _effect_int(effect, "rent_multiplier_if_owned", default=1)
+        if (
+            apply_card_rent
+            and ownership.owner_id is not None
+            and ownership.owner_id != player_id
+            and dice_total is not None
+        ):
+            if dice_total <= 0:
+                raise IllegalRuleActionError("dice total must be positive for utility card rent")
+            rent = dice_total * multiplier
+            state = _pay_card_rent_or_create_debt(
+                stream,
+                state,
+                debtor_id=player_id,
+                creditor_id=ownership.owner_id,
+                amount=rent,
+                reason=f"card_rent:{target.property_id}",
+            )
+        return state
 
     if effect_type == "advance_to_nearest_railroad":
         target = _nearest_space_of_type(state, player_id, "railroad")
@@ -315,11 +344,17 @@ def apply_card_effect(
             return state
         ownership = _property_ownership(state, target.property_id)
         multiplier = _effect_int(effect, "rent_multiplier_if_owned", default=1)
-        if ownership.owner_id is not None and ownership.owner_id != player_id:
+        if apply_card_rent and ownership.owner_id is not None and ownership.owner_id != player_id:
             rent = calculate_rent(state, target.property_id) * multiplier
             if rent > 0:
-                state = _adjust_cash(stream, state, player_id, -rent)
-                state = _adjust_cash(stream, state, ownership.owner_id, rent)
+                state = _pay_card_rent_or_create_debt(
+                    stream,
+                    state,
+                    debtor_id=player_id,
+                    creditor_id=ownership.owner_id,
+                    amount=rent,
+                    reason=f"card_rent:{target.property_id}",
+                )
         return state
 
     if effect_type == "collect_from_bank":
@@ -332,7 +367,8 @@ def apply_card_effect(
         player = _player_by_id(state, player_id)
         if card_id in player.get_out_of_jail_card_ids:
             raise IllegalRuleActionError(f"{player_id} already holds {card_id}")
-        return _set_jail_cards(stream, state, player_id, (*player.get_out_of_jail_card_ids, card_id))
+        state = _set_jail_cards(stream, state, player_id, (*player.get_out_of_jail_card_ids, card_id))
+        return _remove_card_from_deck_discard(stream, state, card_id)
 
     if effect_type == "move_relative":
         player = _player_by_id(state, player_id)
@@ -415,7 +451,8 @@ def use_get_out_of_jail_card(
     stream = _EventStream(event_id_prefix)
     state = _set_jail_cards(stream, state, player_id, remaining_cards)
     state = _set_jail(stream, state, player_id, in_jail=False, jail_turns=0)
-    return _set_consecutive_doubles(stream, state, 0)
+    state = _set_consecutive_doubles(stream, state, 0)
+    return _return_card_to_deck_discard(stream, state, card_id)
 
 
 def mortgage_property(
@@ -707,8 +744,11 @@ def declare_bankruptcy(
         for ownership in owned_properties:
             state = _set_property_owner(stream, state, ownership.property_id, creditor_id)
 
-    if player.get_out_of_jail_card_ids:
+    held_jail_cards = player.get_out_of_jail_card_ids
+    if held_jail_cards:
         state = _set_jail_cards(stream, state, player_id, ())
+        for card_id in held_jail_cards:
+            state = _return_card_to_deck_discard(stream, state, card_id)
     if player.in_jail:
         state = _set_jail(stream, state, player_id, in_jail=False, jail_turns=0)
     return stream.apply(
@@ -799,6 +839,35 @@ def _set_consecutive_doubles(stream: _EventStream, state: GameState, count: int)
     )
 
 
+def _pay_card_rent_or_create_debt(
+    stream: _EventStream,
+    state: GameState,
+    *,
+    debtor_id: str,
+    creditor_id: str,
+    amount: int,
+    reason: str,
+) -> GameState:
+    debtor = _player_by_id(state, debtor_id)
+    if debtor.cash < amount:
+        return stream.apply(
+            state,
+            "ACTIVE_PAYMENT_SET",
+            ActivePaymentSetPayload(
+                active=True,
+                debtor_id=debtor_id,
+                creditor_id=creditor_id,
+                amount_owed=amount,
+                amount_paid=0,
+                reason=reason,
+                negotiation_allowed=True,
+            ),
+        )
+
+    state = _adjust_cash(stream, state, debtor_id, -amount)
+    return _adjust_cash(stream, state, creditor_id, amount)
+
+
 def _set_property_owner(
     stream: _EventStream,
     state: GameState,
@@ -875,6 +944,25 @@ def _set_active_auction(
     )
 
 
+def _set_deck_state(
+    stream: _EventStream,
+    state: GameState,
+    *,
+    deck: str,
+    draw_pile: tuple[str, ...],
+    discard_pile: tuple[str, ...],
+) -> GameState:
+    return stream.apply(
+        state,
+        "DECK_STATE_SET",
+        DeckStateSetPayload(
+            deck=cast(Any, deck),
+            draw_pile=draw_pile,
+            discard_pile=discard_pile,
+        ),
+    )
+
+
 def _move_player_to_position(
     stream: _EventStream,
     state: GameState,
@@ -889,6 +977,40 @@ def _move_player_to_position(
     if should_collect_go:
         state = _adjust_cash(stream, state, player_id, GO_SALARY)
     return state
+
+
+def _remove_card_from_deck_discard(stream: _EventStream, state: GameState, card_id: str) -> GameState:
+    card = _card_data(card_id)
+    deck_state = _deck_state_for_card(state, card)
+    if card_id not in deck_state.discard_pile:
+        return state
+    return _set_deck_state(
+        stream,
+        state,
+        deck=card.deck,
+        draw_pile=deck_state.draw_pile,
+        discard_pile=tuple(current_card_id for current_card_id in deck_state.discard_pile if current_card_id != card_id),
+    )
+
+
+def _return_card_to_deck_discard(stream: _EventStream, state: GameState, card_id: str) -> GameState:
+    card = _card_data(card_id)
+    deck_state = _deck_state_for_card(state, card)
+    if card_id in deck_state.draw_pile or card_id in deck_state.discard_pile:
+        return state
+    return _set_deck_state(
+        stream,
+        state,
+        deck=card.deck,
+        draw_pile=deck_state.draw_pile,
+        discard_pile=(*deck_state.discard_pile, card_id),
+    )
+
+
+def _deck_state_for_card(state: GameState, card: CardData):
+    if card.deck == "chance":
+        return state.decks.chance
+    return state.decks.community_chest
 
 
 def _active_player_by_id(state: GameState, player_id: str) -> PlayerState:

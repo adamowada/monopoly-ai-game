@@ -4,10 +4,9 @@
       "additionalProperties": false,
       "properties": {
         "payload": {
-          "additionalProperties": true,
-          "description": "Game action payload to validate before mutation.",
+          "description": "JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
           "title": "Payload",
-          "type": "object"
+          "type": "string"
         },
         "type": {
           "description": "Game action type selected by the AI.",
@@ -274,10 +273,9 @@
           "type": "string"
         },
         "terms": {
-          "additionalProperties": true,
-          "minProperties": 1,
+          "description": "Structured counteroffer terms encoded as a JSON object string by Codex.",
           "title": "Terms",
-          "type": "object"
+          "type": "string"
         }
       },
       "required": [
@@ -375,10 +373,9 @@
           "type": "array"
         },
         "terms": {
-          "additionalProperties": true,
-          "minProperties": 1,
+          "description": "Structured deal terms encoded as a JSON object string by Codex.",
           "title": "Terms",
-          "type": "object"
+          "type": "string"
         }
       },
       "required": [
@@ -472,9 +469,9 @@
           "type": "integer"
         },
         "metadata": {
-          "additionalProperties": true,
+          "description": "JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
           "title": "Metadata",
-          "type": "object"
+          "type": "string"
         },
         "visibility": {
           "enum": [
@@ -569,9 +566,9 @@
           "type": "string"
         },
         "metadata": {
-          "additionalProperties": true,
+          "description": "JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
           "title": "Metadata",
-          "type": "object"
+          "type": "string"
         },
         "recipient_player_id": {
           "anyOf": [
@@ -654,9 +651,9 @@
       "additionalProperties": false,
       "properties": {
         "context": {
-          "additionalProperties": true,
+          "description": "JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
           "title": "Context",
-          "type": "object"
+          "type": "string"
         },
         "participant_player_ids": {
           "items": {
