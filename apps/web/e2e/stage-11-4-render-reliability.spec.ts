@@ -129,7 +129,7 @@ test("stage-11-4-render-reliability: board panels property management and AI aud
   await expect(contracts).toContainText("Active contracts");
   await expect(negotiation).toContainText("Negotiation inbox");
   await expect(aiAudit).toBeVisible();
-  await expect(aiAudit).toContainText("AI audit");
+  await expect(aiAudit).toContainText("AI notebook");
 
   expect(submittedActions).toContain("Roll dice");
   expect(submittedActions).toContain("End turn");

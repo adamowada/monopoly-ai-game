@@ -56,10 +56,10 @@ export function RejectedActionAuditView({ records }: RejectedActionAuditViewProp
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 id="rejected-actions-title" className="text-base font-semibold text-neutral-950">
-            Rejected action audit
+            Rule rulings
           </h2>
           <p className="mt-2 text-sm text-neutral-600">
-            Invalid submissions stay separate from accepted game events and snapshots.
+            Rejected moves stay separate from accepted table events.
           </p>
         </div>
         <div className="flex items-center gap-2 text-sm text-neutral-600">

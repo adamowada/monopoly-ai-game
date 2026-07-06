@@ -27,7 +27,7 @@ test("renders a 40-space board and updates token position after mocked state mov
   await expect(board).toContainText("Monopoly 2.0");
   await expect(board.getByRole("img", { name: "Chance deck art" })).toBeVisible();
   await expect(board.getByRole("img", { name: "Community Chest deck art" })).toBeVisible();
-  await expect(page.locator("[data-space-art]")).toHaveCount(40);
+  await expect(board.locator("[data-space-art]")).toHaveCount(40);
   await expect(page.locator('[data-board-space][data-space-index="0"]')).toContainText("GO");
   await expect(page.locator('[data-board-space][data-space-index="39"]')).toContainText("Boardwalk");
   await expect(page.getByLabel("Ada token at GO, position 0")).toBeVisible();

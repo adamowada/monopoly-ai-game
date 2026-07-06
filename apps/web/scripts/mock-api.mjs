@@ -572,7 +572,7 @@ function configureAiAuditSeed(game) {
         active_player_id: game.players[0]?.id ?? null,
         inspected_player_id: player.id,
         legal_action_count: 2,
-        note: "Private local AI audit for server-owned decisions, memory, self-dialogue, and rejected outputs.",
+        note: "Private local AI notebook for decisions, memory, self-dialogue, and rejected moves.",
       },
       raw_output:
         "{\"type\":\"session_configured\",\"model\":\"codex\"}\n" +

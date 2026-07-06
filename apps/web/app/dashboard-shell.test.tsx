@@ -64,7 +64,7 @@ function renderDashboard(rejectedActions: RejectedActionRecord[] = []) {
 }
 
 describe("DashboardShell", () => {
-  it("renders the operational app shell with backend health and tier records", () => {
+  it("renders the tabletop app shell with table connection and area records", () => {
     renderDashboard();
 
     expect(
@@ -76,26 +76,27 @@ describe("DashboardShell", () => {
 
     const navigation = screen.getAllByRole("navigation", { name: "Table navigation" })[0];
     expect(within(navigation).getByRole("link", { name: /Overview/ })).toHaveAttribute("href", "#overview");
-    expect(within(navigation).getByRole("link", { name: /Tier health/ })).toHaveAttribute("href", "#tier-health");
-    expect(within(navigation).getByRole("link", { name: /Rejected actions/ })).toHaveAttribute(
+    expect(within(navigation).getByRole("link", { name: /Table check/ })).toHaveAttribute("href", "#table-check");
+    expect(within(navigation).getByRole("link", { name: /Rulings/ })).toHaveAttribute(
       "href",
-      "#rejected-actions",
+      "#rulings",
     );
 
-    const healthStatus = screen.getByRole("status", { name: "Backend health" });
-    expect(healthStatus).toHaveTextContent("ok");
-    expect(healthStatus).toHaveTextContent("phase-1-stage-1.3");
-    expect(healthStatus).toHaveTextContent("test");
+    const healthStatus = screen.getByRole("status", { name: "Table connection" });
+    expect(healthStatus).toHaveTextContent("Ready");
+    expect(healthStatus).toHaveTextContent("Rules referee");
+    expect(healthStatus).toHaveTextContent("Move validation ready");
+    expect(healthStatus).toHaveTextContent("Local table");
 
-    expect(screen.getByRole("row", { name: /FastAPI service ok phase-1-stage-1.3/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Next.js app ready Game table shell/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Postgres configured compose service/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Rules referee ready Move validation/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Game board ready Board and controls/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Save data ready Game persistence/ })).toBeInTheDocument();
   });
 
-  it("mounts the rejected action audit view inside the app shell", () => {
+  it("mounts the rule rulings view inside the app shell", () => {
     renderDashboard([rejectedAction]);
 
-    expect(screen.getByRole("heading", { level: 2, name: "Rejected action audit" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Rule rulings" })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /illegal_action START_TURN BUY_PROPERTY/ })).toBeInTheDocument();
   });
 });

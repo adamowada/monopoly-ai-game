@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PROPERTIES } from "@monopoly-ai-game/schemas";
 
 import { GamePlaySurface } from "./game-play-surface";
 import { PropertyManagementPanel } from "./property-management";
@@ -344,10 +345,12 @@ describe("PropertyManagementPanel", () => {
   });
 
   it("shows Property detail, Bank inventory, and Monopoly groups from static data plus state", () => {
-    renderPanel();
+    const { container } = renderPanel();
 
     const detail = screen.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
     expect(detail).toHaveTextContent("Property detail");
+    expect(within(detail).getByRole("img", { name: "Mediterranean courtyard motif" })).toBeInTheDocument();
+    expect(container.querySelectorAll("[data-property-art]")).toHaveLength(PROPERTIES.length);
     expect(detail).toHaveTextContent("Brown");
     expect(detail).toHaveTextContent("Price $60");
     expect(detail).toHaveTextContent("Mortgage value $30");

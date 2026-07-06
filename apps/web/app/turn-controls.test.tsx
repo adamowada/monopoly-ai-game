@@ -506,8 +506,8 @@ describe("GamePlaySurface turn controls", () => {
 
     expect(await screen.findByLabelText("Ada token at Chance, position 7")).toBeVisible();
     const activePlayer = screen.getByRole("region", { name: "Active player" });
-    expect(within(activePlayer).getByText("Position")).toBeInTheDocument();
-    expect(within(activePlayer).getByText("7")).toBeInTheDocument();
+    expect(within(activePlayer).getByText("Space")).toBeInTheDocument();
+    expect(within(activePlayer).getByText("Chance (7)")).toBeInTheDocument();
     const log = screen.getByRole("region", { name: "Game log" });
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
     expect(within(log).getByText(/TOKEN_MOVED/)).toBeInTheDocument();
@@ -617,7 +617,7 @@ describe("GamePlaySurface turn controls", () => {
 
     const controls = await screen.findByRole("region", { name: "Turn controls" });
     expect(within(controls).getByRole("button", { name: "End turn" })).toBeDisabled();
-    expect(within(controls).getByText("Loading legal actions")).toBeInTheDocument();
+    expect(within(controls).getByText("Loading moves")).toBeInTheDocument();
 
     resolveLegalActions({
       game_id: gameId,

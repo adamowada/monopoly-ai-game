@@ -25,7 +25,7 @@ test("user can inspect AI audit records for profiles, decisions, memory, retriev
 
   const panel = page.getByRole("region", { name: "AI audit" });
   await expect(panel).toBeVisible();
-  await expect(panel).toContainText("Private local AI audit");
+  await expect(panel).toContainText("Private local AI notebook");
 
   await expect(panel).toContainText("AI profile");
   await expect(panel).toContainText("Grace audit profile");

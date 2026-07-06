@@ -4,9 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   BadgeCheck,
+  Brain,
   Blocks,
   Database,
-  FlaskConical,
   Gamepad2,
   RefreshCw,
   Server,
@@ -30,10 +30,10 @@ type DashboardShellProps = {
 const navigation = [
   { name: "Overview", href: "#overview", icon: Activity },
   { name: "Game setup", href: "#game-setup", icon: Gamepad2 },
-  { name: "Tier health", href: "#tier-health", icon: BadgeCheck },
-  { name: "Rejected actions", href: "#rejected-actions", icon: ShieldAlert },
-  { name: "Workspace", href: "#workspace", icon: Blocks },
-  { name: "Cutoffs", href: "#game-setup", icon: Settings2 },
+  { name: "Table check", href: "#table-check", icon: BadgeCheck },
+  { name: "Rulings", href: "#rulings", icon: ShieldAlert },
+  { name: "Table areas", href: "#table-areas", icon: Blocks },
+  { name: "House rules", href: "#game-setup", icon: Settings2 },
 ];
 
 const workspaceRows = [
@@ -44,15 +44,15 @@ const workspaceRows = [
     icon: Gamepad2,
   },
   {
-    name: "AI audit",
+    name: "AI notebook",
     status: "Active",
-    detail: "AI decisions, memory, self-dialogue, and rejected outputs are inspectable from the game table.",
-    icon: FlaskConical,
+    detail: "AI players keep a private notebook for decisions, memory, dialogue, and rejected moves.",
+    icon: Brain,
   },
   {
     name: "Rules authority",
-    status: "Backend-owned",
-    detail: "The frontend displays backend state only; legality remains outside the web tier.",
+    status: "Referee-checked",
+    detail: "The local referee checks every move before the table state changes.",
     icon: ShieldAlert,
   },
 ];
@@ -113,30 +113,30 @@ function getTierRows(snapshot: HealthSnapshot) {
 
   return [
     {
-      tier: "FastAPI service",
-      status: backendOnline ? "ok" : "unavailable",
+      tier: "Rules referee",
+      status: backendOnline ? "ready" : "offline",
       tone: backendOnline ? "success" : "danger",
-      stage: backendOnline ? snapshot.health.stage : "health fetch failed",
-      environment: backendOnline ? snapshot.health.environment : snapshot.error,
-      record: backendOnline ? snapshot.health.database : "not verified",
+      stage: backendOnline ? "Move validation" : "Connection failed",
+      environment: backendOnline ? "Local table" : snapshot.error,
+      record: backendOnline ? "Ready for play" : "Not verified",
       icon: Server,
     },
     {
-      tier: "Next.js app",
+      tier: "Game board",
       status: "ready",
       tone: "info",
-      stage: "Game table shell",
+      stage: "Board and controls",
       environment: "local browser",
-      record: "App Router",
+      record: "Ready for play",
       icon: Activity,
     },
     {
-      tier: "Postgres",
-      status: backendOnline ? "configured" : "pending verification",
+      tier: "Save data",
+      status: backendOnline ? "ready" : "pending",
       tone: backendOnline ? "success" : "warning",
-      stage: "compose service",
-      environment: "local stack",
-      record: backendOnline ? snapshot.health.database : "awaiting API health",
+      stage: "Game persistence",
+      environment: "local database",
+      record: backendOnline ? snapshot.health.database : "awaiting referee",
       icon: Database,
     },
   ] as const;
@@ -189,7 +189,7 @@ export function DashboardShell({
             <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase text-teal-700" data-scaffold-stage="Phase 1 Stage 1.4">
+                  <p className="text-xs font-semibold uppercase text-teal-700">
                     Local tabletop build
                   </p>
                   <h1 className="mt-1 text-2xl font-semibold tracking-normal text-neutral-950">
@@ -224,30 +224,28 @@ export function DashboardShell({
                   </h2>
                   <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
                     Start a local table, choose human or AI seats, then play from the illustrated
-                    board with backend-owned legal actions, negotiations, contracts, and audit views.
+                    board with referee-checked moves, negotiations, contracts, and the AI notebook.
                   </p>
                 </div>
 
                 <div
                   role="status"
-                  aria-label="Backend health"
+                  aria-label="Table connection"
                   aria-live="polite"
                   className="rounded-md border border-neutral-200 bg-neutral-50 p-4"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-sm font-medium text-neutral-950">Backend health</p>
+                      <p className="text-sm font-medium text-neutral-950">Table connection</p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <StatusBadge tone={backendOnline ? "success" : "danger"}>
-                          {backendOnline ? snapshot.health.status : "unavailable"}
+                          {backendOnline ? "Ready" : "Unavailable"}
                         </StatusBadge>
-                        <span className="text-sm text-neutral-600">
-                          {backendOnline ? snapshot.health.service : "api"}
-                        </span>
+                        <span className="text-sm text-neutral-600">Rules referee</span>
                       </div>
                     </div>
                     <Button
-                      aria-label="Refresh backend health"
+                      aria-label="Refresh table connection"
                       disabled={healthQuery.isFetching}
                       onClick={() => {
                         void healthQuery.refetch();
@@ -263,21 +261,21 @@ export function DashboardShell({
 
                   <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                     <div>
-                      <dt className="text-xs font-medium uppercase text-neutral-500">Stage</dt>
+                      <dt className="text-xs font-medium uppercase text-neutral-500">Rules</dt>
                       <dd className="mt-1 text-neutral-950">
-                        {backendOnline ? snapshot.health.stage : "unverified"}
+                        {backendOnline ? "Move validation ready" : "Unverified"}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-xs font-medium uppercase text-neutral-500">Environment</dt>
+                      <dt className="text-xs font-medium uppercase text-neutral-500">Mode</dt>
                       <dd className="mt-1 text-neutral-950">
-                        {backendOnline ? snapshot.health.environment : "offline"}
+                        {backendOnline ? "Local table" : "Offline"}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-xs font-medium uppercase text-neutral-500">Database</dt>
+                      <dt className="text-xs font-medium uppercase text-neutral-500">Save data</dt>
                       <dd className="mt-1 text-neutral-950">
-                        {backendOnline ? snapshot.health.database : "not verified"}
+                        {backendOnline ? snapshot.health.database : "Not verified"}
                       </dd>
                     </div>
                     <div>
@@ -291,15 +289,15 @@ export function DashboardShell({
 
             <GameSetupPanel />
 
-            <section id="tier-health" aria-labelledby="tier-health-title" className="bg-[var(--color-page)]">
+            <section id="table-check" aria-labelledby="table-check-title" className="bg-[var(--color-page)]">
               <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                   <div>
-                    <h2 id="tier-health-title" className="text-base font-semibold text-neutral-950">
-                      Local services
+                    <h2 id="table-check-title" className="text-base font-semibold text-neutral-950">
+                      Table check
                     </h2>
                     <p className="mt-2 text-sm text-neutral-600">
-                      Fast local checks for the browser, API, and database behind the table.
+                      Fast local checks for the board, rules referee, and saved game state.
                     </p>
                   </div>
                 </div>
@@ -310,16 +308,16 @@ export function DashboardShell({
                       <thead className="bg-neutral-50 text-xs uppercase text-neutral-500">
                         <tr>
                           <th scope="col" className="px-4 py-3 font-semibold sm:px-6">
-                            Tier
+                            Area
                           </th>
                           <th scope="col" className="px-4 py-3 font-semibold">
                             Status
                           </th>
                           <th scope="col" className="px-4 py-3 font-semibold">
-                            Stage
+                            Role
                           </th>
                           <th scope="col" className="px-4 py-3 font-semibold">
-                            Environment
+                            Mode
                           </th>
                           <th scope="col" className="px-4 py-3 font-semibold">
                             Record
@@ -351,7 +349,7 @@ export function DashboardShell({
             </section>
 
             <section
-              id="rejected-actions"
+              id="rulings"
               aria-labelledby="rejected-actions-title"
               className="border-t border-neutral-200 bg-[var(--color-page)]"
             >
@@ -360,18 +358,18 @@ export function DashboardShell({
               </div>
             </section>
 
-            <section id="workspace" aria-labelledby="workspace-title" className="border-t border-neutral-200 bg-white">
+            <section id="table-areas" aria-labelledby="workspace-title" className="border-t border-neutral-200 bg-white">
               <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8">
                 <div>
                   <h2 id="workspace-title" className="text-base font-semibold text-neutral-950">
-                    Table regions
+                    Table areas
                   </h2>
                   <div className="mt-5 grid gap-3 md:grid-cols-3">
                     {workspaceRows.map((item) => (
                       <article key={item.name} className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
                         <div className="flex items-start justify-between gap-3">
                           <item.icon aria-hidden="true" className="size-5 text-teal-700" />
-                          <StatusBadge tone={item.status === "Backend-owned" ? "info" : "neutral"}>
+                          <StatusBadge tone={item.status === "Referee-checked" ? "info" : "neutral"}>
                             {item.status}
                           </StatusBadge>
                         </div>
@@ -383,10 +381,10 @@ export function DashboardShell({
                 </div>
 
                 <aside className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
-                  <h3 className="text-sm font-semibold text-neutral-950">Stage boundary</h3>
+                  <h3 className="text-sm font-semibold text-neutral-950">Local table rules</h3>
                   <p className="mt-2 text-sm leading-6 text-neutral-600">
-                    Games run locally only. The backend referee owns legality, while the browser keeps
-                    the board, action controls, negotiations, contracts, and audit records visible.
+                    Games run locally only. The rules referee checks each move while the board,
+                    action controls, negotiations, contracts, and AI notebook stay visible.
                   </p>
                 </aside>
               </div>

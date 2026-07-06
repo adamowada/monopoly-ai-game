@@ -520,10 +520,10 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 id="ai-audit-title" className="text-base font-semibold text-neutral-950">
-              AI audit
+              AI notebook
             </h2>
             <p className="mt-1 text-sm text-neutral-600">
-              Private local AI audit for server-owned decisions, memory, self-dialogue, and rejected outputs.
+              Private local AI notebook for decisions, memory, self-dialogue, and rejected moves.
             </p>
           </div>
           <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
@@ -536,12 +536,12 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
           Parsed output, Validation errors, and accepted or rejected status.
         </p>
         <p className="mt-2 text-xs text-neutral-600">
-          Audit sections: AI profile, Decision history, Self-dialogue timeline, Memory entries, Retrieved context records,
+          Notebook sections: AI profile, Decision history, Self-dialogue timeline, Memory entries, Retrieved context records,
           Rejected AI outputs, Validation errors.
         </p>
       </div>
 
-      {hasError ? <ErrorNote text="AI audit records are unavailable from the API." /> : null}
+      {hasError ? <ErrorNote text="AI notebook records are unavailable." /> : null}
 
       <ProfilesView game={game} isLoading={profilesQuery.isLoading} profiles={profiles} />
 
@@ -588,7 +588,7 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
             <h3 id="ai-memory-title" className="text-sm font-semibold text-neutral-950">
               Memory entries
             </h3>
-            <p className="mt-1 text-xs text-neutral-600">All local memory records loaded for this private audit view.</p>
+            <p className="mt-1 text-xs text-neutral-600">All local memory records loaded for this private notebook.</p>
           </div>
           <Database aria-hidden="true" className="size-4 text-violet-700" />
         </div>

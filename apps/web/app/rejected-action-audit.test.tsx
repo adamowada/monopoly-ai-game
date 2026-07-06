@@ -36,7 +36,7 @@ describe("RejectedActionAuditView", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: "Rejected action audit",
+        name: "Rule rulings",
       }),
     ).toBeInTheDocument();
 

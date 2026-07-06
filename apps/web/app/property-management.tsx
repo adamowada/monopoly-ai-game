@@ -13,9 +13,11 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import {
+  BOARD_SPACES,
   PROPERTIES,
   PROPERTIES_BY_ID,
   PROPERTY_GROUPS,
+  type StaticDataBoardSpace,
   type StaticDataProperty,
   type StaticDataPropertyGroup,
 } from "@monopoly-ai-game/schemas";
@@ -24,6 +26,7 @@ import { Button } from "../components/ui/button";
 import type { GameStateResponse, LegalAction } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
 import { cn } from "../lib/ui";
+import { SPACE_ART_BY_ID, SpaceMotif } from "./board-art";
 
 const MANAGEMENT_ACTION_TYPES = [
   "BUY_HOUSE",
@@ -64,6 +67,9 @@ export type PropertyManagementPanelProps = {
 };
 
 const groupById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group]));
+const propertySpaceById = new Map<string, StaticDataBoardSpace>(
+  BOARD_SPACES.flatMap((space) => (space.property_id ? [[space.property_id, space] as const] : [])),
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -434,6 +440,8 @@ function PropertyDetailCard({
   const mortgageAction = actions.MORTGAGE_PROPERTY;
   const unmortgageAction = actions.UNMORTGAGE_PROPERTY;
   const hasAnyAction = Boolean(buyAction ?? sellAction ?? mortgageAction ?? unmortgageAction);
+  const boardSpace = propertySpaceById.get(property.id);
+  const art = boardSpace ? SPACE_ART_BY_ID[boardSpace.id] : null;
 
   return (
     <article
@@ -447,11 +455,20 @@ function PropertyDetailCard({
           <h4 className="mt-1 text-sm font-semibold text-neutral-950">{property.name}</h4>
           <p className="mt-1 text-xs font-medium text-neutral-600">{propertyGroupName(property)}</p>
         </div>
-        <span
-          aria-hidden="true"
-          className="mt-1 size-4 shrink-0 rounded-sm border border-neutral-300"
-          style={{ backgroundColor: groupById.get(property.group)?.color ?? "#d4d4d4" }}
-        />
+        {art ? (
+          <div
+            data-property-art=""
+            className="grid size-14 shrink-0 place-items-center rounded border border-neutral-200 bg-neutral-50 p-1"
+          >
+            <SpaceMotif art={art} className="size-12" />
+          </div>
+        ) : (
+          <span
+            aria-hidden="true"
+            className="mt-1 size-4 shrink-0 rounded-sm border border-neutral-300"
+            style={{ backgroundColor: groupById.get(property.group)?.color ?? "#d4d4d4" }}
+          />
+        )}
       </div>
 
       <div className="mt-3 grid gap-1.5 text-xs text-neutral-700">
@@ -530,11 +547,11 @@ export function PropertyManagementPanel({
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Property management</h2>
           <p className="mt-1 text-xs text-neutral-600">
-            Mortgage, building, and sale controls appear only when /legal-actions returns them for a property.
+            Mortgage, building, and sale controls appear only when the rules referee allows them.
           </p>
         </div>
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
-          {managementLegalActions.length} management actions
+          {managementLegalActions.length} available moves
         </span>
       </div>
 

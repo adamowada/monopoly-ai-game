@@ -1,5 +1,6 @@
 "use client";
 
+import { BOARD_SPACES } from "@monopoly-ai-game/schemas";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -112,7 +113,9 @@ function playerCash(player: GameMetadata["players"][number]): string {
 }
 
 function playerPosition(player: GameMetadata["players"][number]): string {
-  return String(readNumber(player.state.position));
+  const position = readNumber(player.state.position);
+  const space = BOARD_SPACES[position];
+  return space ? `${space.name} (${position})` : String(position);
 }
 
 function turnRecord(snapshot: GameStateResponse | undefined): Record<string, unknown> | null {
@@ -123,6 +126,34 @@ function turnRecord(snapshot: GameStateResponse | undefined): Record<string, unk
 function activePhase(game: GameMetadata, snapshot: GameStateResponse | undefined): string {
   const phase = turnRecord(snapshot)?.phase;
   return typeof phase === "string" && phase ? phase : (game.current_phase ?? "Unassigned");
+}
+
+const phaseLabels: Record<string, string> = {
+  START_TURN: "Start turn",
+  PRE_ROLL_MANAGEMENT: "Manage properties",
+  ROLLING: "Rolling dice",
+  MOVING: "Moving token",
+  RESOLVE_SPACE: "Resolve space",
+  PURCHASE_OR_AUCTION: "Buy or auction",
+  AUCTION: "Auction",
+  NEGOTIATION_WINDOW: "Negotiation",
+  END_TURN: "End turn",
+};
+
+function formatTitleCase(value: string): string {
+  return value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatTurnPhase(phase: string): string {
+  return phaseLabels[phase] ?? formatTitleCase(phase);
+}
+
+function formatGameStatus(status: string): string {
+  return formatTitleCase(status);
+}
+
+function formatControllerType(type: string): string {
+  return type === "ai" ? "AI" : formatTitleCase(type);
 }
 
 function activePlayerFromState(
@@ -415,11 +446,11 @@ function ActivePlayerPanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Active player</h2>
-          <p className="mt-1 text-xs text-neutral-600">Current backend turn context.</p>
+          <p className="mt-1 text-xs text-neutral-600">Current turn at the table.</p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-200">
           <span aria-hidden="true" className="size-1.5 rounded-full bg-teal-600" />
-          {phase}
+          {formatTurnPhase(phase)}
         </span>
       </div>
 
@@ -430,14 +461,14 @@ function ActivePlayerPanel({
             <dd className="mt-1 font-medium text-neutral-950">{player.name}</dd>
           </div>
           <div>
-            <dt className="text-xs font-medium uppercase text-neutral-500">Type</dt>
+            <dt className="text-xs font-medium uppercase text-neutral-500">Seat</dt>
             <dd className="mt-1 inline-flex items-center gap-1.5 text-neutral-800">
               {player.controller_type === "ai" ? (
                 <Bot aria-hidden="true" className="size-3.5 text-purple-700" />
               ) : (
                 <UserRound aria-hidden="true" className="size-3.5 text-teal-700" />
               )}
-              {player.controller_type}
+              {formatControllerType(player.controller_type)}
             </dd>
           </div>
           <div>
@@ -445,7 +476,7 @@ function ActivePlayerPanel({
             <dd className="mt-1 font-medium text-neutral-950">{playerCash(player)}</dd>
           </div>
           <div>
-            <dt className="text-xs font-medium uppercase text-neutral-500">Position</dt>
+            <dt className="text-xs font-medium uppercase text-neutral-500">Space</dt>
             <dd className="mt-1 font-medium text-neutral-950">{playerPosition(player)}</dd>
           </div>
         </dl>
@@ -463,7 +494,7 @@ function PlayerTable({ game }: Readonly<{ game: GameMetadata }>) {
         <h2 id="players-title" className="text-sm font-semibold text-neutral-950">
           Players
         </h2>
-        <p className="mt-1 text-xs text-neutral-600">Seat order, type, color, position, and status.</p>
+        <p className="mt-1 text-xs text-neutral-600">Seat order, controller, token color, board space, and status.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-left text-xs">
@@ -473,13 +504,13 @@ function PlayerTable({ game }: Readonly<{ game: GameMetadata }>) {
                 Player
               </th>
               <th scope="col" className="px-3 py-2 font-semibold">
-                Type
+                Seat
               </th>
               <th scope="col" className="px-3 py-2 font-semibold">
                 Color
               </th>
               <th scope="col" className="px-3 py-2 font-semibold">
-                Pos
+                Space
               </th>
               <th scope="col" className="px-3 py-2 font-semibold">
                 Status
@@ -499,7 +530,7 @@ function PlayerTable({ game }: Readonly<{ game: GameMetadata }>) {
                       ) : (
                         <UserRound aria-hidden="true" className="size-3.5 text-teal-700" />
                       )}
-                      {player.controller_type}
+                      {formatControllerType(player.controller_type)}
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-neutral-700">
@@ -516,7 +547,7 @@ function PlayerTable({ game }: Readonly<{ game: GameMetadata }>) {
                   <td className="whitespace-nowrap px-3 py-3 text-neutral-700">
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-1 font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
                       <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-600" />
-                      {player.status}
+                      {formatGameStatus(player.status)}
                     </span>
                   </td>
                 </tr>
@@ -535,20 +566,20 @@ function GameDetails({ game, phase }: Readonly<{ game: GameMetadata; phase: stri
     <>
       <section aria-labelledby="game-details-title" className="rounded-md border border-neutral-200 bg-white p-4">
         <h2 id="game-details-title" className="text-sm font-semibold text-neutral-950">
-          Game details
+          Table details
         </h2>
         <dl className="mt-4 grid gap-3 text-sm">
           <div>
             <dt className="text-xs font-medium uppercase text-neutral-500">Status</dt>
-            <dd className="mt-1 text-neutral-950">{game.status}</dd>
+            <dd className="mt-1 text-neutral-950">{formatGameStatus(game.status)}</dd>
           </div>
           <div>
-            <dt className="text-xs font-medium uppercase text-neutral-500">Phase</dt>
-            <dd className="mt-1 text-neutral-950">{phase}</dd>
+            <dt className="text-xs font-medium uppercase text-neutral-500">Turn step</dt>
+            <dd className="mt-1 text-neutral-950">{formatTurnPhase(phase)}</dd>
           </div>
           <div>
-            <dt className="text-xs font-medium uppercase text-neutral-500">Seed</dt>
-            <dd className="mt-1 break-all text-neutral-950">{game.seed ?? "Generated by backend"}</dd>
+            <dt className="text-xs font-medium uppercase text-neutral-500">Setup seed</dt>
+            <dd className="mt-1 break-all text-neutral-950">{game.seed ?? "Generated locally"}</dd>
           </div>
         </dl>
       </section>
@@ -889,19 +920,19 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-neutral-950">Turn controls</h2>
-              <p className="mt-1 text-xs text-neutral-600">Only actions returned by /legal-actions are enabled.</p>
+              <p className="mt-1 text-xs text-neutral-600">Available moves update from the local rules referee.</p>
             </div>
             {legalActionsLoading ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
                 <Hourglass aria-hidden="true" className="size-3" />
-                Loading legal actions
+                Loading moves
               </span>
             ) : null}
           </div>
 
           {legalActionsQuery.isError ? (
             <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              Legal actions unavailable.
+              Available moves unavailable.
             </div>
           ) : null}
 

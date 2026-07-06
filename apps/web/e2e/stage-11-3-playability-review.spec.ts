@@ -256,6 +256,6 @@ test("stage-11-3-mixed-ai-playthrough: mixed human/AI players, Start auction Bid
   await expect(stepAiButton).toBeEnabled();
   await stepAiButton.click();
   await expect(auction).toContainText(/Current high bidder/);
-  await expect(aiAudit).toContainText("AI audit");
+  await expect(aiAudit).toContainText("AI notebook");
   await expect(aiAudit).toContainText("Decision history");
 });

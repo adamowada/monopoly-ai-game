@@ -18,8 +18,8 @@ test("creates a configured game and navigates to the board shell", async ({ page
   expect(page.url()).toContain("/games/");
   await expect(page.getByRole("heading", { level: 1, name: /Game table/ })).toBeVisible();
   await expect(page.getByText("stage-5-e2e-seed")).toBeVisible();
-  await expect(page.getByRole("row", { name: /Ada human #0f766e/ })).toBeVisible();
-  await expect(page.getByRole("row", { name: /Grace ai #7c3aed/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Ada Human #0f766e GO \(0\)/ })).toBeVisible();
+  await expect(page.getByRole("row", { name: /Grace AI #7c3aed GO \(0\)/ })).toBeVisible();
   await expect(page.getByText("Max rounds: 4")).toBeVisible();
   await expect(page.getByText("Proposal limit/player: 3")).toBeVisible();
 });

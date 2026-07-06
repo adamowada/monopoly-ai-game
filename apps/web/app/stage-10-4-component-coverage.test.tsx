@@ -809,7 +809,7 @@ describe("Stage 10.4 frontend component coverage", () => {
     renderWithQueryClient(<GamePlaySurface apiBaseUrl={apiBaseUrl} gameId={gameId} initialGame={gameFixture()} />, fetchMock);
 
     const TurnControls = await screen.findByRole("region", { name: "Turn controls" });
-    expect(within(TurnControls).getByText("Loading legal actions")).toBeInTheDocument();
+    expect(within(TurnControls).getByText("Loading moves")).toBeInTheDocument();
     expect(within(TurnControls).getByRole("button", { name: "End turn" })).toBeDisabled();
 
     legalActionsDeferred.resolve({
@@ -845,7 +845,7 @@ describe("Stage 10.4 frontend component coverage", () => {
     expect(screen.getByLabelText("Ada token at GO, position 0")).toBeInTheDocument();
 
     render(<RejectedActionAuditView records={[rejectedActionFixture()]} />);
-    expect(screen.getByRole("heading", { level: 2, name: "Rejected action audit" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Rule rulings" })).toBeInTheDocument();
   });
 
   it("property management controls submit mortgage improvement payloads", () => {

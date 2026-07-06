@@ -248,7 +248,7 @@ test("completes a 5-player mixed human/fake-AI full-table browser round", async 
 
   await expectActivePlayer(page, "Ada");
   const audit = page.getByRole("region", { name: "AI audit" });
-  await expect(audit).toContainText("AI audit");
+  await expect(audit).toContainText("AI notebook");
   await expect(audit).toContainText("Decision history");
   await expect(audit).toContainText("ai_decision_id");
   await expect(audit).toContainText("Legal actions snapshot");

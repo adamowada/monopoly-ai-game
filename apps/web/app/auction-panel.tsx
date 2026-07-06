@@ -270,7 +270,7 @@ export function AuctionPanel({
             <h2 className="text-sm font-semibold text-neutral-950">Auction</h2>
           </div>
           <p className="mt-1 text-xs text-neutral-600">
-            Bid and pass controls appear only from /legal-actions for eligible bidders.
+            Bid and pass controls appear only when the rules referee allows them for eligible bidders.
           </p>
         </div>
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
