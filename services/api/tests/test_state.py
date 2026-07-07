@@ -5,6 +5,7 @@ import re
 import pytest
 from pydantic import ValidationError
 
+from app.rules.static_data import load_classic_monopoly_data
 from app.rules.state import (
     GameState,
     PlayerSetup,
@@ -114,11 +115,17 @@ def test_initial_game_state_contains_core_state_slots() -> None:
     assert all(ownership.houses == 0 for ownership in state.property_ownership)
     assert all(not ownership.hotel for ownership in state.property_ownership)
 
-    assert len(state.decks.chance.draw_pile) == 16
-    assert state.decks.chance.draw_pile[0] == "card_chance_advance_to_go"
+    data = load_classic_monopoly_data()
+    chance_card_ids = tuple(card.id for card in data.decks.chance)
+    community_chest_card_ids = tuple(card.id for card in data.decks.community_chest)
+
+    assert len(state.decks.chance.draw_pile) == len(chance_card_ids)
+    assert set(state.decks.chance.draw_pile) == set(chance_card_ids)
+    assert state.decks.chance.draw_pile != chance_card_ids
     assert state.decks.chance.discard_pile == ()
-    assert len(state.decks.community_chest.draw_pile) == 16
-    assert state.decks.community_chest.draw_pile[0] == "card_community_advance_to_go"
+    assert len(state.decks.community_chest.draw_pile) == len(community_chest_card_ids)
+    assert set(state.decks.community_chest.draw_pile) == set(community_chest_card_ids)
+    assert state.decks.community_chest.draw_pile != community_chest_card_ids
     assert state.decks.community_chest.discard_pile == ()
 
     assert state.bank_inventory.houses == 32
@@ -133,6 +140,24 @@ def test_initial_game_state_contains_core_state_slots() -> None:
     assert state.active_auction is None
     assert state.active_negotiation is None
     assert state.active_bankruptcy is None
+
+
+def test_initial_decks_are_seeded_deterministic_shuffles() -> None:
+    players = _player_setups(2)
+
+    state = create_initial_game_state(seed="seed-1", players=players, game_id="game-1")
+    identical_state = create_initial_game_state(seed="seed-1", players=players, game_id="game-1")
+    different_state = create_initial_game_state(seed="seed-2", players=players, game_id="game-1")
+
+    assert state.decks.chance.draw_pile == identical_state.decks.chance.draw_pile
+    assert state.decks.community_chest.draw_pile == identical_state.decks.community_chest.draw_pile
+    assert (
+        state.decks.chance.draw_pile,
+        state.decks.community_chest.draw_pile,
+    ) != (
+        different_state.decks.chance.draw_pile,
+        different_state.decks.community_chest.draw_pile,
+    )
 
 
 def test_game_state_serialization_round_trip_preserves_equality() -> None:

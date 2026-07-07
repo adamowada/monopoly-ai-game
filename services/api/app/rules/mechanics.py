@@ -982,13 +982,13 @@ def _move_player_to_position(
 def _remove_card_from_deck_discard(stream: _EventStream, state: GameState, card_id: str) -> GameState:
     card = _card_data(card_id)
     deck_state = _deck_state_for_card(state, card)
-    if card_id not in deck_state.discard_pile:
+    if card_id not in deck_state.draw_pile and card_id not in deck_state.discard_pile:
         return state
     return _set_deck_state(
         stream,
         state,
         deck=card.deck,
-        draw_pile=deck_state.draw_pile,
+        draw_pile=tuple(current_card_id for current_card_id in deck_state.draw_pile if current_card_id != card_id),
         discard_pile=tuple(current_card_id for current_card_id in deck_state.discard_pile if current_card_id != card_id),
     )
 
@@ -1002,8 +1002,8 @@ def _return_card_to_deck_discard(stream: _EventStream, state: GameState, card_id
         stream,
         state,
         deck=card.deck,
-        draw_pile=deck_state.draw_pile,
-        discard_pile=(*deck_state.discard_pile, card_id),
+        draw_pile=(*deck_state.draw_pile, card_id),
+        discard_pile=deck_state.discard_pile,
     )
 
 

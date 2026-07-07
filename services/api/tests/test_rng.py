@@ -3,13 +3,16 @@ from __future__ import annotations
 import pytest
 
 from app.rules.events import CardDrawnPayload, DeckShuffledPayload, DiceRolledPayload, GameEvent
+from app.rules.mechanics import apply_card_effect, send_player_to_jail, use_get_out_of_jail_card
 from app.rules.reducer import InvalidEventError, apply_event, replay_events
 from app.rules.rng import (
     generate_card_draw_event,
     generate_deck_shuffle_event,
     generate_dice_roll_event,
 )
-from app.rules.state import GameState, PlayerSetup, create_initial_game_state
+from app.rules.simulation import check_invariants
+from app.rules.static_data import load_classic_monopoly_data
+from app.rules.state import DeckCollectionState, DeckState, GameState, PlayerSetup, create_initial_game_state
 
 
 def _player_setups() -> tuple[PlayerSetup, ...]:
@@ -21,6 +24,32 @@ def _player_setups() -> tuple[PlayerSetup, ...]:
 
 def _initial_state(seed: str = "seed-1") -> GameState:
     return create_initial_game_state(seed=seed, players=_player_setups(), game_id="game-1")
+
+
+def _player(state: GameState, player_id: str):
+    return next(player for player in state.players if player.id == player_id)
+
+
+def _card_ids_for_deck(deck: str) -> tuple[str, ...]:
+    data = load_classic_monopoly_data()
+    cards = data.decks.chance if deck == "chance" else data.decks.community_chest
+    return tuple(card.id for card in cards)
+
+
+def _state_with_deck_draw_pile(
+    state: GameState,
+    deck: str,
+    draw_pile: tuple[str, ...],
+    discard_pile: tuple[str, ...] = (),
+) -> GameState:
+    deck_updates = state.decks.model_dump(mode="python")
+    deck_updates[deck] = DeckState(draw_pile=draw_pile, discard_pile=discard_pile)
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "decks": DeckCollectionState.model_validate(deck_updates),
+        }
+    )
 
 
 def _dice_sequence(seed: str, roll_count: int = 8) -> tuple[tuple[int, int], ...]:
@@ -80,9 +109,12 @@ def test_deck_shuffle_is_deterministic_and_preserves_membership() -> None:
     assert shuffled_state.rng.community_chest_shuffle_count == 0
 
 
-def test_card_draw_event_stores_drawn_card_and_reducer_moves_card_to_discard() -> None:
+def test_card_draw_event_stores_drawn_card_and_reducer_rotates_normal_card_to_bottom() -> None:
     state = _initial_state()
-    top_card_id = state.decks.community_chest.draw_pile[0]
+    top_card_id = "card_community_advance_to_go"
+    card_ids = _card_ids_for_deck("community_chest")
+    draw_pile = (top_card_id, *(card_id for card_id in card_ids if card_id != top_card_id))
+    state = _state_with_deck_draw_pile(state, "community_chest", draw_pile)
 
     event = generate_card_draw_event(state, "draw-1", "community_chest")
     payload = event.payload
@@ -93,10 +125,39 @@ def test_card_draw_event_stores_drawn_card_and_reducer_moves_card_to_discard() -
 
     next_state = apply_event(state, event)
 
-    assert next_state.decks.community_chest.draw_pile == state.decks.community_chest.draw_pile[1:]
-    assert next_state.decks.community_chest.discard_pile == (top_card_id,)
+    assert next_state.decks.community_chest.draw_pile == (*state.decks.community_chest.draw_pile[1:], top_card_id)
+    assert next_state.decks.community_chest.discard_pile == ()
     assert next_state.rng.community_chest_draw_count == 1
     assert next_state.rng.chance_draw_count == 0
+
+
+def test_get_out_of_jail_card_leaves_deck_while_held_and_returns_to_bottom_when_used() -> None:
+    card_id = "card_chance_get_out_of_jail"
+    card_ids = _card_ids_for_deck("chance")
+    draw_pile = (card_id, *(current_card_id for current_card_id in card_ids if current_card_id != card_id))
+    state = _state_with_deck_draw_pile(_initial_state(), "chance", draw_pile)
+
+    draw_event = generate_card_draw_event(state, "draw-jail-card", "chance")
+    drawn = apply_event(state, draw_event)
+
+    assert drawn.decks.chance.draw_pile == draw_pile[1:]
+    assert card_id not in drawn.decks.chance.discard_pile
+
+    held = apply_card_effect(drawn, "player-1", card_id, "hold-jail-card")
+
+    assert _player(held, "player-1").get_out_of_jail_card_ids == (card_id,)
+    assert card_id not in held.decks.chance.draw_pile
+    assert card_id not in held.decks.chance.discard_pile
+    check_invariants(held)
+
+    jailed = send_player_to_jail(held, "player-1", "send-to-jail")
+    used = use_get_out_of_jail_card(jailed, "player-1", card_id, "use-jail-card")
+
+    assert not _player(used, "player-1").in_jail
+    assert _player(used, "player-1").get_out_of_jail_card_ids == ()
+    assert used.decks.chance.draw_pile == (*draw_pile[1:], card_id)
+    assert used.decks.chance.discard_pile == ()
+    check_invariants(used)
 
 
 def test_dice_shuffle_and_card_events_replay_to_same_final_state_hash() -> None:

@@ -8,6 +8,7 @@ from typing import Literal, Self, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.rules.atomic import AtomicResolutionKind
+from app.rules.deterministic import deterministic_shuffle
 from app.rules.phases import TurnPhase
 from app.rules.static_data import load_classic_monopoly_data
 
@@ -260,13 +261,15 @@ def create_initial_game_state(
         PropertyOwnershipState(property_id=property_data.id)
         for property_data in data.properties
     )
+    chance_card_ids = tuple(card.id for card in data.decks.chance)
+    community_chest_card_ids = tuple(card.id for card in data.decks.community_chest)
     decks = DeckCollectionState(
         chance=DeckState(
-            draw_pile=tuple(card.id for card in data.decks.chance),
+            draw_pile=deterministic_shuffle(seed, "chance", 0, chance_card_ids),
             discard_pile=(),
         ),
         community_chest=DeckState(
-            draw_pile=tuple(card.id for card in data.decks.community_chest),
+            draw_pile=deterministic_shuffle(seed, "community_chest", 0, community_chest_card_ids),
             discard_pile=(),
         ),
     )
