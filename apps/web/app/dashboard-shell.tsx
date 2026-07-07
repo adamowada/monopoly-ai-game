@@ -27,7 +27,6 @@ export function DashboardShell({
               <Gamepad2 aria-hidden="true" className="size-6" />
             </span>
             <div>
-              <p className="text-xs font-black uppercase text-[#6f604c]">Local tabletop build</p>
               <h1 className="text-2xl font-black tracking-normal text-[#2f2418]">{title}</h1>
             </div>
           </div>

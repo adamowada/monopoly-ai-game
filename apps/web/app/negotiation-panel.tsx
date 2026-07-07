@@ -809,7 +809,6 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Negotiation inbox</h2>
-          <p className="mt-1 text-xs text-neutral-600">Deals, messages, and accept/reject outcomes are loaded from the API.</p>
         </div>
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
           <MessageSquareText aria-hidden="true" className="size-3" />
@@ -1014,12 +1013,6 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                   <p>round_number {selectedNegotiation.round_number}</p>
                   <p>participant_player_ids {selectedNegotiation.participant_player_ids.join(", ")}</p>
                 </TechnicalRecord>
-                {selectedNegotiation.status === "expired" ? (
-                  <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm font-medium text-neutral-700">
-                    Expired negotiation is visibly closed and cannot execute accept controls.
-                  </p>
-                ) : null}
-
                 {aiParticipants.length > 0 ? (
                   <section aria-label="AI negotiation controls" className="rounded-md border border-purple-200 bg-purple-50 p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -1206,17 +1199,6 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                             <p>validation_errors {deal.validation_errors.length}</p>
                           </TechnicalRecord>
 
-                          {deal.status === "rejected" ? (
-                            <p className="mt-3 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-700">
-                              Rejected deal is visibly closed and cannot execute accept controls.
-                            </p>
-                          ) : null}
-                          {deal.status === "expired" ? (
-                            <p className="mt-3 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-700">
-                              Expired deal is visibly closed and cannot execute accept controls.
-                            </p>
-                          ) : null}
-
                           {canExecute ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Button
@@ -1287,9 +1269,6 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="text-sm font-semibold text-neutral-950">Structured deal builder</h3>
-              <p className="mt-1 text-xs text-neutral-600">
-                Add executable terms as a draft, then submit them to the API for a proposed deal version.
-              </p>
             </div>
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-white px-2 py-1 text-xs font-medium text-neutral-600 ring-1 ring-inset ring-neutral-200">
               <BadgeDollarSign aria-hidden="true" className="size-3" />
@@ -1422,10 +1401,12 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
             </Button>
           </div>
 
-          <div className="mt-3 rounded-md border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
-            <p className="font-semibold text-neutral-950">Counteroffer</p>
-            <p className="mt-1">Parent deal {parentDealId ?? "none"}</p>
-          </div>
+          {parentDealId ? (
+            <div className="mt-3 rounded-md border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+              <span className="block font-semibold text-neutral-950">Counteroffer</span>
+              <span className="mt-1 block">Parent deal {parentDealId}</span>
+            </div>
+          ) : null}
         </section>
 
         <section aria-label="Contract preview" className="rounded-md border border-neutral-200 bg-white p-3">
@@ -1448,7 +1429,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
             </div>
             <div>
               <dt className="text-xs font-medium uppercase text-neutral-500">Obligations</dt>
-              <dd className="mt-1 text-neutral-950">Phase 6 would create obligations from accepted structured terms.</dd>
+              <dd className="mt-1 text-neutral-950">Created from accepted structured terms.</dd>
             </div>
           </dl>
           {previewTerms.length === 0 ? (

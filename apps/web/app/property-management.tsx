@@ -373,11 +373,11 @@ function BankInventoryPanel({ inventory }: Readonly<{ inventory: BankInventoryVi
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
         <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2">
           <p className="text-xs font-medium uppercase text-neutral-500">Houses remaining</p>
-          <p className="mt-1 font-semibold text-neutral-950">Houses remaining {inventory.houses ?? "Unknown"}</p>
+          <p className="mt-1 font-semibold text-neutral-950">{inventory.houses ?? "Unknown"}</p>
         </div>
         <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2">
           <p className="text-xs font-medium uppercase text-neutral-500">Hotels remaining</p>
-          <p className="mt-1 font-semibold text-neutral-950">Hotels remaining {inventory.hotels ?? "Unknown"}</p>
+          <p className="mt-1 font-semibold text-neutral-950">{inventory.hotels ?? "Unknown"}</p>
         </div>
       </div>
     </section>
@@ -452,7 +452,7 @@ function PropertyDetailCard({
       className="rounded-md border border-neutral-200 bg-white p-3"
       role="region"
     >
-      <p className="sr-only">Property detail</p>
+      <span className="sr-only">Property detail</span>
       <PropertyDeedCard game={game} ownership={ownership} property={property} />
 
       <div className="mt-3 grid gap-1.5 text-xs text-neutral-700">
@@ -530,9 +530,6 @@ export function PropertyManagementPanel({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Property management</h2>
-          <p className="mt-1 text-xs text-neutral-600">
-            Mortgage, building, and sale controls appear only when the rules referee allows them.
-          </p>
         </div>
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
           {managementLegalActions.length} available moves
@@ -544,7 +541,6 @@ export function PropertyManagementPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="text-sm font-semibold text-neutral-950">Legal deed actions</h3>
-              <p className="mt-1 text-xs text-neutral-600">Actionable deeds appear here when the referee opens a legal move.</p>
             </div>
             <Button
               aria-expanded={showDeedCatalog}

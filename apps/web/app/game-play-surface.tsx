@@ -296,6 +296,13 @@ function formatControllerType(type: string): string {
   return type === "ai" ? "AI" : formatTitleCase(type);
 }
 
+function legalActionDescription(action: LegalAction): string | null {
+  if (action.type === "ROLL_DICE" || action.type === "END_TURN") {
+    return null;
+  }
+  return action.description ?? null;
+}
+
 function activePlayerFromState(
   game: GameMetadata,
   snapshot: GameStateResponse | undefined,
@@ -1045,7 +1052,6 @@ function GameLogChatPanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-black uppercase text-[#2f2418]">Game log</h2>
-          <p className="mt-1 text-xs font-semibold text-[#6f604c]">Important table events, newest at the bottom.</p>
         </div>
         <div className="relative">
           <button
@@ -1059,8 +1065,7 @@ function GameLogChatPanel({
           </button>
           {filtersOpen ? (
             <div className="absolute right-0 top-full z-30 mt-2 w-64 rounded-md border-2 border-[#2f2418]/35 bg-[#fff8e8] p-3 shadow-[0_18px_40px_rgba(47,36,24,0.2)]">
-              <p className="text-[10px] font-black uppercase text-[#6f604c]">Show categories</p>
-              <div className="mt-2 grid gap-2">
+              <div className="grid gap-2">
                 {gameLogCategories.map((category) => (
                   <label key={category.id} className="flex items-center gap-2 text-xs font-semibold text-[#2f2418]">
                     <input
@@ -1167,9 +1172,7 @@ function RejectedActionAlert({
                 <li key={message}>{message}</li>
               ))}
             </ul>
-          ) : (
-            <p className="mt-2">No validation details supplied.</p>
-          )}
+          ) : null}
         </div>
       </div>
     </section>
@@ -1289,6 +1292,7 @@ function ActionButton({
   if (!model) {
     return null;
   }
+  const description = legalActionDescription(action);
   const Icon = model.icon;
   return (
     <div className="grid max-w-full gap-1">
@@ -1307,9 +1311,9 @@ function ActionButton({
         )}
         {isSubmitting ? "Submitting..." : model.label}
       </Button>
-      {action.description ? (
+      {description ? (
         <p className="max-w-52 text-xs font-medium leading-5 text-neutral-600" data-legal-action-description="">
-          {action.description}
+          {description}
         </p>
       ) : null}
     </div>
@@ -1396,7 +1400,6 @@ function ActivePlayerPanel({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Active player</h2>
-          <p className="mt-1 text-xs text-neutral-600">Current turn at the table.</p>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-200">
           <span aria-hidden="true" className="size-1.5 rounded-full bg-teal-600" />
@@ -1555,12 +1558,6 @@ function PlayerTrayRail({
                 </div>
               </div>
 
-              <div className="mt-3 rounded border border-[#2f2418]/10 bg-white/60 px-3 py-2">
-                <p className="text-[10px] font-black uppercase text-[#6f604c]">Holdings</p>
-                <p className="mt-1 text-sm font-black text-[#2f2418]">
-                  {selectedProperties.length} {selectedProperties.length === 1 ? "deed" : "deeds"}
-                </p>
-              </div>
             </div>
 
             <div className="grid gap-3">
@@ -1670,7 +1667,6 @@ function CurrentPlayerHoldingsPanel({
           <h2 className="text-sm font-semibold text-neutral-950">
             {player ? `${player.name} holdings` : "Current player holdings"}
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Owned property, contracts, obligations, and active commitments for the current turn.</p>
         </div>
         <span className="inline-flex w-fit items-center rounded-full bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-200">
           {properties.length} properties
@@ -1715,7 +1711,7 @@ function CurrentPlayerHoldingsPanel({
             </ul>
           ) : (
             <p className="mt-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
-              No current contracts or obligations for {player?.name ?? "this player"}.
+              No current contracts or obligations.
             </p>
           )}
         </div>
@@ -1745,10 +1741,7 @@ function TradeContextPanel({ player }: Readonly<{ player: GameMetadata["players"
     <section className="rounded-md border border-neutral-200 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-neutral-950">Trade request</h2>
-          <p className="mt-1 text-sm text-neutral-700">
-            {player ? `${player.name} has an open negotiation window.` : "The table has an open negotiation window."}
-          </p>
+          <h2 className="text-sm font-semibold text-neutral-950">{player ? `${player.name} trade request` : "Trade request"}</h2>
         </div>
         <span className="inline-flex w-fit shrink-0 items-center rounded-full bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-200">
           Trade
@@ -1765,7 +1758,6 @@ function PlayerTable({ game }: Readonly<{ game: GameMetadata }>) {
         <h2 id="players-title" className="text-sm font-semibold text-neutral-950">
           Players
         </h2>
-        <p className="mt-1 text-xs text-neutral-600">Seat order, controller, token color, board space, and status.</p>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-left text-xs">
@@ -2415,7 +2407,6 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Turn controls</h2>
-          <p className="mt-1 text-xs text-neutral-600">Available moves update from the local rules referee.</p>
         </div>
       </div>
 
@@ -2510,7 +2501,6 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         bankruptcyAction={bankruptcyAction}
         bankruptcyDisabled={bankruptcyAction ? !canSubmitDirectAction(bankruptcyAction) : true}
         currentPlayerName={currentPlayer?.name ?? null}
-        gameId={game.id}
         isEnding={endGameMutation.isPending}
         message={sessionMessage}
         onDeclareBankruptcy={handleSubmit}

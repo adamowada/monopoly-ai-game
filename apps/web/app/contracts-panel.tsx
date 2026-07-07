@@ -397,16 +397,15 @@ function ActiveContracts({
           <h2 id="active-contracts-title" className="text-sm font-semibold text-neutral-950">
             Active contracts
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Server-owned agreements that can create future obligations.</p>
         </div>
         <FileText aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-3">
         {isLoading ? (
-          <EmptyState text="Loading active contracts from the API." />
+          <EmptyState text="Loading active contracts." />
         ) : activeContracts.length === 0 ? (
-          <EmptyState text="No active contracts returned by the API." />
+          <EmptyState text="No active contracts." />
         ) : (
           activeContracts.map((contract) => (
             <article
@@ -419,7 +418,6 @@ function ActiveContracts({
                   <h3 className="font-semibold text-neutral-950">
                     Agreement between {playerNames(game, contract.party_player_ids)}
                   </h3>
-                  <p className="mt-1 text-neutral-700">Parties {playerNames(game, contract.party_player_ids)}</p>
                 </div>
                 <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
                   {contract.status === "active" ? "Active" : contract.status}
@@ -470,21 +468,19 @@ function UpcomingObligations({
           <h2 id="upcoming-obligations-title" className="text-sm font-semibold text-neutral-950">
             Upcoming obligations
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Scheduled and pending obligations returned by the API.</p>
         </div>
         <CalendarClock aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-3">
         {isLoading ? (
-          <EmptyState text="Loading upcoming obligations from the API." />
+          <EmptyState text="Loading upcoming obligations." />
         ) : upcoming.length === 0 ? (
-          <EmptyState text="No upcoming obligations returned by the API." />
+          <EmptyState text="No upcoming obligations." />
         ) : (
           upcoming.map((obligation) => {
             const canSettle = canSettleObligation(obligation);
             const isCurrentEnforcement = enforcingObligationId === obligation.id;
-            const unavailableDescriptionId = `obligation-${obligation.id}-settlement-unavailable`;
 
             return (
               <article
@@ -509,11 +505,9 @@ function UpcomingObligations({
                     {obligationAssetText(obligation)}
                     <PropertyReferences game={game} propertyIds={propertyIdsFromText(obligationAssetText(obligation))} />
                   </div>
-                  <p>Counterparty {playerName(game, obligation.counterparty_player_id)}</p>
                 </div>
                 <div className="mt-3 grid gap-2">
                   <Button
-                    aria-describedby={!canSettle ? unavailableDescriptionId : undefined}
                     onClick={() => {
                       if (canSettle) {
                         onEnforce(obligation);
@@ -531,11 +525,6 @@ function UpcomingObligations({
                     )}
                     {isCurrentEnforcement ? "Enforcing..." : canSettle ? "Enforce obligation" : "Unavailable until due"}
                   </Button>
-                  {!canSettle ? (
-                    <p id={unavailableDescriptionId} className="text-xs text-neutral-600">
-                      Settlement unavailable until this obligation is due.
-                    </p>
-                  ) : null}
                 </div>
                 <TechnicalRecord buttonLabel="Show obligation technical record">
                   <p>obligation_id {obligation.id}</p>
@@ -567,16 +556,15 @@ function SettlementHistory({
           <h2 id="settlement-history-title" className="text-sm font-semibold text-neutral-950">
             Obligation settlement history
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Past settlements and their triggering events.</p>
         </div>
         <History aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-2">
         {isLoading ? (
-          <EmptyState text="Loading obligation settlement history from the API." />
+          <EmptyState text="Loading obligation settlement history." />
         ) : settled.length === 0 ? (
-          <EmptyState text="No settled obligations returned by the API." />
+          <EmptyState text="No settled obligations." />
         ) : (
           settled.map((obligation) => (
             <article key={obligation.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
@@ -615,16 +603,15 @@ function ContractOutcomeExplanations({
           <h2 id="contract-outcome-explanation-title" className="text-sm font-semibold text-neutral-950">
             Contract outcome explanation
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Classic-rule effects returned by the API.</p>
         </div>
         <Info aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-2">
         {isLoading ? (
-          <EmptyState text="Loading contract outcome explanations from the API." />
+          <EmptyState text="Loading contract outcome explanations." />
         ) : outcomes.length === 0 ? (
-          <EmptyState text="No contract outcome explanations returned by the API." />
+          <EmptyState text="No contract outcome explanations." />
         ) : (
           outcomes.map((outcome) => (
             <article key={outcome.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs">
@@ -709,7 +696,6 @@ function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Full game log</h2>
-          <p className="mt-1 text-xs text-neutral-600">Accepted events, deals, AI decisions, and rejections.</p>
         </div>
         <div className="flex items-center gap-2 text-xs text-neutral-500">
           <ListFilter aria-hidden="true" className="size-3.5" />

@@ -40,7 +40,7 @@ function ReasonBadge({ reasonCode }: Readonly<{ reasonCode: string }>) {
 
 function validationSummary(record: RejectedActionRecord): string {
   if (record.validation_errors.length === 0) {
-    return "No validation details supplied.";
+    return "";
   }
   return record.validation_errors
     .map((error) => {
@@ -58,9 +58,6 @@ export function RejectedActionAuditView({ records }: RejectedActionAuditViewProp
           <h2 id="rejected-actions-title" className="text-base font-semibold text-neutral-950">
             Rule rulings
           </h2>
-          <p className="mt-2 text-sm text-neutral-600">
-            Rejected moves stay separate from accepted table events.
-          </p>
         </div>
         <div className="flex items-center gap-2 text-sm text-neutral-600">
           <ShieldAlert aria-hidden="true" className="size-4 text-rose-600" />

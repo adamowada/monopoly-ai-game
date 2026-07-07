@@ -397,13 +397,26 @@ afterEach(() => {
 
 describe("AiAuditPanel", () => {
   it("renders profiles, decision traceability, memory, retrievals, dialogue, and rejected outputs from server data", async () => {
-    // Persona summary visible in audit UI
     renderPanel(createAiAuditFetchMock());
 
     const panel = await screen.findByRole("region", { name: "AI audit" });
-    await within(panel).findByText("Grace audit profile");
+    await within(panel).findByRole("tablist", { name: "AI notebook sections" });
 
-    expect(panel).toHaveTextContent("Private local AI notebook");
+    expect(panel).toHaveTextContent("AI notebook");
+    expect(panel).not.toHaveTextContent("Private local AI notebook");
+    expect(panel).not.toHaveTextContent("The notebook summarizes");
+    expect(within(panel).getByRole("tab", { name: /Decisions/ })).toHaveAttribute("aria-selected", "true");
+    expect(within(panel).getByRole("tab", { name: /Stream/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("tab", { name: /Profiles/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("tab", { name: /Memory/ })).toBeInTheDocument();
+    expect(within(panel).getByRole("tab", { name: /Retrieval/ })).toBeInTheDocument();
+
+    expect(panel).toHaveTextContent("Decision history");
+    expect(panel).not.toHaveTextContent("Grace audit profile");
+
+    fireEvent.click(within(panel).getByRole("tab", { name: /Profiles/ }));
+    expect(await within(panel).findByText("Grace audit profile")).toBeInTheDocument();
+
     expect(panel).toHaveTextContent("AI profile");
     expect(panel).toHaveTextContent("Grace");
     expect(panel).toHaveTextContent("Traits");
@@ -415,6 +428,7 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("Persona summary");
     expect(panel).toHaveTextContent("Grace is a careful analyst who keeps liquidity before pressing for monopolies.");
 
+    fireEvent.click(within(panel).getByRole("tab", { name: /Decisions/ }));
     expect(panel).toHaveTextContent("Decision history");
     expect(panel).toHaveTextContent("Grace action decision");
     expect(panel).toHaveTextContent("Legal actions snapshot");
@@ -436,7 +450,11 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("Memory entries");
     expect(panel).toHaveTextContent("player_trust_model");
     expect(panel).toHaveTextContent("Grace remembers Ada prefers keeping $200 cash after trades involving property_boardwalk.");
-    expect(within(panel).getByRole("button", { name: "Show property card for Boardwalk" })).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("tab", { name: /Stream/ }));
+    expect(await within(panel).findByRole("button", { name: "Show property card for Boardwalk" })).toBeInTheDocument();
+
+    fireEvent.click(within(panel).getByRole("tab", { name: /Decisions/ }));
 
     expect(panel).toHaveTextContent("Retrieved context records");
     expect(panel).toHaveTextContent("Retrieved context confirms Ada cash-reserve behavior.");

@@ -35,6 +35,8 @@ _FIELD_JOINER = "".join
 
 def _normalize_codex_json_object(value: Any) -> Any:
     if isinstance(value, str):
+        if value.strip() == "":
+            return {}
         try:
             decoded = json.loads(value)
         except json.JSONDecodeError as exc:

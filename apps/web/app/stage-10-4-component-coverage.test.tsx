@@ -1024,7 +1024,7 @@ describe("Stage 10.4 frontend component coverage", () => {
     expect(futureObligation).toHaveTextContent("Turn 9");
     expect(futureObligation).not.toHaveTextContent("due_turn 9");
     expect(futureObligation).toHaveTextContent("$25 scheduled rent-share transfer");
-    expect(futureObligation).toHaveTextContent("Settlement unavailable until this obligation is due.");
+    expect(futureObligation).not.toHaveTextContent("Settlement unavailable until this obligation is due.");
     fireEvent.click(within(futureObligation).getByRole("button", { name: "Show obligation technical record" }));
     expect(futureObligation).toHaveTextContent("due_turn 9");
     const futureControl = within(futureObligation).getByRole("button", { name: "Unavailable until due" });
@@ -1105,7 +1105,8 @@ describe("Stage 10.4 frontend component coverage", () => {
     renderWithQueryClient(<AiAuditPanel apiBaseUrl={apiBaseUrl} game={gameFixture()} gameId={gameId} />, createAiAuditFetchMock());
 
     const panel = await screen.findByRole("region", { name: "AI audit" });
-    await within(panel).findByText("Grace component audit profile");
+    await within(panel).findByRole("tablist", { name: "AI notebook sections" });
+    expect(panel).not.toHaveTextContent("Grace component audit profile");
 
     expect(panel).toHaveTextContent("Decision history");
     expect(panel).not.toHaveTextContent(`ai_decision_id ${decisionId}`);
@@ -1129,5 +1130,8 @@ describe("Stage 10.4 frontend component coverage", () => {
     fireEvent.click(within(panel).getByRole("button", { name: "Show rejected output technical record" }));
     expect(panel).toHaveTextContent("rejected_output_id rejected-output-stage-10-4");
     expect(panel).toHaveTextContent("parsed_output.action: BUY_PROPERTY is not legal.");
+
+    fireEvent.click(within(panel).getByRole("tab", { name: /Profiles/ }));
+    expect(await within(panel).findByText("Grace component audit profile")).toBeInTheDocument();
   });
 });

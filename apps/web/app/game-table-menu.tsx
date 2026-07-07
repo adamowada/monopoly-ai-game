@@ -37,7 +37,6 @@ type TableViewTarget = "game-log" | "properties" | "deals" | "contracts" | "ai-n
 type GameTableMenuProps = {
   bankruptcyAction?: LegalAction | null;
   bankruptcyDisabled?: boolean;
-  gameId: string;
   isEnding?: boolean;
   message?: string | null;
   onDeclareBankruptcy?: (action: LegalAction) => void;
@@ -72,7 +71,6 @@ export function GameTableMenu({
   bankruptcyAction = null,
   bankruptcyDisabled = false,
   currentPlayerName,
-  gameId,
   isEnding = false,
   message = null,
   onDeclareBankruptcy,
@@ -110,9 +108,7 @@ export function GameTableMenu({
           role="menu"
         >
           <div className="rounded border border-[#2f2418]/20 bg-white/70 px-3 py-2">
-            <p className="text-xs font-black uppercase text-[#6f604c]">Game table</p>
-            <p className="mt-1 truncate font-black text-[#2f2418]">{gameId}</p>
-            <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-[#6f604c]">
+            <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#6f604c]">
               <span>{status}</span>
               {phase ? <span>{phase}</span> : null}
               {currentPlayerName ? <span>{currentPlayerName}</span> : null}
@@ -233,8 +229,7 @@ export function GameTableMenu({
                   Confirm bankruptcy
                 </h2>
                 <p className="mt-2 text-sm font-semibold leading-6 text-[#6f604c]">
-                  {bankruptcyPlayerName} will give up and lose. The rules referee will liquidate the player and
-                  continue with the remaining table.
+                  {bankruptcyPlayerName} will give up and lose. The table will continue with the remaining players.
                 </p>
               </div>
             </div>

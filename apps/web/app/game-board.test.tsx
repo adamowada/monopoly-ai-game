@@ -272,7 +272,7 @@ describe("ClassicGameBoard", () => {
     );
   });
 
-  it("renders non-street board cells with a top name, large logo, and required bottom instruction", () => {
+  it("renders non-street board cells with a top name, large logo, and relevant bottom labels", () => {
     render(<ClassicGameBoard game={gameFixture()} />);
 
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
@@ -291,7 +291,7 @@ describe("ClassicGameBoard", () => {
     expect(board.querySelector("[data-property-hover]")).toBeNull();
 
     expect(communityChest?.querySelector("[data-space-art]")).toBeTruthy();
-    expect(communityChest?.querySelector("[data-space-bottom-label]")).toHaveTextContent("Follow instructions on top card");
+    expect(communityChest?.querySelector("[data-space-bottom-label]")).toBeNull();
     fireEvent.mouseEnter(communityChest as Element);
     expect(board.querySelector("[data-property-hover]")).toBeNull();
 

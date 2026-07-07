@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bot, Loader2, Plus, RefreshCw, Trash2, UserRound } from "lucide-react";
+import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { Button } from "../components/ui/button";
 import { createGame, type CreateGamePlayer } from "../lib/api/games";
@@ -252,7 +252,6 @@ export function GameSetupPanel() {
             <div className="flex flex-col gap-3 border-b border-[#b99768]/50 pb-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-sm font-black text-[#2f2418]">Seat cards</h3>
-                <p className="mt-1 text-sm font-semibold text-[#6f604c]">Each card becomes one token at the board.</p>
               </div>
               <Button onClick={addPlayer} disabled={!canAddPlayer || isSubmitting} className="justify-center">
                 <Plus aria-hidden="true" className="size-4" />
@@ -280,14 +279,6 @@ export function GameSetupPanel() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-black uppercase text-[#6f604c]">Seat {playerNumber}</p>
-                        <p className="mt-1 flex items-center gap-1.5 text-sm font-black">
-                          {player.kind === "ai" ? (
-                            <Bot aria-hidden="true" className="size-4 text-purple-700" />
-                          ) : (
-                            <UserRound aria-hidden="true" className="size-4 text-teal-700" />
-                          )}
-                          {player.kind === "ai" ? "AI token" : "Human token"}
-                        </p>
                       </div>
                       <Button
                         aria-label={`Remove Player ${playerNumber}`}

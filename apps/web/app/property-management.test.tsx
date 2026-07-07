@@ -380,8 +380,10 @@ describe("PropertyManagementPanel", () => {
     expect(detail).toHaveTextContent("Hotels: 0");
 
     const bankInventory = screen.getByRole("region", { name: "Bank inventory" });
-    expect(bankInventory).toHaveTextContent("Houses remaining 29");
-    expect(bankInventory).toHaveTextContent("Hotels remaining 11");
+    expect(bankInventory).toHaveTextContent("Houses remaining");
+    expect(bankInventory).toHaveTextContent("Hotels remaining");
+    expect(within(bankInventory).getByText("29")).toBeInTheDocument();
+    expect(within(bankInventory).getByText("11")).toBeInTheDocument();
 
     const monopolyGroups = screen.getByRole("region", { name: "Monopoly groups" });
     expect(monopolyGroups).toHaveTextContent("Brown");
@@ -475,13 +477,13 @@ describe("GamePlaySurface property management integration", () => {
     const baltic = await screen.findByRole("region", { name: "Property detail: Baltic Avenue" });
     await waitFor(() => expect(baltic).toHaveTextContent("Houses: 1"));
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Bank inventory" })).toHaveTextContent("Houses remaining 29"),
+      expect(within(screen.getByRole("region", { name: "Bank inventory" })).getByText("29")).toBeInTheDocument(),
     );
 
     fireEvent.click(within(baltic).getByRole("button", { name: "Build house" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Bank inventory" })).toHaveTextContent("Houses remaining 28"),
+      expect(within(screen.getByRole("region", { name: "Bank inventory" })).getByText("28")).toBeInTheDocument(),
     );
     fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
     const updatedBaltic = screen.getByRole("region", { name: "Property detail: Baltic Avenue" });
@@ -506,7 +508,7 @@ describe("GamePlaySurface property management integration", () => {
     await waitFor(() => expect(baltic).toHaveTextContent("Unmortgaged"));
     await waitFor(() => expect(baltic).toHaveTextContent("Houses: 1"));
     expect(baltic).toHaveTextContent("Hotels: 0");
-    await waitFor(() => expect(bankInventory).toHaveTextContent("Houses remaining 29"));
+    await waitFor(() => expect(within(bankInventory).getByText("29")).toBeInTheDocument());
 
     fireEvent.click(within(baltic).getByRole("button", { name: "Build house" }));
 
@@ -517,6 +519,6 @@ describe("GamePlaySurface property management integration", () => {
     expect(baltic).toHaveTextContent("Unmortgaged");
     expect(baltic).toHaveTextContent("Houses: 1");
     expect(baltic).toHaveTextContent("Hotels: 0");
-    expect(bankInventory).toHaveTextContent("Houses remaining 29");
+    expect(within(bankInventory).getByText("29")).toBeInTheDocument();
   });
 });

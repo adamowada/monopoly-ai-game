@@ -29,6 +29,11 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from app.ai import enforcement as enforcement_module
+from app.ai.decision_schema import (
+    AIDecisionValidationError,
+    ActionDecisionOutput,
+    validate_ai_decision_output,
+)
 from app.ai.enforcement import AIOutputEnforcementRequest, enforce_ai_output
 from app.ai.orchestrator import (
     CodexExecAIDecisionResult,
@@ -768,6 +773,40 @@ def invalid_action_output(
     output = valid_action_output(state)
     output["action"] = {"type": action_type, "payload": dict(payload)}
     return output
+
+
+def test_empty_action_payload_string_normalizes_to_empty_object() -> None:
+    state = create_initial_game_state(
+        seed="empty-payload-normalization",
+        game_id=str(GAME_ID),
+        players=(
+            PlayerSetup(id=str(AI_PLAYER_ID), name="Ada", kind="ai"),
+            PlayerSetup(id=str(HUMAN_PLAYER_ID), name="Grace", kind="human"),
+        ),
+    )
+    output = valid_action_output(state)
+    output["action"] = {"type": "ROLL_DICE", "payload": ""}
+
+    parsed = validate_ai_decision_output(output)
+
+    assert isinstance(parsed.root, ActionDecisionOutput)
+    assert parsed.root.action.payload == {}
+
+
+def test_non_json_action_payload_string_still_rejected() -> None:
+    state = create_initial_game_state(
+        seed="invalid-payload-normalization",
+        game_id=str(GAME_ID),
+        players=(
+            PlayerSetup(id=str(AI_PLAYER_ID), name="Ada", kind="ai"),
+            PlayerSetup(id=str(HUMAN_PLAYER_ID), name="Grace", kind="human"),
+        ),
+    )
+    output = valid_action_output(state)
+    output["action"] = {"type": "ROLL_DICE", "payload": "not-json"}
+
+    with pytest.raises(AIDecisionValidationError):
+        validate_ai_decision_output(output)
 
 
 def invalid_deal_proposal_output() -> dict[str, Any]:

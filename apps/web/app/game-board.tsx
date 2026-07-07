@@ -287,9 +287,6 @@ function bottomLabel(space: StaticDataBoardSpace, property: StaticDataProperty |
     const taxAmount = space.id === "space_luxury_tax" ? 75 : (space.amount ?? 0);
     return `pay $${taxAmount.toFixed(2)}`;
   }
-  if (space.type === "community_chest") {
-    return "Follow instructions on top card";
-  }
   return null;
 }
 
@@ -380,11 +377,9 @@ function BoardTitleMark() {
         <path d="M93 75 H267" stroke="#f7e6ad" strokeWidth="2" strokeLinecap="round" opacity="0.75" />
       </svg>
       <div className="relative py-3">
-        <p className="text-[11px] font-black uppercase tracking-normal text-[#f7d977]">Local tabletop edition</p>
-        <h2 className="mt-0.5 font-serif text-3xl font-black leading-none text-[#fff7dc] [text-shadow:0_2px_0_rgba(47,36,24,0.5)]">
+        <h2 className="font-serif text-3xl font-black leading-none text-[#fff7dc] [text-shadow:0_2px_0_rgba(47,36,24,0.5)]">
           Monopoly 2.0
         </h2>
-        <p className="mt-1 text-[10px] font-bold uppercase tracking-normal text-[#f7d977]">AI strategy board</p>
       </div>
     </div>
   );
@@ -457,8 +452,7 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
       data-board-motion-banner={motion.status}
       role="status"
     >
-      <p className="text-[10px] font-black uppercase text-[#6f604c]">{isLanding ? "Landed" : "Moving"}</p>
-      <p className="mt-0.5 break-words text-xs font-black leading-tight">{message}</p>
+      <p className="break-words text-xs font-black leading-tight">{message}</p>
     </div>
   );
 }
@@ -1032,7 +1026,7 @@ function JailSpaceCell({
               })}
             </div>
           ) : (
-            <p className="text-[7px] font-black uppercase leading-none text-[#6f604c]">Empty</p>
+            <span aria-hidden="true" className="h-2" />
           )}
         </div>
         <div
@@ -1044,9 +1038,7 @@ function JailSpaceCell({
             <SpaceMotif art={SPACE_ART_BY_ID[space.id]} className="mx-auto mt-1 h-10 w-full max-w-12" />
           </div>
           <TokenStack game={game} motion={motion} players={visitingPlayers} space={space} />
-          <p className="text-[7px] font-black uppercase leading-none text-[#6f604c]">
-            {visitingPlayers.length > 0 ? "Passing through" : "Open"}
-          </p>
+          <span aria-hidden="true" className="h-2" />
         </div>
       </div>
     </div>
