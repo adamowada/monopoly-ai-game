@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { BOARD_SPACES } from "@monopoly-ai-game/schemas";
+import { BOARD_SPACES, PROPERTIES_BY_ID } from "@monopoly-ai-game/schemas";
 
 import { DECK_ART, SPACE_ART_BY_ID } from "./board-art";
 import { ClassicGameBoard } from "./game-board";
@@ -8,6 +8,12 @@ import type { GameMetadata } from "../lib/api/games";
 import type { GameStateResponse } from "../lib/api/gameplay";
 
 const createdAt = "2026-07-04T00:00:00.000Z";
+const nonStreetMotifCount = BOARD_SPACES.filter((space) => {
+  if (!space.property_id) {
+    return true;
+  }
+  return PROPERTIES_BY_ID[space.property_id]?.kind !== "street";
+}).length;
 
 function gameFixture(positions: number[] = [0, 7]): GameMetadata {
   return {
@@ -209,19 +215,24 @@ describe("ClassicGameBoard", () => {
     expect(screen.queryByRole("status", { name: "Winner Player 1!" })).not.toBeInTheDocument();
   });
 
-  it("renders all 40 board spaces with visible original motif art", () => {
+  it("renders visible motif art only for non-street board spaces", () => {
     render(<ClassicGameBoard game={gameFixture()} />);
 
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
 
-    expect(board.querySelectorAll("[data-space-art]")).toHaveLength(40);
+    expect(board.querySelectorAll("[data-space-art]")).toHaveLength(nonStreetMotifCount);
     for (const space of BOARD_SPACES) {
       const boardSpace = board.querySelector(`[data-space-index='${space.position}']`);
-      expect(boardSpace?.querySelector("[data-space-art]"), `${space.name} should render motif art`).toBeInTheDocument();
+      const property = space.property_id ? PROPERTIES_BY_ID[space.property_id] : null;
+      if (property?.kind === "street") {
+        expect(boardSpace?.querySelector("[data-space-art]"), `${space.name} should not render motif art`).toBeNull();
+      } else {
+        expect(boardSpace?.querySelector("[data-space-art]"), `${space.name} should render motif art`).toBeInTheDocument();
+      }
     }
   });
 
-  it("renders street property cells with motifs, owner markers, development markers, and hover details", () => {
+  it("renders street property cells without motif art while keeping band, markers, and hover details", () => {
     render(<ClassicGameBoard game={gameFixture()} snapshot={stateFixture()} />);
 
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
@@ -230,7 +241,7 @@ describe("ClassicGameBoard", () => {
 
     expect(boardwalk).toHaveAttribute("data-space-kind", "street-property");
     expect(boardwalk?.querySelector("[data-property-color-band]")).toBeTruthy();
-    expect(boardwalk?.querySelector("[data-space-art]")).toBeInTheDocument();
+    expect(boardwalk?.querySelector("[data-space-art]")).toBeNull();
     expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute(
       "aria-label",
       "Owner marker: Grace owns Boardwalk",

@@ -871,7 +871,6 @@ function StreetPropertyCell({
   property: StaticDataProperty;
   space: StaticDataBoardSpace;
 }>) {
-  const art = SPACE_ART_BY_ID[space.id];
   return (
     <>
       <BoardOwnerMarker game={game} ownership={ownership} property={property} />
@@ -881,7 +880,6 @@ function StreetPropertyCell({
         <p className="break-words text-[8px] font-black leading-[0.9] text-[#1f2a1f] uppercase" data-space-name="">
           {space.name}
         </p>
-        <SpaceMotif art={art} className="mx-auto h-[30%] min-h-4 w-full max-w-10 shrink" />
         <TokenStack game={game} motion={motion} players={players} space={space} />
         <p className="text-[9px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
           {money(property.price)}

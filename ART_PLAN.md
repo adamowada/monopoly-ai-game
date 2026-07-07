@@ -253,7 +253,9 @@ The board is the hero object of the play page.
 Required:
 
 - Render all 40 spaces.
-- Render a visible visual motif for every space, including street properties.
+- Render visible visual motifs for non-street spaces.
+- Keep street-property rectangles text-first: group band, name, price, tokens, owner markers, and
+  development markers, without per-square motif art.
 - Keep property group color bands recognizable.
 - Keep classic space names and prices for the current compatibility theme.
 - Show token positions directly on spaces.
@@ -294,15 +296,14 @@ Every board space must have:
 
 - Visible name.
 - Price or amount where relevant.
-- Local original motif.
 - Accessible name.
 - Inspectable detail state where useful.
 
 Street properties:
 
 - Keep property group band as the primary color cue.
-- Add a small local motif without crowding the name, price, token, owner marker, or development
-  marker.
+- Do not render per-square motif art inside the street rectangle.
+- Preserve room for name, price, token, owner marker, and development marker.
 - Do not recolor the full tile to match the owner. Use owner markers instead.
 
 Railroads and utilities:
@@ -633,9 +634,10 @@ implementation pass.
 
 Update or add tests that fail against the current dashboard-like implementation:
 
-- All 40 board spaces render visible motif art.
-- Street properties no longer assert absence of `[data-space-art]`.
-- E2E motif count expects all board spaces with visible motifs or explicit accessible equivalents.
+- All 40 board spaces render.
+- Non-street board spaces render visible motif art.
+- Street properties assert absence of `[data-space-art]`.
+- E2E motif count expects 18 non-street visible motifs.
 - Board center contains only game-facing title/deck/dice/card/winner content.
 - No board-center debug or implementation copy.
 - Hamburger opens and closes a real drawer/disclosure.
@@ -666,7 +668,6 @@ Primary files likely involved:
 
 Implement:
 
-- Street-property motifs.
 - Owner markers.
 - Development markers.
 - Improved token pieces.
@@ -803,8 +804,8 @@ The art direction is complete only when all items are true:
 - The game looks like a finished 2D tabletop video game at desktop, tablet, and mobile widths.
 - The board is the hero object of the play page.
 - The center is simple, game-facing, and not busy.
-- Every board space has a visible original visual identity.
-- Street property tiles include motifs while preserving names, prices, and group colors.
+- Non-street board spaces have visible original motif art.
+- Street property tiles preserve names, prices, and group colors without per-square motif art.
 - Ownership is clear through owner markers, not whole-tile owner recoloring.
 - Development is clear directly on property spaces.
 - Player trays make cash, token, ownership, and current player clear at a glance.
@@ -827,7 +828,9 @@ The implementation is not acceptable if:
 - It still reads as a generic admin dashboard.
 - It shows all audit/research panels by default in normal play.
 - The hamburger remains a one-link setup menu.
-- Board space art exists only for non-street spaces.
+- Non-street board-space motif art is missing or unreadable.
+- Street properties reintroduce per-square motif art that competes with names, prices, tokens, or
+  markers.
 - Current player, cash, ownership, development, or legal next action require scanning long panels.
 - Whole property tiles are recolored by owner in a way that duplicates or obscures group colors.
 - The board center becomes visually busy or filled with scenery/logs/debug text.
