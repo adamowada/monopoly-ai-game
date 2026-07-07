@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -416,43 +416,48 @@ describe("AiAuditPanel", () => {
     expect(panel).toHaveTextContent("Grace is a careful analyst who keeps liquidity before pressing for monopolies.");
 
     expect(panel).toHaveTextContent("Decision history");
-    expect(panel).toHaveTextContent("ai_decision_id decision-grace-1");
-    expect(panel).toHaveTextContent("ai_profile_id profile-grace");
-    expect(panel).toHaveTextContent("state_hash mock-state-ai-audit-1");
+    expect(panel).toHaveTextContent("Grace action decision");
     expect(panel).toHaveTextContent("Legal actions snapshot");
     expect(panel).toHaveTextContent("ROLL_DICE");
-    expect(panel).toHaveTextContent("Prompt context");
-    expect(panel).toHaveTextContent("board_position");
-    expect(panel).toHaveTextContent("Raw output");
-    expect(panel).toHaveTextContent("session_configured");
-    expect(panel).toHaveTextContent("Parsed output");
-    expect(panel).toHaveTextContent("\"confidence\": 0.81");
-    expect(panel).toHaveTextContent("validated");
-    expect(panel).toHaveTextContent("rejected");
-    expect(panel).toHaveTextContent("timeout");
-    expect(panel).toHaveTextContent("process_error");
+    expect(panel).toHaveTextContent("Accepted");
+    expect(panel).toHaveTextContent("Validated");
+    expect(panel).toHaveTextContent("Rejected");
+    expect(panel).toHaveTextContent("Timeout");
+    expect(panel).toHaveTextContent("Process Error");
+    expect(panel).not.toHaveTextContent("ai_decision_id decision-grace-1");
+    expect(panel).not.toHaveTextContent("ai_profile_id profile-grace");
+    expect(panel).not.toHaveTextContent("state_hash mock-state-ai-audit-1");
+    expect(panel).not.toHaveTextContent("session_configured");
+    expect(panel).not.toHaveTextContent("\"confidence\": 0.81");
 
     expect(panel).toHaveTextContent("Self-dialogue timeline");
-    expect(panel).toHaveTextContent("self_dialogue_id dialogue-1");
-    expect(panel).toHaveTextContent("Linked decision decision-grace-1");
     expect(panel).toHaveTextContent("The legal action set is narrow");
 
     expect(panel).toHaveTextContent("Memory entries");
-    expect(panel).toHaveTextContent("memory_entry_id memory-grace-1");
-    expect(panel).toHaveTextContent("Used by decision decision-grace-1");
     expect(panel).toHaveTextContent("player_trust_model");
-    expect(panel).toHaveTextContent("decision decision-grace-1");
-    expect(panel).toHaveTextContent("event event-grace-1");
-    expect(panel).toHaveTextContent("superseded_by_memory_id n/a");
     expect(panel).toHaveTextContent("Grace remembers Ada prefers keeping $200 cash after trades.");
 
     expect(panel).toHaveTextContent("Retrieved context records");
-    expect(panel).toHaveTextContent("retrieval_record_id retrieval-grace-1");
     expect(panel).toHaveTextContent("Retrieved context confirms Ada cash-reserve behavior.");
 
     expect(panel).toHaveTextContent("Rejected AI outputs");
-    expect(panel).toHaveTextContent("rejected_output_id rejected-output-1");
     expect(panel).toHaveTextContent("Validation errors");
     expect(panel).toHaveTextContent("parsed_output.action: BUY_PROPERTY is not in the Legal actions snapshot.");
+
+    const decision = within(panel).getByRole("article", { name: "AI decision: Grace action decision Accepted" });
+    fireEvent.click(within(decision).getByRole("button", { name: "Show AI technical trace" }));
+    expect(decision).toHaveTextContent("ai_decision_id decision-grace-1");
+    expect(decision).toHaveTextContent("ai_profile_id profile-grace");
+    expect(decision).toHaveTextContent("state_hash mock-state-ai-audit-1");
+    expect(decision).toHaveTextContent("Prompt context");
+    expect(decision).toHaveTextContent("session_configured");
+    expect(decision).toHaveTextContent("\"confidence\": 0.81");
+
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Show memory technical record" })[0]);
+    expect(panel).toHaveTextContent("memory_entry_id memory-grace-1");
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Show retrieval technical record" })[0]);
+    expect(panel).toHaveTextContent("retrieval_record_id retrieval-grace-1");
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Show rejected output technical record" })[0]);
+    expect(panel).toHaveTextContent("rejected_output_id rejected-output-1");
   });
 });

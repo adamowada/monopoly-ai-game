@@ -728,11 +728,13 @@ describe("Stage 10.4 frontend component coverage", () => {
       target: { value: "6" },
     });
 
-    const playersTable = screen.getByRole("table", { name: "Configured players" });
-    expect(within(playersTable).getByRole("textbox", { name: "Player 1 name" })).toHaveValue("Ada");
-    expect(within(playersTable).getByRole("textbox", { name: "Player 2 name" })).toHaveValue("Grace");
-    expect(within(playersTable).getByRole("textbox", { name: "Player 3 name" })).toHaveValue("Linus");
-    expect(within(playersTable).getByRole("combobox", { name: "Player 3 type" })).toHaveValue("ai");
+    const seatOne = screen.getByRole("group", { name: "Seat 1 token setup" });
+    const seatTwo = screen.getByRole("group", { name: "Seat 2 token setup" });
+    const seatThree = screen.getByRole("group", { name: "Seat 3 token setup" });
+    expect(within(seatOne).getByRole("textbox", { name: "Player 1 name" })).toHaveValue("Ada");
+    expect(within(seatTwo).getByRole("textbox", { name: "Player 2 name" })).toHaveValue("Grace");
+    expect(within(seatThree).getByRole("textbox", { name: "Player 3 name" })).toHaveValue("Linus");
+    expect(within(seatThree).getByRole("combobox", { name: "Player 3 type" })).toHaveValue("ai");
 
     fireEvent.click(screen.getByRole("button", { name: "Create game" }));
 
@@ -892,12 +894,12 @@ describe("Stage 10.4 frontend component coverage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add sample complex instruments" }));
     const preview = screen.getByRole("region", { name: "Contract preview" });
     for (const termKind of [
-      "immediate_cash_transfer",
-      "deferred_cash_payment",
-      "interest_bearing_debt",
-      "property_purchase_option",
-      "rent_share",
-      "insurance_payout",
+      "Immediate Cash Transfer",
+      "Deferred Cash Payment",
+      "Interest Bearing Debt",
+      "Property Purchase Option",
+      "Rent Share",
+      "Insurance Payout",
     ]) {
       expect(preview).toHaveTextContent(termKind);
     }
@@ -988,17 +990,35 @@ describe("Stage 10.4 frontend component coverage", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     const panel = await screen.findByRole("region", { name: "Contracts obligations panel" });
-    await within(panel).findByText("Contract contract-stage-10-4");
-    const obligation = within(panel).getByRole("article", { name: "Obligation obligation-immediate-stage-10-4" });
-    expect(obligation).toHaveTextContent("pending");
-    expect(obligation).toHaveTextContent("due condition not set");
-    expect(obligation).toHaveTextContent("$50 immediate rent-share transfer");
+    await within(panel).findByText("Agreement between Ada, Grace");
+    const contract = within(panel).getByRole("article", { name: "Contract between Ada, Grace" });
+    expect(contract).not.toHaveTextContent("contract_id contract-stage-10-4");
+    fireEvent.click(within(contract).getByRole("button", { name: "Show contract technical record" }));
+    expect(contract).toHaveTextContent("contract_id contract-stage-10-4");
 
-    const futureObligation = within(panel).getByRole("article", { name: "Obligation obligation-future-stage-10-4" });
+    const obligationArticles = within(panel).getAllByRole("article", { name: "Obligation Ada to Grace" });
+    const obligation = obligationArticles.find((article) => article.textContent?.includes("$50 immediate rent-share transfer"));
+    expect(obligation).toBeTruthy();
+    const immediateObligation = obligation as HTMLElement;
+    expect(immediateObligation).not.toHaveTextContent("obligation_id obligation-immediate-stage-10-4");
+    fireEvent.click(within(immediateObligation).getByRole("button", { name: "Show obligation technical record" }));
+    expect(immediateObligation).toHaveTextContent("obligation_id obligation-immediate-stage-10-4");
+    expect(immediateObligation).toHaveTextContent("pending");
+    expect(immediateObligation).toHaveTextContent("due condition not set");
+    expect(immediateObligation).toHaveTextContent("$50 immediate rent-share transfer");
+
+    const futureObligationArticle = obligationArticles.find((article) =>
+      article.textContent?.includes("$25 scheduled rent-share transfer"),
+    );
+    expect(futureObligationArticle).toBeTruthy();
+    const futureObligation = futureObligationArticle as HTMLElement;
     expect(futureObligation).toHaveTextContent("scheduled");
-    expect(futureObligation).toHaveTextContent("due_turn 9");
+    expect(futureObligation).toHaveTextContent("Turn 9");
+    expect(futureObligation).not.toHaveTextContent("due_turn 9");
     expect(futureObligation).toHaveTextContent("$25 scheduled rent-share transfer");
     expect(futureObligation).toHaveTextContent("Settlement unavailable until this obligation is due.");
+    fireEvent.click(within(futureObligation).getByRole("button", { name: "Show obligation technical record" }));
+    expect(futureObligation).toHaveTextContent("due_turn 9");
     const futureControl = within(futureObligation).getByRole("button", { name: "Unavailable until due" });
     expect(futureControl).toBeDisabled();
 
@@ -1014,7 +1034,7 @@ describe("Stage 10.4 frontend component coverage", () => {
       }),
     );
 
-    fireEvent.click(within(obligation).getByRole("button", { name: "Enforce obligation" }));
+    fireEvent.click(within(immediateObligation).getByRole("button", { name: "Enforce obligation" }));
 
     await waitFor(() =>
       expect(
@@ -1032,7 +1052,7 @@ describe("Stage 10.4 frontend component coverage", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url) === `${apiBaseUrl}/games/${gameId}/contracts/enforce`)).toBe(
       false,
     );
-    expect(within(obligation).getByRole("button", { name: "Enforcing..." })).toBeDisabled();
+    expect(within(immediateObligation).getByRole("button", { name: "Enforcing..." })).toBeDisabled();
 
     enforcementDeferred.resolve(
       Response.json({
@@ -1080,17 +1100,25 @@ describe("Stage 10.4 frontend component coverage", () => {
     await within(panel).findByText("Grace component audit profile");
 
     expect(panel).toHaveTextContent("Decision history");
-    expect(panel).toHaveTextContent(`ai_decision_id ${decisionId}`);
+    expect(panel).not.toHaveTextContent(`ai_decision_id ${decisionId}`);
     expect(panel).toHaveTextContent("ROLL_DICE");
     expect(panel).toHaveTextContent("BUY_PROPERTY");
     expect(panel).toHaveTextContent("parsed_output.action: BUY_PROPERTY is not in the legal action snapshot.");
+    fireEvent.click(within(panel).getByRole("button", { name: "Show AI technical trace" }));
+    expect(panel).toHaveTextContent(`ai_decision_id ${decisionId}`);
     expect(panel).toHaveTextContent("Self-dialogue timeline");
     expect(panel).toHaveTextContent("Only ROLL_DICE is legal, so buying property should be rejected.");
+    expect(panel).not.toHaveTextContent(`memory_entry_id ${memoryEntryId}`);
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Show memory technical record" })[0]);
     expect(panel).toHaveTextContent(`memory_entry_id ${memoryEntryId}`);
     expect(panel).toHaveTextContent("Grace remembers Ada keeps a cash reserve after trades.");
+    expect(panel).not.toHaveTextContent(`retrieval_record_id ${retrievalRecordId}`);
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Show retrieval technical record" })[0]);
     expect(panel).toHaveTextContent(`retrieval_record_id ${retrievalRecordId}`);
     expect(panel).toHaveTextContent("Retrieved context confirms Ada's cash-reserve preference.");
     expect(panel).toHaveTextContent("Rejected AI outputs");
+    expect(panel).not.toHaveTextContent("rejected_output_id rejected-output-stage-10-4");
+    fireEvent.click(within(panel).getByRole("button", { name: "Show rejected output technical record" }));
     expect(panel).toHaveTextContent("rejected_output_id rejected-output-stage-10-4");
     expect(panel).toHaveTextContent("parsed_output.action: BUY_PROPERTY is not legal.");
   });

@@ -14,6 +14,7 @@ async function createNegotiationGame(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Create game" }).click();
 
   await expect(page).toHaveURL(/\/games\/mock-game-\d+$/);
+  await page.getByRole("tab", { name: "Deals" }).click();
 }
 
 async function startNegotiation(page: import("@playwright/test").Page, topic: string) {
@@ -28,12 +29,12 @@ async function proposeSampleDeal(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Add sample complex instruments" }).click();
   await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Contract preview");
   await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Complex instruments");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("immediate_cash_transfer");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("deferred_cash_payment");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("interest_bearing_debt");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("property_purchase_option");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("rent_share");
-  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("insurance_payout");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Immediate Cash Transfer");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Deferred Cash Payment");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Interest Bearing Debt");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Property Purchase Option");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Rent Share");
+  await expect(page.getByRole("region", { name: "Contract preview" })).toContainText("Insurance Payout");
   await page.getByRole("button", { name: "Propose deal" }).click();
 }
 
@@ -61,7 +62,6 @@ test("human can propose, message, counter, accept, reject, and expire negotiatio
   await expect(page.getByRole("region", { name: "Structured deal builder" })).toContainText("Counteroffer");
   await proposeSampleDeal(page);
   const counterDeal = page.getByRole("region", { name: "Deal v2" });
-  await expect(counterDeal).toContainText("Parent deal");
   await expect(counterDeal).toContainText("Counteroffer");
 
   await counterDeal.getByRole("button", { name: "Accept" }).click();

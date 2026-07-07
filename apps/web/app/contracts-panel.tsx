@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft, Bot, CalendarClock, FileText, History, Info, ListFilter, Loader2, ShieldAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
 import {
@@ -119,7 +119,7 @@ function obligationAssetText(obligation: ObligationRecord): string {
 function dueText(obligation: ObligationRecord): string {
   const parts = [];
   if (obligation.due_turn !== null) {
-    parts.push(`due_turn ${obligation.due_turn}`);
+    parts.push(`Turn ${obligation.due_turn}`);
   }
   if (obligation.due_condition) {
     parts.push(obligation.due_condition);
@@ -265,6 +265,39 @@ function pluralize(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
+function TechnicalRecord({
+  buttonLabel,
+  children,
+}: Readonly<{
+  buttonLabel: string;
+  children: ReactNode;
+}>) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="mt-3">
+      <Button
+        aria-expanded={isOpen}
+        className="min-h-8 px-2.5 py-1.5 text-xs"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+        variant="secondary"
+      >
+        {isOpen ? "Hide technical record" : buttonLabel}
+      </Button>
+      {isOpen ? (
+        <div
+          aria-label="Technical record"
+          className="mt-2 grid gap-1 rounded border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-700"
+          role="group"
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ContractEnforcementStatus({ result }: Readonly<{ result: ContractEnforcementResult }>) {
   const text =
     result.status === "rejected"
@@ -320,28 +353,33 @@ function ActiveContracts({
           activeContracts.map((contract) => (
             <article
               key={contract.id}
-              aria-label={`Contract ${contract.id}`}
+              aria-label={`Contract between ${playerNames(game, contract.party_player_ids)}`}
               className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h3 className="font-semibold text-neutral-950">Contract {contract.id}</h3>
+                  <h3 className="font-semibold text-neutral-950">
+                    Agreement between {playerNames(game, contract.party_player_ids)}
+                  </h3>
                   <p className="mt-1 text-neutral-700">Parties {playerNames(game, contract.party_player_ids)}</p>
                 </div>
                 <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                  Status {contract.status}
+                  {contract.status === "active" ? "Active" : contract.status}
                 </span>
               </div>
               <div className="mt-3 grid gap-1 text-xs text-neutral-700">
-                <p>deal_id {contract.deal_id ?? "not linked"}</p>
-                <p>source_agreement_id {contract.source_agreement_id ?? "not linked"}</p>
-                <p>effective_event_id {contract.effective_event_id ?? "not linked"}</p>
                 <p>Created {formatDate(contract.created_at)}</p>
                 <p>Effective {formatDate(contract.effective_at)}</p>
               </div>
               <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs leading-5 text-neutral-700">
                 {contractTermText(contract)}
               </p>
+              <TechnicalRecord buttonLabel="Show contract technical record">
+                <p>contract_id {contract.id}</p>
+                <p>deal_id {contract.deal_id ?? "not linked"}</p>
+                <p>source_agreement_id {contract.source_agreement_id ?? "not linked"}</p>
+                <p>effective_event_id {contract.effective_event_id ?? "not linked"}</p>
+              </TechnicalRecord>
             </article>
           ))
         )}
@@ -392,17 +430,21 @@ function UpcomingObligations({
             return (
               <article
                 key={obligation.id}
-                aria-label={`Obligation ${obligation.id}`}
+                aria-label={`Obligation ${playerName(game, obligation.obligated_player_id)} to ${playerName(
+                  game,
+                  obligation.counterparty_player_id,
+                )}`}
                 className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <h3 className="font-semibold text-neutral-950">obligation_id {obligation.id}</h3>
+                  <h3 className="font-semibold text-neutral-950">
+                    {playerName(game, obligation.obligated_player_id)} owes {playerName(game, obligation.counterparty_player_id)}
+                  </h3>
                   <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
                     {obligation.status}
                   </span>
                 </div>
                 <div className="mt-3 grid gap-1 text-xs text-neutral-700">
-                  <p>contract_id {obligation.contract_id}</p>
                   <p>{dueText(obligation)}</p>
                   <p>{obligationAssetText(obligation)}</p>
                   <p>Counterparty {playerName(game, obligation.counterparty_player_id)}</p>
@@ -433,6 +475,12 @@ function UpcomingObligations({
                     </p>
                   ) : null}
                 </div>
+                <TechnicalRecord buttonLabel="Show obligation technical record">
+                  <p>obligation_id {obligation.id}</p>
+                  <p>contract_id {obligation.contract_id}</p>
+                  <p>due_turn {obligation.due_turn ?? "not set"}</p>
+                  <p>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</p>
+                </TechnicalRecord>
               </article>
             );
           })
@@ -470,12 +518,16 @@ function SettlementHistory({
         ) : (
           settled.map((obligation) => (
             <article key={obligation.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
-              <p className="font-semibold text-neutral-950">settled_at {formatDate(obligation.settled_at)}</p>
-              <p className="mt-1">triggering event {obligation.triggering_event_id ?? "not linked"}</p>
-              <p className="mt-1">linked contract_id {obligation.contract_id}</p>
+              <p className="font-semibold text-neutral-950">Settled {formatDate(obligation.settled_at)}</p>
               <p className="mt-2 rounded-md bg-white px-3 py-2 leading-5">
                 {obligation.transfer_summary ?? obligationAssetText(obligation)}
               </p>
+              <TechnicalRecord buttonLabel="Show settlement technical record">
+                <p>obligation_id {obligation.id}</p>
+                <p>contract_id {obligation.contract_id}</p>
+                <p>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</p>
+                <p>settled_at {formatDate(obligation.settled_at)}</p>
+              </TechnicalRecord>
             </article>
           ))
         )}
@@ -515,16 +567,19 @@ function ContractOutcomeExplanations({
           outcomes.map((outcome) => (
             <article key={outcome.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs">
               <div className="flex flex-wrap items-center gap-2 text-neutral-700">
-                <span className="font-semibold text-neutral-950">contract_id {outcome.contract_id}</span>
+                <span className="font-semibold text-neutral-950">Contract outcome</span>
                 <span className="rounded bg-white px-1.5 py-0.5 font-medium text-neutral-600">
                   {String(outcome.decision.status ?? "recorded")}
                 </span>
               </div>
-              <p className="mt-1 text-neutral-600">obligation_id {outcome.obligation_id ?? "contract"}</p>
-              <p className="mt-1 text-neutral-600">source_deal_id {outcome.source_deal_id ?? "not linked"}</p>
               <p className="mt-2 rounded-md bg-white px-3 py-2 leading-5 text-neutral-700">
                 {outcome.explanation_text}
               </p>
+              <TechnicalRecord buttonLabel="Show outcome technical record">
+                <p>contract_id {outcome.contract_id}</p>
+                <p>obligation_id {outcome.obligation_id ?? "contract"}</p>
+                <p>source_deal_id {outcome.source_deal_id ?? "not linked"}</p>
+              </TechnicalRecord>
             </article>
           ))
         )}

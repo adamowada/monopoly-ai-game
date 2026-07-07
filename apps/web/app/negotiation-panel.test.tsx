@@ -350,7 +350,7 @@ describe("NegotiationPanel", () => {
 
     const thread = await screen.findByRole("region", { name: "Negotiation thread" });
     await waitFor(() => expect(thread).toHaveTextContent("Opening trade"));
-    expect(thread).toHaveTextContent("round_number 1");
+    expect(thread).toHaveTextContent("Round 1");
     expect(thread).toHaveTextContent("Participants Ada, Grace");
 
     fireEvent.change(screen.getByLabelText("Freeform message"), {
@@ -364,12 +364,12 @@ describe("NegotiationPanel", () => {
     expect(preview).toHaveTextContent("Contract preview");
     expect(preview).toHaveTextContent("Complex instruments");
     for (const termKind of [
-      "immediate_cash_transfer",
-      "deferred_cash_payment",
-      "interest_bearing_debt",
-      "property_purchase_option",
-      "rent_share",
-      "insurance_payout",
+      "Immediate Cash Transfer",
+      "Deferred Cash Payment",
+      "Interest Bearing Debt",
+      "Property Purchase Option",
+      "Rent Share",
+      "Insurance Payout",
     ]) {
       expect(preview).toHaveTextContent(termKind);
     }
@@ -379,7 +379,7 @@ describe("NegotiationPanel", () => {
     const deal = await screen.findByRole("region", { name: "Deal v1" });
     expect(deal).toHaveTextContent("Deal v1");
     expect(deal).toHaveTextContent("Proposed");
-    expect(deal).toHaveTextContent("immediate_cash_transfer");
+    expect(deal).toHaveTextContent("Immediate Cash Transfer");
 
     const dealSubmission = fetchMock.mock.calls.find(
       ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/deals` && init?.method === "POST",
@@ -417,8 +417,8 @@ describe("NegotiationPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Propose deal" }));
 
     const counterDeal = await screen.findByRole("region", { name: "Deal v2" });
-    expect(counterDeal).toHaveTextContent("Parent deal deal-1");
     expect(counterDeal).toHaveTextContent("Counteroffer");
+    expect(counterDeal).not.toHaveTextContent("parent_deal_id");
     const counterSubmission = fetchMock.mock.calls.find(
       ([url, init]) =>
         String(url) === `${apiBaseUrl}/games/${gameId}/deals` &&
@@ -430,7 +430,9 @@ describe("NegotiationPanel", () => {
     fireEvent.click(within(counterDeal).getByRole("button", { name: "Accept" }));
 
     await waitFor(() => expect(counterDeal).toHaveTextContent("Accepted"));
+    fireEvent.click(within(counterDeal).getByRole("button", { name: "Show deal technical record" }));
     expect(counterDeal).toHaveTextContent("accepted_at");
+    expect(counterDeal).toHaveTextContent("parent_deal_id deal-1");
     expect(within(counterDeal).queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
   });
 

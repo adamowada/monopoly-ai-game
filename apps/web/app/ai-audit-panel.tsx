@@ -12,7 +12,7 @@ import {
   Search,
   ShieldAlert,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   readAiDecisions,
@@ -84,6 +84,17 @@ function validationText(errors: AiValidationError[]): string {
     .join(" ");
 }
 
+function formatTitleCase(value: string): string {
+  return value
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function decisionLabel(decision: AiDecision, game: GameMetadata): string {
+  return `${playerName(game, decision.player_id)} ${formatTitleCase(decision.decision_type).toLowerCase()}`;
+}
+
 function metadataRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -115,6 +126,30 @@ function ErrorNote({ text }: Readonly<{ text: string }>) {
   );
 }
 
+function TechnicalRecord({
+  buttonLabel,
+  children,
+}: Readonly<{
+  buttonLabel: string;
+  children: ReactNode;
+}>) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="mt-3">
+      <button
+        aria-expanded={isOpen}
+        className="rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+      >
+        {isOpen ? "Hide technical record" : buttonLabel}
+      </button>
+      {isOpen ? <div className="mt-2 grid gap-2">{children}</div> : null}
+    </div>
+  );
+}
+
 function InlineMeta({ label, value }: Readonly<{ label: string; value: string | null | undefined }>) {
   const displayValue = value ?? "n/a";
   return (
@@ -142,7 +177,7 @@ function StatusBadge({ status }: Readonly<{ status: AiDecision["status"] }>) {
       ) : (
         <ShieldAlert aria-hidden="true" className="size-3" />
       )}
-      {status}
+      {formatTitleCase(status)}
     </span>
   );
 }
@@ -176,9 +211,7 @@ function ProfilesView({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h4 className="text-sm font-semibold text-neutral-950">{profile.display_name}</h4>
-                <p className="text-xs text-neutral-600">
-                  {playerName(game, profile.player_id)} · ai_profile_id {profile.ai_profile_id}
-                </p>
+                <p className="text-xs text-neutral-600">{playerName(game, profile.player_id)}</p>
               </div>
               <span className="text-xs text-neutral-500">{formatDate(profile.created_at)}</span>
             </div>
@@ -200,6 +233,12 @@ function ProfilesView({
               <p className="text-[11px] font-semibold uppercase text-neutral-500">Persona summary</p>
               <p className="mt-1 text-neutral-950">{profile.persona_summary}</p>
             </div>
+            <TechnicalRecord buttonLabel="Show profile technical record">
+              <div className="flex flex-wrap gap-2">
+                <InlineMeta label="ai_profile_id" value={profile.ai_profile_id} />
+                <InlineMeta label="player_id" value={profile.player_id} />
+              </div>
+            </TechnicalRecord>
           </article>
         ))}
       </div>
@@ -222,22 +261,27 @@ function LinkedMemory({
         Memory entries
       </h5>
       {linked.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">No memory_entry_ids were linked to this decision.</p>
+        <p className="mt-2 text-sm text-neutral-600">No memory notes were linked to this decision.</p>
       ) : (
         <ul className="mt-2 grid gap-2">
           {linked.map((entry) => (
             <li key={entry.memory_entry_id} className="text-sm text-neutral-700">
-              <span className="font-medium text-neutral-950">memory_entry_id {entry.memory_entry_id}</span>
-              <span className="block">Used by decision {decision.ai_decision_id}</span>
+              <span className="font-medium text-neutral-950">{entry.content}</span>
               <span className="block">
                 {entry.category} - {entry.visibility} - importance {entry.importance}
               </span>
               <span className="block">
                 {isCompactedSummary(entry)
                   ? `compacted summary of ${compactionSourceIds(entry).length} source memories`
-                  : `superseded by ${entry.superseded_by_memory_id ?? "n/a"}`}
+                  : "active memory note"}
               </span>
-              <span className="block">{entry.content}</span>
+              <TechnicalRecord buttonLabel="Show memory technical record">
+                <div className="flex flex-wrap gap-2">
+                  <InlineMeta label="memory_entry_id" value={entry.memory_entry_id} />
+                  <InlineMeta label="ai_decision_id" value={decision.ai_decision_id} />
+                  <InlineMeta label="superseded_by_memory_id" value={entry.superseded_by_memory_id} />
+                </div>
+              </TechnicalRecord>
             </li>
           ))}
         </ul>
@@ -261,17 +305,22 @@ function LinkedRetrievals({
         Retrieved context records
       </h5>
       {linked.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-600">No retrieval_record_ids were linked to this decision.</p>
+        <p className="mt-2 text-sm text-neutral-600">No retrieved context was linked to this decision.</p>
       ) : (
         <ul className="mt-2 grid gap-2">
           {linked.map((record) => (
             <li key={record.retrieval_record_id} className="text-sm text-neutral-700">
-              <span className="font-medium text-neutral-950">retrieval_record_id {record.retrieval_record_id}</span>
+              <span className="font-medium text-neutral-950">{record.content}</span>
               <span className="block">
-                Linked decision {record.ai_decision_id} · source {record.source_type}:{record.source_id} · score{" "}
-                {record.score === null ? "n/a" : record.score.toFixed(2)}
+                {record.source_type} context{record.score === null ? "" : ` - score ${record.score.toFixed(2)}`}
               </span>
-              <span className="block">{record.content}</span>
+              <TechnicalRecord buttonLabel="Show retrieval technical record">
+                <div className="flex flex-wrap gap-2">
+                  <InlineMeta label="retrieval_record_id" value={record.retrieval_record_id} />
+                  <InlineMeta label="ai_decision_id" value={record.ai_decision_id} />
+                  <InlineMeta label="source_id" value={record.source_id} />
+                </div>
+              </TechnicalRecord>
             </li>
           ))}
         </ul>
@@ -298,19 +347,21 @@ function LinkedDialogue({
           {dialogue.map((entry) => (
             <li key={entry.self_dialogue_id} className="border-l-2 border-violet-200 pl-3 text-sm text-neutral-700">
               <span className="font-medium text-neutral-950">
-                #{entry.sequence} {entry.role} · self_dialogue_id {entry.self_dialogue_id}
+                #{entry.sequence} {entry.role} - {formatTitleCase(entry.status)}
               </span>
-              <span className="block">
-                Linked decision {entry.ai_decision_id} - ai_profile_id {entry.ai_profile_id ?? "n/a"}
-              </span>
-              <span className="block">
-                player {entry.player_id} - phase {entry.phase ?? "n/a"} - state_hash {entry.state_hash ?? "n/a"} - status{" "}
-                {entry.status}
-              </span>
+              <span className="block">{entry.phase ? `Phase ${formatTitleCase(entry.phase)}` : "Phase unavailable"}</span>
               <span className="block">{entry.content}</span>
-              <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-100 p-2 text-xs text-neutral-800">
-                {jsonBlock(entry.payload)}
-              </pre>
+              <TechnicalRecord buttonLabel="Show dialogue technical record">
+                <div className="flex flex-wrap gap-2">
+                  <InlineMeta label="self_dialogue_id" value={entry.self_dialogue_id} />
+                  <InlineMeta label="ai_decision_id" value={entry.ai_decision_id} />
+                  <InlineMeta label="ai_profile_id" value={entry.ai_profile_id} />
+                  <InlineMeta label="state_hash" value={entry.state_hash} />
+                </div>
+                <pre className="overflow-x-auto rounded-md bg-neutral-100 p-2 text-xs text-neutral-800">
+                  {jsonBlock(entry.payload)}
+                </pre>
+              </TechnicalRecord>
             </li>
           ))}
         </ol>
@@ -332,26 +383,29 @@ function RejectedOutputList({ records }: Readonly<{ records: AiRejectedOutput[] 
         <ul className="mt-2 grid gap-3">
           {records.map((record) => (
             <li key={record.rejected_output_id} className="rounded-md bg-white p-3 text-sm text-neutral-700">
-              <div className="flex flex-wrap gap-2">
-                <InlineMeta label="rejected_output_id" value={record.rejected_output_id} />
-                <InlineMeta label="state_hash" value={record.state_hash} />
-                <InlineMeta label="status" value={record.status} />
-                <InlineMeta label="rejected_action_id" value={record.rejected_action_id} />
-              </div>
+              <p className="font-medium text-neutral-950">{formatTitleCase(record.status)} AI output</p>
               <p className="mt-2 font-medium text-neutral-950">Validation errors</p>
               <p>{validationText(record.validation_errors)}</p>
-              <div className="mt-2 grid gap-2 md:grid-cols-2">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase text-neutral-500">Raw output</p>
-                  <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-950 p-2 text-xs text-white">{record.raw_output}</pre>
+              <TechnicalRecord buttonLabel="Show rejected output technical record">
+                <div className="flex flex-wrap gap-2">
+                  <InlineMeta label="rejected_output_id" value={record.rejected_output_id} />
+                  <InlineMeta label="state_hash" value={record.state_hash} />
+                  <InlineMeta label="status" value={record.status} />
+                  <InlineMeta label="rejected_action_id" value={record.rejected_action_id} />
                 </div>
-                <div>
-                  <p className="text-[11px] font-semibold uppercase text-neutral-500">Parsed output</p>
-                  <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-950 p-2 text-xs text-white">
-                    {jsonBlock(record.parsed_output)}
-                  </pre>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase text-neutral-500">Raw output</p>
+                    <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-950 p-2 text-xs text-white">{record.raw_output}</pre>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase text-neutral-500">Parsed output</p>
+                    <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-950 p-2 text-xs text-white">
+                      {jsonBlock(record.parsed_output)}
+                    </pre>
+                  </div>
                 </div>
-              </div>
+              </TechnicalRecord>
             </li>
           ))}
         </ul>
@@ -369,26 +423,24 @@ function DecisionCard({
   decision: AiDecision;
   game: GameMetadata;
 }>) {
+  const label = decisionLabel(decision, game);
+
   return (
-    <article className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
+    <article
+      aria-label={`AI decision: ${label} ${formatTitleCase(decision.status)}`}
+      className="rounded-md border border-neutral-200 bg-neutral-50 p-4"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h4 className="text-sm font-semibold text-neutral-950">
-            Decision {decision.ai_decision_id} · {playerName(game, decision.player_id)}
+            {label}
           </h4>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <InlineMeta label="ai_decision_id" value={decision.ai_decision_id} />
-            <InlineMeta label="ai_profile_id" value={decision.ai_profile_id} />
-            <InlineMeta label="state_hash" value={decision.state_hash} />
-          </div>
+          <p className="mt-1 text-xs text-neutral-600">
+            {formatTitleCase(decision.phase ?? "phase unavailable")} - {formatDate(decision.created_at)}
+          </p>
         </div>
         <StatusBadge status={decision.status} />
       </div>
-
-      <p className="mt-3 text-xs text-neutral-600">
-        Trace state/legal actions -&gt; prompt context/retrieved records/memory -&gt; raw output/parsed output -&gt; accepted or
-        rejected status.
-      </p>
 
       <div className="mt-3 grid gap-3">
         <div className="rounded-md border border-neutral-200 bg-white p-3">
@@ -396,23 +448,44 @@ function DecisionCard({
             <GitBranch aria-hidden="true" className="size-3.5" />
             Legal actions snapshot
           </h5>
-          <ul className="mt-2 grid gap-2 text-sm text-neutral-700">
-            {decision.legal_actions.map((action) => (
-              <li key={`${action.actor_id}-${action.type}-${JSON.stringify(action.payload)}`}>
-                <span className="font-medium text-neutral-950">{action.type}</span>
-                <span className="block">
-                  actor {action.actor_id} · expected_state_hash {action.expected_state_hash} · event_sequence{" "}
-                  {action.expected_event_sequence}
-                </span>
-                <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-100 p-2 text-xs text-neutral-800">
-                  {jsonBlock(action.payload)}
-                </pre>
-              </li>
-            ))}
-          </ul>
+          {decision.legal_actions.length === 0 ? (
+            <p className="mt-2 text-sm text-neutral-600">No legal actions were attached to this decision.</p>
+          ) : (
+            <ul className="mt-2 grid gap-2 text-sm text-neutral-700">
+              {decision.legal_actions.map((action) => (
+                <li key={`${action.actor_id}-${action.type}-${JSON.stringify(action.payload)}`}>
+                  <span className="font-medium text-neutral-950">{action.type}</span>
+                  {action.description ? <span className="block">{action.description}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="grid gap-3 xl:grid-cols-2">
+          <LinkedDialogue dialogue={context.dialogue} />
+          <LinkedMemory decision={decision} memory={context.memory} />
+        </div>
+
+        <div className="grid gap-3 xl:grid-cols-2">
+          <LinkedRetrievals decision={decision} retrieval={context.retrieval} />
+          <RejectedOutputList records={context.rejectedOutputs} />
+        </div>
+
+        <p className="text-sm text-neutral-700">
+          <span className="font-medium text-neutral-950">Validation errors</span>{" "}
+          {validationText(decision.validation_errors)}
+        </p>
+
+        <TechnicalRecord buttonLabel="Show AI technical trace">
+          <div className="flex flex-wrap gap-2">
+            <InlineMeta label="ai_decision_id" value={decision.ai_decision_id} />
+            <InlineMeta label="ai_profile_id" value={decision.ai_profile_id} />
+            <InlineMeta label="state_hash" value={decision.state_hash} />
+            <InlineMeta label="prompt_context_hash" value={decision.prompt_context_hash} />
+            <InlineMeta label="accepted_event_id" value={decision.accepted_event_id} />
+            <InlineMeta label="rejected_action_id" value={decision.rejected_action_id} />
+          </div>
           <div className="rounded-md border border-neutral-200 bg-white p-3">
             <h5 className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-neutral-500">
               <Brain aria-hidden="true" className="size-3.5" />
@@ -422,38 +495,25 @@ function DecisionCard({
               {jsonBlock(decision.prompt_context)}
             </pre>
           </div>
-          <LinkedDialogue dialogue={context.dialogue} />
-        </div>
-
-        <div className="grid gap-3 xl:grid-cols-2">
-          <LinkedMemory decision={decision} memory={context.memory} />
-          <LinkedRetrievals decision={decision} retrieval={context.retrieval} />
-        </div>
-
-        <div className="grid gap-3 xl:grid-cols-2">
-          <div className="rounded-md border border-neutral-200 bg-white p-3">
-            <h5 className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-neutral-500">
-              <FileJson2 aria-hidden="true" className="size-3.5" />
-              Raw output
-            </h5>
-            <pre className="mt-2 overflow-x-auto rounded-md bg-neutral-950 p-3 text-xs text-white">{decision.raw_output}</pre>
+          <div className="grid gap-3 xl:grid-cols-2">
+            <div className="rounded-md border border-neutral-200 bg-white p-3">
+              <h5 className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-neutral-500">
+                <FileJson2 aria-hidden="true" className="size-3.5" />
+                Raw output
+              </h5>
+              <pre className="mt-2 overflow-x-auto rounded-md bg-neutral-950 p-3 text-xs text-white">{decision.raw_output}</pre>
+            </div>
+            <div className="rounded-md border border-neutral-200 bg-white p-3">
+              <h5 className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-neutral-500">
+                <FileJson2 aria-hidden="true" className="size-3.5" />
+                Parsed output
+              </h5>
+              <pre className="mt-2 overflow-x-auto rounded-md bg-neutral-950 p-3 text-xs text-white">
+                {jsonBlock(decision.parsed_output)}
+              </pre>
+            </div>
           </div>
-          <div className="rounded-md border border-neutral-200 bg-white p-3">
-            <h5 className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase text-neutral-500">
-              <FileJson2 aria-hidden="true" className="size-3.5" />
-              Parsed output
-            </h5>
-            <pre className="mt-2 overflow-x-auto rounded-md bg-neutral-950 p-3 text-xs text-white">
-              {jsonBlock(decision.parsed_output)}
-            </pre>
-            <p className="mt-2 text-sm text-neutral-700">
-              <span className="font-medium text-neutral-950">Validation errors</span>{" "}
-              {validationText(decision.validation_errors)}
-            </p>
-          </div>
-        </div>
-
-        <RejectedOutputList records={context.rejectedOutputs} />
+        </TechnicalRecord>
       </div>
     </article>
   );
@@ -528,16 +588,12 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
           </div>
           <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-200">
             <Brain aria-hidden="true" className="size-3" />
-            {profiles.length} profiles · {decisions.length} decisions
+            {profiles.length} profiles - {decisions.length} decisions
           </span>
         </div>
         <p className="mt-3 text-xs text-neutral-600">
-          Traceability: state/legal actions -&gt; Prompt context, Memory entries, and Retrieved context records -&gt; Raw output,
-          Parsed output, Validation errors, and accepted or rejected status.
-        </p>
-        <p className="mt-2 text-xs text-neutral-600">
-          Notebook sections: AI profile, Decision history, Self-dialogue timeline, Memory entries, Retrieved context records,
-          Rejected AI outputs, Validation errors.
+          The notebook summarizes AI choices, memory notes, retrieved context, and rejected moves. Technical trace records stay behind
+          explicit reveals.
         </p>
       </div>
 
@@ -552,8 +608,7 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
               Decision history
             </h3>
             <p className="mt-1 text-xs text-neutral-600">
-              Decisions link ai_decision_id, ai_profile_id, state_hash, legal_actions, prompt_context, raw_output,
-              parsed_output, validation_errors, memory_entry_ids, and retrieval_record_ids.
+              Decisions show player intent, legal moves, supporting notes, and validation state.
             </p>
           </div>
           <GitBranch aria-hidden="true" className="size-4 text-violet-700" />
@@ -598,20 +653,22 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
           <ul className="mt-3 grid gap-2 text-sm text-neutral-700">
             {memory.map((entry) => (
               <li key={entry.memory_entry_id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
-                <span className="font-medium text-neutral-950">memory_entry_id {entry.memory_entry_id}</span>
+                <span className="font-medium text-neutral-950">{entry.content}</span>
                 <span className="block">
-                  {playerName(game, entry.player_id)} · {entry.category} · {entry.visibility} · ai_profile_id{" "}
-                  {entry.ai_profile_id ?? "n/a"}
+                  {playerName(game, entry.player_id)} - {entry.category} - {entry.visibility} - importance {entry.importance}
                 </span>
-                <span className="block">
-                  decision {entry.source_decision_id} · event {entry.source_event_id ?? "n/a"} · message{" "}
-                  {entry.source_negotiation_message_id ?? "n/a"}
-                </span>
-                <span className="block">
-                  superseded_by_memory_id {entry.superseded_by_memory_id ?? "n/a"}
-                  {isCompactedSummary(entry) ? ` - source_memory_ids ${compactionSourceIds(entry).join(", ")}` : ""}
-                </span>
-                <span className="block">{entry.content}</span>
+                {isCompactedSummary(entry) ? (
+                  <span className="block">Compacted from {compactionSourceIds(entry).length} source memories.</span>
+                ) : null}
+                <TechnicalRecord buttonLabel="Show memory technical record">
+                  <div className="flex flex-wrap gap-2">
+                    <InlineMeta label="memory_entry_id" value={entry.memory_entry_id} />
+                    <InlineMeta label="ai_profile_id" value={entry.ai_profile_id} />
+                    <InlineMeta label="source_decision_id" value={entry.source_decision_id} />
+                    <InlineMeta label="source_event_id" value={entry.source_event_id} />
+                    <InlineMeta label="superseded_by_memory_id" value={entry.superseded_by_memory_id} />
+                  </div>
+                </TechnicalRecord>
               </li>
             ))}
           </ul>
@@ -636,11 +693,15 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
           <ul className="mt-3 grid gap-2 text-sm text-neutral-700">
             {retrieval.map((record) => (
               <li key={record.retrieval_record_id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
-                <span className="font-medium text-neutral-950">retrieval_record_id {record.retrieval_record_id}</span>
-                <span className="block">
-                  Linked decision {record.ai_decision_id} · source {record.source_type}:{record.source_id}
-                </span>
-                <span className="block">{record.content}</span>
+                <span className="font-medium text-neutral-950">{record.content}</span>
+                <span className="block">{record.source_type} context used by an AI decision.</span>
+                <TechnicalRecord buttonLabel="Show retrieval technical record">
+                  <div className="flex flex-wrap gap-2">
+                    <InlineMeta label="retrieval_record_id" value={record.retrieval_record_id} />
+                    <InlineMeta label="ai_decision_id" value={record.ai_decision_id} />
+                    <InlineMeta label="source_id" value={record.source_id} />
+                  </div>
+                </TechnicalRecord>
               </li>
             ))}
           </ul>

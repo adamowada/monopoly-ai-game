@@ -25,22 +25,31 @@ test("shows contracts, obligations, settlement history, source-linked transfers,
   await expect(panel).toBeVisible();
 
   await expect(panel).toContainText("Active contracts");
-  await expect(panel).toContainText("Contract");
+  await expect(panel).toContainText("Agreement between Ada, Grace");
   await expect(panel).toContainText("Parties Ada, Grace");
-  await expect(panel).toContainText("deal_id");
-  await expect(panel).toContainText("source_agreement_id");
-  await expect(panel).toContainText("effective_event_id");
+  await expect(panel).not.toContainText("deal_id");
+  await expect(panel).not.toContainText("source_agreement_id");
+  await expect(panel).not.toContainText("effective_event_id");
 
   await expect(panel).toContainText("Upcoming obligations");
-  await expect(panel).toContainText("obligation_id");
-  await expect(panel).toContainText("contract_id");
-  await expect(panel).toContainText("due_turn");
+  await expect(panel).toContainText("Ada owes Grace");
+  await expect(panel).toContainText("Turn");
+  await expect(panel).not.toContainText("obligation_id");
+  await expect(panel).not.toContainText("contract_id");
+  await expect(panel).not.toContainText("due_turn");
   await expect(panel).toContainText("Counterparty Grace");
 
   await expect(panel).toContainText("Obligation settlement history");
-  await expect(panel).toContainText("settled_at");
-  await expect(panel).toContainText("triggering event");
-  await expect(panel).toContainText("linked contract_id");
+  await expect(panel).toContainText("Settled");
+
+  await panel.getByRole("button", { name: "Show contract technical record" }).first().click();
+  await expect(panel).toContainText("deal_id");
+  await expect(panel).toContainText("source_agreement_id");
+  await expect(panel).toContainText("effective_event_id");
+  await panel.getByRole("button", { name: "Show obligation technical record" }).first().click();
+  await expect(panel).toContainText("obligation_id");
+  await expect(panel).toContainText("contract_id");
+  await expect(panel).toContainText("due_turn");
 
   const log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("Full game log");
