@@ -42,6 +42,7 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
 
   await expect(page.getByLabel("Ada token at Chance, position 7")).toBeVisible();
   await expect(page.getByLabel("Ada token at GO, position 0")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Contracts" }).click();
   const log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("DICE_ROLLED");
   await expect(log).toContainText("TOKEN_MOVED");

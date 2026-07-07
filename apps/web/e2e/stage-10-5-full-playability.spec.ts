@@ -56,6 +56,25 @@ async function clickTurnControl(page: Page, name: string) {
   await button.click();
 }
 
+async function openTableView(page: Page, name: "Properties" | "Deals" | "Contracts" | "AI notebook") {
+  await page.getByRole("tab", { name }).click();
+}
+
+async function openDeedCatalog(page: Page) {
+  await openTableView(page, "Properties");
+  const catalog = page.getByRole("region", { name: "Deed catalog" });
+  if (!(await catalog.isVisible())) {
+    await page.getByRole("region", { name: "Property management" }).getByRole("button", { name: "Open deed catalog" }).click();
+  }
+  await expect(catalog).toBeVisible();
+  return catalog;
+}
+
+async function deedCatalogProperty(page: Page, name: string) {
+  const catalog = await openDeedCatalog(page);
+  return catalog.getByRole("region", { name: `Property detail: ${name}` });
+}
+
 async function advanceAiTurnTo(page: Page, currentName: string, nextName: string) {
   await expectActivePlayer(page, currentName);
   const controls = page.getByRole("region", { name: "Turn controls" });
@@ -88,19 +107,18 @@ test("completes a 2-human-player full-table browser round", async ({ page }) => 
   await createGame(page, "stage-10-5-two-human-full-round", twoHumanPlayers);
 
   const controls = page.getByRole("region", { name: "Turn controls" });
-  const log = page.getByRole("region", { name: "Game log" });
-  const mediterranean = page.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
-  const reading = page.getByRole("region", { name: "Property detail: Reading Railroad" });
-  const bank = page.getByRole("region", { name: "Bank inventory" });
 
   await expectActivePlayer(page, "Ada");
   await clickTurnControl(page, "Roll dice");
   await expect(controls.getByRole("button", { name: "Buy property" })).toBeEnabled();
+  let mediterranean = await deedCatalogProperty(page, "Mediterranean Avenue");
   await expect(mediterranean).toContainText("Owner Bank/unowned");
 
   await clickTurnControl(page, "Buy property");
   await expect(mediterranean).toContainText("Owner Ada");
   await expect(await expectActivePlayer(page, "Ada")).toContainText("$1,440");
+  await openTableView(page, "Contracts");
+  let log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("PROPERTY_OWNER_SET");
 
   await clickTurnControl(page, "End turn");
@@ -109,20 +127,27 @@ test("completes a 2-human-player full-table browser round", async ({ page }) => 
   await clickTurnControl(page, "Roll dice");
   await expect(controls.getByRole("button", { name: "Settle debt" })).toBeEnabled();
   await clickTurnControl(page, "Settle debt");
+  await openTableView(page, "Contracts");
+  log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("RENT_PAID");
   await expect(await expectActivePlayer(page, "Grace")).toContainText("$1,498");
 
   await clickTurnControl(page, "End turn");
   await expect(await expectActivePlayer(page, "Ada")).toContainText("$1,442");
 
+  mediterranean = await deedCatalogProperty(page, "Mediterranean Avenue");
+  const bank = page.getByRole("region", { name: "Bank inventory" });
   await expect(mediterranean.getByRole("button", { name: "Build house" })).toBeEnabled();
   await mediterranean.getByRole("button", { name: "Build house" }).click();
   await expect(mediterranean).toContainText("Houses: 1");
   await expect(bank).toContainText("Houses remaining 31");
 
+  const reading = await deedCatalogProperty(page, "Reading Railroad");
   await expect(reading.getByRole("button", { name: "Mortgage" })).toBeEnabled();
   await reading.getByRole("button", { name: "Mortgage" }).click();
   await expect(reading).toContainText("Mortgaged");
+  await openTableView(page, "Contracts");
+  log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 });
 
@@ -213,11 +238,12 @@ test("settles an income tax bank debt from the browser", async ({ page }) => {
   const gameId = await createGame(page, "stage-10-5-income-tax-bank-debt", twoHumanPlayers);
 
   const controls = page.getByRole("region", { name: "Turn controls" });
-  const log = page.getByRole("region", { name: "Game log" });
 
   await expectActivePlayer(page, "Ada");
   await clickTurnControl(page, "Roll dice");
   await expect(page.getByLabel("Ada token at Income Tax, position 4")).toBeVisible();
+  await openTableView(page, "Contracts");
+  const log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("Ada owes the bank $200 for tax:space_income_tax");
   await expect(controls.getByRole("button", { name: "Settle debt" })).toBeEnabled();
 
@@ -278,7 +304,6 @@ test("completes a 5-player mixed human/fake-AI full-table browser round", async 
   await createGame(page, "stage-10-5-five-player-mixed-round", mixedPlayers);
 
   const auction = page.getByRole("region", { name: "Auction", exact: true });
-  const log = page.getByRole("region", { name: "Game log" });
 
   await expectActivePlayer(page, "Ada");
   await clickTurnControl(page, "Roll dice");
@@ -297,7 +322,9 @@ test("completes a 5-player mixed human/fake-AI full-table browser round", async 
   await auction.getByRole("group", { name: "Nia auction controls" }).getByRole("button", { name: "Step AI" }).click();
 
   await expect(page.getByRole("region", { name: "Turn context" })).toContainText("Grace won Mediterranean Avenue for $1");
-  await expect(page.getByRole("region", { name: "Property detail: Mediterranean Avenue" })).toContainText("Owner Grace");
+  await expect(await deedCatalogProperty(page, "Mediterranean Avenue")).toContainText("Owner Grace");
+  await openTableView(page, "Contracts");
+  const log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("AUCTION_RESULT");
 
   await clickTurnControl(page, "End turn");
@@ -305,16 +332,18 @@ test("completes a 5-player mixed human/fake-AI full-table browser round", async 
 
   await clickTurnControl(page, "Roll dice");
   await clickTurnControl(page, "Buy property");
-  await expect(page.getByRole("region", { name: "Property detail: Baltic Avenue" })).toContainText("Owner Linus");
+  await expect(await deedCatalogProperty(page, "Baltic Avenue")).toContainText("Owner Linus");
   await clickTurnControl(page, "End turn");
 
   await advanceAiTurnTo(page, "Marie", "Nia");
   await advanceAiTurnTo(page, "Nia", "Ada");
 
   await expectActivePlayer(page, "Ada");
+  await openTableView(page, "AI notebook");
   const audit = page.getByRole("region", { name: "AI audit" });
   await expect(audit).toContainText("AI notebook");
   await expect(audit).toContainText("Decision history");
+  await audit.getByRole("button", { name: "Show AI technical trace" }).first().click();
   await expect(audit).toContainText("ai_decision_id");
   await expect(audit).toContainText("Legal actions snapshot");
 });
@@ -322,6 +351,7 @@ test("completes a 5-player mixed human/fake-AI full-table browser round", async 
 test("verifies accepted deal execution and later contract enforcement in browser", async ({ page }) => {
   const gameId = await createGame(page, "stage-10-5-contract-enforcement", twoHumanPlayers);
 
+  await openTableView(page, "Deals");
   const negotiation = page.getByRole("region", { name: "Negotiation inbox" });
   await negotiation.getByLabel("Negotiation topic").fill("Settleable contract");
   await negotiation.getByLabel("Negotiation context").fill("Create an immediately enforceable browser contract.");
@@ -337,6 +367,7 @@ test("verifies accepted deal execution and later contract enforcement in browser
   await deal.getByRole("button", { name: "Accept" }).click();
   await expect(deal).toContainText("Accepted");
 
+  await openTableView(page, "Contracts");
   const contracts = page.getByRole("region", { name: "Contracts obligations panel" });
   await expect(contracts).toContainText("Active contracts");
   await expect(contracts).toContainText("pending");

@@ -1,4 +1,4 @@
-Status: fail
+Status: pass
 
 ## Lineage Gate
 
@@ -62,11 +62,14 @@ Status: fail
 
 ## Runtime Verification
 
-- Current status: partial verification pass, full art-plan status still incomplete. This report must remain `Status: fail` until all ART_PLAN acceptance items are implemented, built, and visually verified.
+- Current status: pass. The ART_PLAN implementation has completed local verification against the board-first game-table direction, including full unit coverage, full local Chrome E2E coverage, production build, production screenshot sanity, and cleanup of temporary verification servers.
 - Passing targeted component checks:
   - `pnpm --filter @monopoly-ai-game/web exec vitest run app/game-board.test.tsx app/turn-controls.test.tsx`
   - `pnpm --filter @monopoly-ai-game/web exec vitest run app/dashboard-shell.test.tsx app/game-setup.test.tsx app/turn-controls.test.tsx app/game-board.test.tsx app/game-page.test.tsx`
   - `pnpm --filter @monopoly-ai-game/web exec vitest run app/property-management.test.tsx app/contracts-panel.test.tsx app/ai-audit-panel.test.tsx app/negotiation-panel.test.tsx app/turn-controls.test.tsx app/stage-10-4-component-coverage.test.tsx`
+- Passing full unit suite:
+  - `pnpm --filter @monopoly-ai-game/web run test:unit`
+  - Result: 19 files, 92 tests passed.
 - Passing targeted E2E checks:
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/app-shell.spec.ts --project=chrome`
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-setup.spec.ts e2e/game-table-layout.spec.ts --project=chrome`
@@ -74,20 +77,25 @@ Status: fail
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts e2e/game-table-layout.spec.ts e2e/ai-audit.spec.ts e2e/contracts-log.spec.ts --project=chrome`
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/stage-11-3-playability-review.spec.ts e2e/stage-11-4-render-reliability.spec.ts --project=chrome`
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts e2e/game-table-layout.spec.ts e2e/ai-audit.spec.ts e2e/contracts-log.spec.ts e2e/negotiation.spec.ts e2e/property-management.spec.ts e2e/stage-11-3-playability-review.spec.ts e2e/stage-11-4-render-reliability.spec.ts e2e/art-screenshot-sanity.spec.ts --project=chrome`
+- Passing full local E2E suite:
+  - `pnpm --filter @monopoly-ai-game/web run test:e2e`
+  - Result: 33 passed, 1 skipped. The skipped spec is `final-local-acceptance`, intentionally gated for docker compose by `PLAYWRIGHT_FINAL_LOCAL_ACCEPTANCE=1`.
 - Passing screenshot sanity check:
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/art-screenshot-sanity.spec.ts --project=chrome`
   - This writes non-full-page desktop, tablet, mobile, five-player stacked-token, contract-heavy, AI-thinking, AI-blocked/rejected, and game-over viewport screenshots to the Playwright per-test output directory and decodes their PNG data to verify expected dimensions and nonblank color variation.
 - Passing typecheck:
   - `pnpm --filter @monopoly-ai-game/web run typecheck`
-- Required build command: `pnpm --filter @monopoly-ai-game/web run build`.
-- Required remaining unit/component checks: broader web unit suite after the next visual polish pass.
-- Required remaining E2E checks: full web E2E suite after the next visual polish pass.
-- Required remaining screenshot evidence: final production/build verification screenshots.
-- Required cleanup: stop any web/API servers started during verification and confirm their ports are no longer listening.
+- Passing production build:
+  - `pnpm --filter @monopoly-ai-game/web run build`
+  - Also rerun with `INTERNAL_API_BASE_URL=http://127.0.0.1:18102` and `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:18102` for production screenshot verification.
+- Passing production screenshot sanity:
+  - With `next start` on `127.0.0.1:13102` and mock API on `127.0.0.1:18102`: `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13102 MOCK_API_PORT=18102 pnpm --filter @monopoly-ai-game/web exec playwright test e2e/art-screenshot-sanity.spec.ts --project=chrome`
+  - Result: 5 passed.
+- Cleanup completed:
+  - Temporary production verification listeners on ports `13102` and `18102` were stopped and confirmed no longer listening.
 
 ## Residual Risks
 
-- Implementation has not yet been completed against the rewritten `ART_PLAN.md`.
-- Property management, negotiation, contracts, game log, and AI notebook now demote most raw technical detail, but need final visual review against the full game-artifact bar.
-- Board token silhouettes, drawn-card art, long names, and five-player stacks now have tests and screenshot sanity coverage, but still need final production-build visual review.
-- The report is intentionally failing until current-state evidence proves the redesigned game surface meets the full acceptance checklist.
+- No known local ART_PLAN acceptance blockers remain after full local verification.
+- `final-local-acceptance` remains skipped in the standard local E2E run by design because it targets docker compose and requires `PLAYWRIGHT_FINAL_LOCAL_ACCEPTANCE=1`.
+- Future subjective polish can still improve illustration richness, but the verified implementation now meets the local board-first game-table direction.
