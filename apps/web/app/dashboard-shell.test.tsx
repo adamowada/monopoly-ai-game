@@ -1,5 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DashboardShell } from "./dashboard-shell";
@@ -35,31 +34,8 @@ const rejectedAction: RejectedActionRecord = {
 };
 
 function renderDashboard(rejectedActions: RejectedActionRecord[] = []) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
-    },
-  });
-
   return render(
-    <QueryClientProvider client={queryClient}>
-      <DashboardShell
-        initialHealth={{
-          state: "online",
-          checkedAt: "2026-07-04T00:00:00.000Z",
-          health: {
-            status: "ok",
-            service: "api",
-            stage: "phase-1-stage-1.3",
-            environment: "test",
-            database: "configured",
-          },
-        }}
-        initialRejectedActions={rejectedActions}
-      />
-    </QueryClientProvider>,
+    <DashboardShell initialRejectedActions={rejectedActions} />,
   );
 }
 
@@ -74,25 +50,19 @@ describe("DashboardShell", () => {
       }),
     ).toBeInTheDocument();
 
-    const navigation = screen.getByRole("navigation", { name: "Game prep navigation" });
-    expect(within(navigation).getByRole("link", { name: "Setup" })).toHaveAttribute("href", "#game-setup");
-    expect(within(navigation).getByRole("link", { name: "Connection details" })).toHaveAttribute(
-      "href",
-      "#connection-details",
-    );
-    expect(within(navigation).queryByRole("link", { name: /Table check/ })).not.toBeInTheDocument();
-    expect(within(navigation).queryByRole("link", { name: /Table areas/ })).not.toBeInTheDocument();
-
-    const healthStatus = screen.getByRole("status", { name: "Referee readiness" });
-    expect(healthStatus).toHaveTextContent("Ready");
-    expect(healthStatus).toHaveTextContent("Local referee");
+    expect(screen.queryByRole("navigation", { name: "Game prep navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Setup" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connection details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Referee readiness" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "Set the seats, then open the board." }),
+    ).not.toBeInTheDocument();
 
     expect(screen.getByRole("region", { name: "Choose seats" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2, name: "Table check" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2, name: "Table areas" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Connection details" }));
-    expect(screen.getByRole("row", { name: /Rules referee ready Move validation/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connection details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Rules referee ready Move validation/ })).not.toBeInTheDocument();
   });
 
   it("keeps rule rulings inside troubleshooting details", () => {

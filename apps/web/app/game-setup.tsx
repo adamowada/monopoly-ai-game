@@ -17,13 +17,8 @@ type SetupPlayer = {
   color: string;
 };
 
-type GameSetupPanelProps = {
-  initialSeed?: string;
-};
-
 const playerColors = ["#0f766e", "#2563eb", "#7c3aed", "#dc2626", "#ca8a04"];
 const hexColorPattern = /^#[0-9a-fA-F]{6}$/;
-const defaultSeed = "setup-local-table";
 
 export const AI_PLAYER_NAMES = [
   "Emma",
@@ -147,9 +142,9 @@ function validateSetup(players: SetupPlayer[], maxRounds: string, proposalLimit:
   return messages;
 }
 
-export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
+export function GameSetupPanel() {
   const router = useRouter();
-  const [seed, setSeed] = useState(() => initialSeed ?? defaultSeed);
+  const [seed, setSeed] = useState(generateSeed);
   const [players, setPlayers] = useState<SetupPlayer[]>(() => [defaultPlayer(0), defaultPlayer(1)]);
   const [maxRounds, setMaxRounds] = useState("3");
   const [proposalLimit, setProposalLimit] = useState("4");

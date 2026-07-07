@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AI_PLAYER_NAMES, GameSetupPanel } from "./game-setup";
 import { createGame, type GameMetadata } from "../lib/api/games";
@@ -21,6 +21,12 @@ vi.mock("../lib/api/games", async () => {
 });
 
 const createGameMock = vi.mocked(createGame);
+
+function expectedGeneratedSeed(timestamp: number, randomValue: number): string {
+  return `setup-${timestamp.toString(36)}-${Math.floor(randomValue * 100_000)
+    .toString(36)
+    .padStart(4, "0")}`;
+}
 
 function gameMetadata(overrides: Partial<GameMetadata> = {}): GameMetadata {
   return {
@@ -75,12 +81,23 @@ describe("GameSetupPanel", () => {
     push.mockReset();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("renders setup controls for local 2-5 player game creation", () => {
-    render(<GameSetupPanel initialSeed="seed-fixed" />);
+    const timestamp = 1_789_000_000_000;
+    const randomValue = 0.31415;
+    vi.spyOn(Date, "now").mockReturnValue(timestamp);
+    vi.spyOn(Math, "random").mockReturnValue(randomValue);
+
+    render(<GameSetupPanel />);
 
     expect(screen.getByRole("heading", { level: 2, name: "Choose seats" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Choose seats" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("seed-fixed");
+    expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue(
+      expectedGeneratedSeed(timestamp, randomValue),
+    );
     expect(screen.getByRole("button", { name: "Generate seed" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add player" })).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Configured players" })).not.toBeInTheDocument();
@@ -97,15 +114,34 @@ describe("GameSetupPanel", () => {
     expect(screen.getByRole("spinbutton", { name: "Proposal limit per player" })).toHaveValue(4);
   });
 
-  it("uses a stable default seed when no initial seed is provided", () => {
+  it("starts each setup with a generated seed", () => {
+    const firstTimestamp = 1_789_000_000_000;
+    const secondTimestamp = 1_789_000_001_000;
+    const firstRandomValue = 0.12345;
+    const secondRandomValue = 0.98765;
+    vi.spyOn(Date, "now")
+      .mockReturnValueOnce(firstTimestamp)
+      .mockReturnValueOnce(secondTimestamp);
+    vi.spyOn(Math, "random")
+      .mockReturnValueOnce(firstRandomValue)
+      .mockReturnValueOnce(secondRandomValue);
+
+    const firstRender = render(<GameSetupPanel />);
+    const firstSeed = screen.getByRole("textbox", { name: "Seed" });
+    expect(firstSeed).toHaveValue(expectedGeneratedSeed(firstTimestamp, firstRandomValue));
+    const firstSeedValue = (firstSeed as HTMLInputElement).value;
+
+    firstRender.unmount();
     render(<GameSetupPanel />);
 
-    expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("setup-local-table");
+    const secondSeed = screen.getByRole("textbox", { name: "Seed" });
+    expect(secondSeed).toHaveValue(expectedGeneratedSeed(secondTimestamp, secondRandomValue));
+    expect(secondSeed).not.toHaveValue(firstSeedValue);
   });
 
   it("sends player colors and negotiation cutoffs through settings before navigating", async () => {
     createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
-    render(<GameSetupPanel initialSeed="seed-fixed" />);
+    render(<GameSetupPanel />);
 
     fireEvent.change(screen.getByRole("textbox", { name: "Seed" }), {
       target: { value: "manual-seed" },
@@ -154,7 +190,7 @@ describe("GameSetupPanel", () => {
   });
 
   it("auto-generates common names when seats become AI players", () => {
-    render(<GameSetupPanel initialSeed="seed-fixed" />);
+    render(<GameSetupPanel />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Player 2 type" }), {
       target: { value: "ai" },
@@ -177,7 +213,7 @@ describe("GameSetupPanel", () => {
   });
 
   it("blocks invalid setup choices before calling the backend", async () => {
-    render(<GameSetupPanel initialSeed="seed-fixed" />);
+    render(<GameSetupPanel />);
 
     fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), {
       target: { value: "Ada" },
@@ -206,7 +242,7 @@ describe("GameSetupPanel", () => {
       state: "error",
       error: "Server rejected setup: unsupported negotiation cutoff",
     });
-    render(<GameSetupPanel initialSeed="seed-fixed" />);
+    render(<GameSetupPanel />);
 
     fireEvent.click(screen.getByRole("button", { name: "Create game" }));
 

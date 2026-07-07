@@ -715,9 +715,12 @@ describe("Stage 10.4 frontend component coverage", () => {
       game: gameFixture({ id: "game-created-stage-10-4" }),
     });
 
-    render(<GameSetupPanel initialSeed="stage-10-4-seed" />);
+    render(<GameSetupPanel />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add player" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Seed" }), {
+      target: { value: "stage-10-4-seed" },
+    });
     fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), { target: { value: "Ada" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Player 2 name" }), { target: { value: "Grace" } });
     fireEvent.change(screen.getByRole("textbox", { name: "Player 3 name" }), { target: { value: "Linus" } });
