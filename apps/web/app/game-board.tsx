@@ -197,26 +197,21 @@ function tokenShapeForSeat(seatOrder: number): TokenShape {
   return tokenShapes[seatOrder % tokenShapes.length] ?? "shield";
 }
 
-function TokenSilhouette({
+function TokenPuck({
   color,
-  shape,
 }: Readonly<{
   color: string;
-  shape: TokenShape;
 }>) {
-  const paths: Record<TokenShape, string> = {
-    shield: "M12 2 L21 6 V13 C21 18 17.5 21 12 23 C6.5 21 3 18 3 13 V6 Z",
-    diamond: "M12 2 L22 12 L12 22 L2 12 Z",
-    tag: "M5 4 H17 L22 9 V20 H5 Z",
-    hex: "M7 3 H17 L23 12 L17 21 H7 L1 12 Z",
-    crest: "M12 2 C16 5 20 4 22 8 C20 16 17 20 12 23 C7 20 4 16 2 8 C4 4 8 5 12 2 Z",
-  };
-
   return (
-    <svg aria-hidden="true" className="absolute inset-0 size-full" data-token-silhouette="" viewBox="0 0 24 24">
-      <path d={paths[shape]} fill={color} stroke="#fffbea" strokeLinejoin="round" strokeWidth="2" />
-      <path d={paths[shape]} fill="none" opacity="0.45" stroke="#2f2418" strokeLinejoin="round" strokeWidth="1" />
-    </svg>
+    <span
+      aria-hidden="true"
+      className="absolute inset-0 rounded-full border-2 bg-[#fffbea]"
+      data-token-puck=""
+      style={{
+        borderColor: color,
+        boxShadow: `inset 0 -2px 0 ${color}, 0 1px 0 rgba(47, 36, 24, 0.32), 0 0 0 1px rgba(47, 36, 24, 0.28)`,
+      }}
+    />
   );
 }
 
@@ -864,7 +859,7 @@ function TokenStack({
           <span
             key={player.id}
             aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
-            className={`board-token group/token relative inline-grid size-5 place-items-center text-[9px] font-black shadow-sm ring-2 ring-[#2f2418]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e] ${
+            className={`board-token group/token relative inline-grid size-5 place-items-center rounded-full text-[14px] font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e] ${
               isMovingToken ? "board-token-moving z-20" : ""
             } ${isLandingToken ? "board-token-landing z-20" : ""}`}
             data-token-landing={isLandingToken ? "true" : undefined}
@@ -881,10 +876,10 @@ function TokenStack({
             title={player.name}
           >
             {isMovingToken || isLandingToken ? <span aria-hidden="true" className="board-token-trail" data-token-trail="" /> : null}
-            <TokenSilhouette color={color} shape={shape} />
+            <TokenPuck color={color} />
             <span
               aria-hidden="true"
-              className="relative z-10 text-[12px] leading-none drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]"
+              className="relative z-10 translate-y-px leading-none drop-shadow-[0_1px_0_rgba(255,255,255,0.75)]"
               data-player-token-icon=""
             >
               {icon}
@@ -936,7 +931,7 @@ function MotionTokenOverlay({
   return (
     <span
       aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
-      className="board-token board-token-moving board-token-motion-overlay group/token absolute z-50 grid size-6 place-items-center text-[10px] font-black shadow-sm ring-2 ring-[#2f2418]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e]"
+      className="board-token board-token-moving board-token-motion-overlay group/token absolute z-50 grid size-6 place-items-center rounded-full text-base font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e]"
       data-player-id={player.id}
       data-player-token=""
       data-space-index={space.position}
@@ -950,10 +945,10 @@ function MotionTokenOverlay({
       title={player.name}
     >
       <span aria-hidden="true" className="board-token-trail" data-token-trail="" />
-      <TokenSilhouette color={color} shape={shape} />
+      <TokenPuck color={color} />
       <span
         aria-hidden="true"
-        className="relative z-10 text-[14px] leading-none drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]"
+        className="relative z-10 translate-y-px leading-none drop-shadow-[0_1px_0_rgba(255,255,255,0.75)]"
         data-player-token-icon=""
       >
         {icon}

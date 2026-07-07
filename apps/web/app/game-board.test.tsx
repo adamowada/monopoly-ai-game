@@ -309,6 +309,8 @@ describe("ClassicGameBoard", () => {
     expect(
       screen.getByLabelText("Ada token at GO, position 0").querySelector("[data-player-token-icon]"),
     ).toHaveTextContent("🚗");
+    expect(screen.getByLabelText("Ada token at GO, position 0").querySelector("[data-token-puck]")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ada token at GO, position 0").querySelector("[data-token-silhouette]")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-player-token");
     expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-token-shape", "diamond");
     expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-token-icon", "🎩");
@@ -323,7 +325,7 @@ describe("ClassicGameBoard", () => {
     expect(screen.getByLabelText("Ada token at Illinois Avenue, position 24")).toHaveAttribute("data-player-token");
   });
 
-  it("uses distinct game-piece silhouettes when multiple players share one space", () => {
+  it("uses distinct emoji pucks when multiple players share one space", () => {
     render(<ClassicGameBoard game={stackedTokenGameFixture()} />);
 
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
@@ -335,7 +337,8 @@ describe("ClassicGameBoard", () => {
     expect(new Set(shapes)).toEqual(new Set(["shield", "diamond", "tag", "hex", "crest"]));
     expect(new Set(icons)).toEqual(new Set(["🚗", "🎩", "🚂", "🚢", "💎"]));
     for (const token of tokens) {
-      expect(token.querySelector("[data-token-silhouette]")).toBeInTheDocument();
+      expect(token.querySelector("[data-token-puck]")).toBeInTheDocument();
+      expect(token.querySelector("[data-token-silhouette]")).not.toBeInTheDocument();
       expect(token.querySelector("[data-player-token-icon]")).toBeInTheDocument();
     }
   });
@@ -366,6 +369,8 @@ describe("ClassicGameBoard", () => {
     expect(movingToken).toHaveAttribute("data-token-slide", "true");
     expect(movingToken).toHaveClass("board-token-motion-overlay");
     expect(movingToken).toHaveAttribute("data-token-moving", "true");
+    expect(movingToken.querySelector("[data-token-puck]")).toBeInTheDocument();
+    expect(movingToken.querySelector("[data-token-silhouette]")).not.toBeInTheDocument();
     expect(movingToken.querySelector("[data-token-trail]")).toBeInTheDocument();
 
     rerender(
