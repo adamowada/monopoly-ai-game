@@ -1575,6 +1575,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       }),
     onMutate: (action) => {
       setLocalRejectedAction(null);
+      setAiStepResult(null);
       setPendingActionType(action.type);
       setQueuedBoardMotion(null);
       setBoardMotion(
@@ -1702,7 +1703,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     };
     for (const action of legalActions) {
       const model = actionModels[action.type];
-      if (!model || action.type === "END_TURN" || isAuctionAction(action)) {
+      if (!model || action.type === "END_TURN" || action.type === "DECLARE_BANKRUPTCY" || isAuctionAction(action)) {
         continue;
       }
       grouped[model.group].push(action);
@@ -1710,6 +1711,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     return grouped;
   }, [legalActions]);
   const endTurnAction = legalActions.find((action) => action.type === "END_TURN") ?? null;
+  const bankruptcyAction = legalActions.find((action) => action.type === "DECLARE_BANKRUPTCY") ?? null;
   const latestAuditRejection = latestRejectedAction(rejectedActionsQuery.data ?? []);
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
@@ -1872,6 +1874,12 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         </div>
       ) : null}
 
+      {!activeAiPlayer && aiStepResult ? (
+        <div className="mt-4">
+          <AiStepStatusPanel isThinking={aiStep.isPending} result={aiStepResult} />
+        </div>
+      ) : null}
+
       <ActivePaymentPanel game={game} snapshot={stateQuery.data} />
 
       <div className="mt-4 grid gap-3">
@@ -1922,10 +1930,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   return (
     <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:px-8">
       <GameTableMenu
+        bankruptcyAction={bankruptcyAction}
+        bankruptcyDisabled={bankruptcyAction ? !canSubmitDirectAction(bankruptcyAction) : true}
         currentPlayerName={currentPlayer?.name ?? null}
         gameId={game.id}
         isEnding={endGameMutation.isPending}
         message={sessionMessage}
+        onDeclareBankruptcy={handleSubmit}
         onEndGame={handleEndGame}
         onLoadGame={handleLoadGame}
         onSaveGame={handleSaveGame}

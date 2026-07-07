@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   Brain,
   ClipboardList,
   FileText,
@@ -21,6 +22,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "../components/ui/button";
+import type { LegalAction } from "../lib/api/gameplay";
 
 type SavedGameRecord = {
   id: string;
@@ -33,9 +35,12 @@ type SavedGameRecord = {
 type TableViewTarget = "properties" | "deals" | "contracts" | "ai-notebook";
 
 type GameTableMenuProps = {
+  bankruptcyAction?: LegalAction | null;
+  bankruptcyDisabled?: boolean;
   gameId: string;
   isEnding?: boolean;
   message?: string | null;
+  onDeclareBankruptcy?: (action: LegalAction) => void;
   onEndGame?: () => void;
   onLoadGame?: (gameId: string) => void;
   onSaveGame?: () => void;
@@ -64,10 +69,13 @@ function formatSavedStatus(status: string): string {
 }
 
 export function GameTableMenu({
+  bankruptcyAction = null,
+  bankruptcyDisabled = false,
   currentPlayerName,
   gameId,
   isEnding = false,
   message = null,
+  onDeclareBankruptcy,
   onEndGame,
   onLoadGame,
   onSaveGame,
@@ -79,6 +87,9 @@ export function GameTableMenu({
   status,
 }: GameTableMenuProps) {
   const [open, setOpen] = useState(false);
+  const [confirmingBankruptcy, setConfirmingBankruptcy] = useState(false);
+  const canDeclareBankruptcy = Boolean(bankruptcyAction && onDeclareBankruptcy);
+  const bankruptcyPlayerName = currentPlayerName ?? "Current player";
 
   return (
     <div className="fixed right-4 top-4 z-[80]">
@@ -145,6 +156,25 @@ export function GameTableMenu({
             </div>
           ) : null}
 
+          {canDeclareBankruptcy ? (
+            <div className="mt-3 grid gap-2 border-t border-[#2f2418]/15 pt-3">
+              <Button
+                aria-label="Declare bankruptcy"
+                className="justify-start text-rose-800 hover:bg-rose-50"
+                disabled={bankruptcyDisabled}
+                onClick={() => {
+                  setOpen(false);
+                  setConfirmingBankruptcy(true);
+                }}
+                role="menuitem"
+                variant="secondary"
+              >
+                <AlertTriangle aria-hidden="true" className="size-4" />
+                Declare bankruptcy
+              </Button>
+            </div>
+          ) : null}
+
           {message ? (
             <p aria-live="polite" className="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800">
               {message}
@@ -183,6 +213,47 @@ export function GameTableMenu({
             <Home aria-hidden="true" className="size-4 text-[#0f766e]" />
             Setup
           </Link>
+        </div>
+      ) : null}
+
+      {confirmingBankruptcy && bankruptcyAction ? (
+        <div className="fixed inset-0 z-[90] grid place-items-center bg-neutral-950/55 px-4">
+          <div
+            aria-labelledby="confirm-bankruptcy-title"
+            aria-modal="true"
+            className="w-full max-w-md rounded-md border-2 border-rose-900 bg-[#fff8e8] p-4 text-[#2f2418] shadow-[0_24px_70px_rgba(0,0,0,0.35)]"
+            role="dialog"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-rose-100 text-rose-800">
+                <AlertTriangle aria-hidden="true" className="size-5" />
+              </span>
+              <div>
+                <h2 id="confirm-bankruptcy-title" className="text-lg font-black">
+                  Confirm bankruptcy
+                </h2>
+                <p className="mt-2 text-sm font-semibold leading-6 text-[#6f604c]">
+                  {bankruptcyPlayerName} will give up and lose. The rules referee will liquidate the player and
+                  continue with the remaining table.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button onClick={() => setConfirmingBankruptcy(false)} variant="secondary">
+                Cancel
+              </Button>
+              <Button
+                disabled={bankruptcyDisabled}
+                onClick={() => {
+                  setConfirmingBankruptcy(false);
+                  onDeclareBankruptcy?.(bankruptcyAction);
+                }}
+                variant="danger"
+              >
+                Confirm bankruptcy
+              </Button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

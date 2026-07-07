@@ -887,6 +887,7 @@ describe("GamePlaySurface turn controls", () => {
       baseFetchMock({
         legalActions: [
           legalAction("ROLL_DICE"),
+          legalAction("DECLARE_BANKRUPTCY"),
           legalAction("PAY_JAIL_FINE", { amount: 50 }, "state-0", 0, "Pay $50 to leave jail before rolling."),
         ],
       }),
@@ -903,6 +904,59 @@ describe("GamePlaySurface turn controls", () => {
     expect(within(controls).queryByRole("button", { name: "Bid auction" })).not.toBeInTheDocument();
     expect(within(controls).queryByRole("button", { name: "Pass auction" })).not.toBeInTheDocument();
     expect(within(controls).queryByRole("button", { name: "Settle debt" })).not.toBeInTheDocument();
+    expect(within(controls).queryByRole("button", { name: "Declare bankruptcy" })).not.toBeInTheDocument();
+  });
+
+  it("keeps voluntary bankruptcy in the game menu behind confirmation", async () => {
+    const bankruptcyAction = legalAction("DECLARE_BANKRUPTCY", { creditor_id: graceId });
+    const fetchMock = baseFetchMock({
+      legalActions: [legalAction("ROLL_DICE"), bankruptcyAction],
+      actionResponse: {
+        ...acceptedRollResponse(),
+        submitted_action: bankruptcyAction,
+      },
+    });
+
+    renderSurface(fetchMock);
+
+    const controls = await screen.findByRole("region", { name: "Turn controls" });
+    expect(within(controls).queryByRole("button", { name: "Declare bankruptcy" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open game menu" }));
+    const menu = screen.getByRole("menu", { name: "Game menu" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Declare bankruptcy" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Confirm bankruptcy" });
+    expect(dialog).toHaveTextContent("Ada");
+    expect(dialog).toHaveTextContent("give up and lose");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Confirm bankruptcy" })).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+      ),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open game menu" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Declare bankruptcy" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm bankruptcy" }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    const submittedCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(submittedCall?.[1]?.body))).toMatchObject({
+      actor_id: adaId,
+      type: "DECLARE_BANKRUPTCY",
+      payload: { creditor_id: graceId },
+    });
   });
 
   it("settles an active debt with the backend-provided legal action payload", async () => {
@@ -1375,6 +1429,58 @@ describe("GamePlaySurface turn controls", () => {
       mandatory: true,
       request_context: { mode: "manual" },
     });
+  });
+
+  it("keeps the last AI step status visible after the turn advances to a human", async () => {
+    let aiStepCompleted = false;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStepCompleted ? stateFixture(0, 1) : aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [legalAction("ROLL_DICE", {}, "state-1", 1)],
+          state_hash: "state-1",
+          event_sequence: 1,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        aiStepCompleted = true;
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
+
+    await waitFor(() => expect(screen.getByRole("region", { name: "Active player" })).toHaveTextContent("Ada"));
+    expect(screen.queryByRole("button", { name: "Step AI" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done");
   });
 
   it("shows AI dice rolls with pips and total when an AI step accepts roll events", async () => {

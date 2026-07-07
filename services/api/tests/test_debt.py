@@ -345,6 +345,21 @@ def test_settle_debt_transfers_cash_to_creditor_and_clears_when_paid() -> None:
     assert is_debt_settled(settled)
 
 
+def test_settle_debt_auto_bankrupts_when_no_liquidation_route_remains() -> None:
+    state = _set_cash(_initial_state(), "player-1", 20)
+    state = _state_in_phase(state, TurnPhase.PAYMENT_RESOLUTION)
+    state = _set_active_payment(state, amount_owed=60, amount_paid=0)
+
+    bankrupt = apply_action(state, _action(state, "player-1", "SETTLE_DEBT", {"amount": 20}), "forced-bankruptcy")
+
+    assert _player(bankrupt, "player-1").is_bankrupt
+    assert _player(bankrupt, "player-1").cash == 0
+    assert _player(bankrupt, "player-2").cash == 1520
+    assert bankrupt.active_payment is None
+    assert bankrupt.turn.current_player_id == "player-2"
+    assert bankrupt.turn.phase == TurnPhase.START_TURN
+
+
 def test_settle_debt_legal_action_executes_with_captured_events_for_api() -> None:
     state = _set_active_payment(
         _state_in_phase(_initial_state(), TurnPhase.PAYMENT_RESOLUTION),
