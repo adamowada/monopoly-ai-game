@@ -48,13 +48,14 @@ def test_api_container_runs_migrations_before_uvicorn() -> None:
     assert source.index(migration) < source.index(server)
 
 
-def test_live_codex_smoke_stays_gated_and_uses_xhigh_exec_json() -> None:
+def test_live_codex_smoke_stays_gated_and_uses_gpt_5_4_mini_light_exec_json() -> None:
     source = LIVE_SMOKE_PATH.read_text(encoding="utf-8")
 
     assert "RUN_LIVE_CODEX_AI" in source
     assert "codex exec" in source
+    assert "gpt-5.4-mini" in source
     assert "model_reasoning_effort" in source
-    assert "xhigh" in source
+    assert "light" in source
     assert "--json" in source
     assert "--output-schema" in source
     assert "--disable" in source

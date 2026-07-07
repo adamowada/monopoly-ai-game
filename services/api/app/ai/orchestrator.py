@@ -37,7 +37,8 @@ from app.db.metadata import ai_decisions, ai_profiles, ai_self_dialogue, retriev
 DEFAULT_AI_SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 DEFAULT_AI_WORK_DIR = Path(__file__).resolve().parent / "runtime"
 DEFAULT_AI_SCHEMA_FILE = DEFAULT_AI_WORK_DIR / "agent_decision.schema.json"
-XHIGH_REASONING_CONFIG = 'model_reasoning_effort="xhigh"'
+DEFAULT_AI_MODEL = "gpt-5.4-mini"
+LIGHT_REASONING_CONFIG = 'model_reasoning_effort="light"'
 _FIELD_JOINER = "".join
 _AUDIT_NO_REPLACEMENT_KEY = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
 _AUDIT_REPLACEMENT_KEY = _FIELD_JOINER(["sub", "stitute_", "move"])
@@ -218,6 +219,8 @@ def build_codex_exec_command(
         "--skip-git-repo-check",
         "--json",
         "--ephemeral",
+        "--model",
+        DEFAULT_AI_MODEL,
         "--disable",
         "plugins",
         "--disable",
@@ -227,7 +230,7 @@ def build_codex_exec_command(
         "-c",
         "mcp_servers.robinhood-trading.enabled=false",
         "-c",
-        XHIGH_REASONING_CONFIG,
+        LIGHT_REASONING_CONFIG,
         "--output-schema",
         str(schema_path),
         "-C",
@@ -1227,8 +1230,10 @@ __all__ = [
     "CodexExecRunner",
     "CodexExecTimeoutError",
     "CodexSubprocessRunner",
+    "DEFAULT_AI_MODEL",
     "DEFAULT_AI_SANDBOX_DIR",
     "DEFAULT_AI_SCHEMA_FILE",
+    "LIGHT_REASONING_CONFIG",
     "ParsedCodexJSONLEvents",
     "build_codex_exec_command",
     "build_prompt",
