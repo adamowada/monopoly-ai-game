@@ -6,8 +6,10 @@ import { RotateCw, X } from "lucide-react";
 
 import type { GameMetadata, GamePlayer } from "../lib/api/games";
 import type { GameStateResponse } from "../lib/api/gameplay";
+import { cn } from "../lib/ui";
 import { DECK_ART, DeckArtPreview, SPACE_ART_BY_ID, SpaceMotif } from "./board-art";
 import { getPlayerIcon } from "./player-icons";
+import { PropertyDeedCard } from "./property-deed-card";
 
 type BoardCoordinates = {
   row: number;
@@ -62,12 +64,20 @@ export type DrawnCardView = {
   playerName: string | null;
 };
 
+export type LastRollView = {
+  dice: number[];
+  eventId: string;
+  isDoubles: boolean;
+  landedSpaceName?: string;
+  playerName?: string;
+  total: number;
+};
+
 const boardGridSize = 13;
 const fallbackPlayerColor = "#525866";
 const boardSurfaceColor = "#eaf3d7";
 const tokenShapes = ["shield", "diamond", "tag", "hex", "crest"] as const;
 const groupColorById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group.color]));
-const groupById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group]));
 const propertyById = new Map<string, StaticDataProperty>(
   Object.values(PROPERTIES_BY_ID).map((property) => [property.id, property]),
 );
@@ -163,22 +173,40 @@ function readInteger(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isInteger(value) ? value : fallback;
 }
 
-function snapshotPlayerPosition(snapshot: GameStateResponse | undefined, playerId: string): number | null {
+function readBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function snapshotPlayerRecord(snapshot: GameStateResponse | undefined, playerId: string): Record<string, unknown> | null {
   const players = snapshot?.state.players;
   if (!Array.isArray(players)) {
     return null;
   }
-  const player = players.find((entry) => {
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      return false;
-    }
-    return (entry as Record<string, unknown>).id === playerId;
-  });
-  if (player === null || typeof player !== "object" || Array.isArray(player)) {
+  const player = players.find((entry) => isRecord(entry) && entry.id === playerId);
+  return isRecord(player) ? player : null;
+}
+
+function snapshotPlayerPosition(snapshot: GameStateResponse | undefined, playerId: string): number | null {
+  const player = snapshotPlayerRecord(snapshot, playerId);
+  if (!player) {
     return null;
   }
-  const position = (player as Record<string, unknown>).position;
+  const position = player.position;
   return typeof position === "number" && Number.isInteger(position) ? normalizedPosition(position) : null;
+}
+
+function playerJailStatus(player: GamePlayer, snapshot: GameStateResponse | undefined): { inJail: boolean; turns: number } {
+  const snapshotPlayer = snapshotPlayerRecord(snapshot, player.id);
+  const playerState = isRecord(player.state) ? player.state : {};
+  const inJail = readBoolean(
+    snapshotPlayer?.in_jail ?? snapshotPlayer?.is_in_jail,
+    readBoolean(playerState.in_jail ?? playerState.is_in_jail),
+  );
+  const turns = readInteger(
+    snapshotPlayer?.jail_turns ?? snapshotPlayer?.turns_in_jail,
+    readInteger(playerState.jail_turns ?? playerState.turns_in_jail),
+  );
+  return { inJail, turns: Math.max(0, turns) };
 }
 
 function playerPosition(player: GamePlayer, snapshot: GameStateResponse | undefined, motion: BoardMotion | undefined): number {
@@ -265,25 +293,6 @@ function bottomLabel(space: StaticDataBoardSpace, property: StaticDataProperty |
   return null;
 }
 
-function propertyFacts(property: StaticDataProperty): string[] {
-  if (property.kind === "street") {
-    return [
-      `Rent ${money(property.rents[0])} base`,
-      `1 house ${money(property.rents[1])}`,
-      `Hotel rent ${money(property.rents[5])}`,
-      `House cost ${money(property.house_cost)}`,
-    ];
-  }
-  if (property.kind === "railroad") {
-    return [
-      `Rent ${money(property.rent_by_owned_count[0])}-${money(
-        property.rent_by_owned_count[property.rent_by_owned_count.length - 1],
-      )} by railroads owned`,
-    ];
-  }
-  return [`Rent multiplier ${property.rent_multipliers[0]}x/${property.rent_multipliers[1]}x dice`];
-}
-
 function defaultOwnership(propertyId: string): PropertyOwnershipView {
   return {
     property_id: propertyId,
@@ -333,35 +342,11 @@ function ownershipByProperty(snapshot: GameStateResponse | undefined): Map<strin
   return ownerships;
 }
 
-function ownerName(game: GameMetadata, ownerId: string | null): string {
-  if (!ownerId) {
-    return "Bank/unowned";
-  }
-  return game.players.find((player) => player.id === ownerId)?.name ?? ownerId;
-}
-
 function ownerPlayer(game: GameMetadata, ownerId: string | null): GamePlayer | null {
   if (!ownerId) {
     return null;
   }
   return game.players.find((player) => player.id === ownerId) ?? null;
-}
-
-function propertyGroupName(property: StaticDataProperty): string {
-  return groupById.get(property.group)?.name ?? property.group;
-}
-
-function hotelConversionText(property: StaticDataProperty, ownership: PropertyOwnershipView): string {
-  if (property.kind !== "street") {
-    return "Hotel conversion: Not available for railroads or utilities.";
-  }
-  if (ownership.hotel || ownership.hotels > 0) {
-    return "Hotel conversion: hotel-to-houses status appears in property management.";
-  }
-  if (ownership.houses === 4) {
-    return "Hotel conversion: four-house-to-hotel status appears in property management.";
-  }
-  return "Hotel conversion: Not at conversion threshold.";
 }
 
 function contentRotationForPosition(position: number): number {
@@ -547,24 +532,43 @@ function DiceFace({ index, rolling, value }: Readonly<{ index: number; rolling: 
   );
 }
 
-function DiceMotionStatus({ motion }: Readonly<{ motion?: BoardMotion }>) {
-  if (!motion) {
+function DiceMotionStatus({ lastRoll, motion }: Readonly<{ lastRoll?: LastRollView | null; motion?: BoardMotion }>) {
+  if (!motion && !lastRoll) {
     return null;
   }
-  const rolling = motion.status === "rolling";
-  const dice: Array<number | "?"> = motion.dice && motion.dice.length > 0 ? motion.dice : ["?", "?"];
-  const diceLabel = motion.dice && motion.dice.length > 0 ? motion.dice.join(" + ") : "Rolling dice";
-  const totalLabel = typeof motion.total === "number" ? ` = ${motion.total}` : "";
-  const primaryLabel = motion.dice && motion.dice.length > 0 ? `${diceLabel}${totalLabel}` : "Rolling dice";
+  const rolling = motion?.status === "rolling";
+  const diceSource = motion?.dice && motion.dice.length > 0 ? motion.dice : lastRoll?.dice;
+  const dice: Array<number | "?"> = diceSource && diceSource.length > 0 ? diceSource : ["?", "?"];
+  const diceLabel = diceSource && diceSource.length > 0 ? diceSource.join(" + ") : "Rolling dice";
+  const total = typeof motion?.total === "number" ? motion.total : lastRoll?.total;
+  const totalLabel = typeof total === "number" ? ` = ${total}` : "";
+  const primaryLabel = diceSource && diceSource.length > 0 ? `${diceLabel}${totalLabel}` : "Rolling dice";
+  const doublesLabel =
+    lastRoll && !motion && lastRoll.isDoubles && lastRoll.dice.length >= 2
+      ? `Double ${lastRoll.dice[0]}s`
+      : null;
+  const lastRollLabel =
+    !motion && lastRoll
+      ? `${lastRoll.playerName ? `${lastRoll.playerName} rolled` : "Last roll"}${lastRoll.landedSpaceName ? ` to ${lastRoll.landedSpaceName}` : ""}`
+      : null;
   const movementLabel =
-    motion.status === "rolling" ? "Dice in motion" : motion.status === "moving" ? "Token moving" : "Dice resolved";
+    motion?.status === "rolling"
+      ? "Dice in motion"
+      : motion?.status === "moving"
+        ? "Token moving"
+        : motion?.status === "settled"
+          ? "Dice resolved"
+          : doublesLabel ?? lastRollLabel ?? "Last roll";
 
   return (
     <div
       aria-label="Dice roll animation"
       aria-live="polite"
-      className="dice-motion-panel absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]"
-      data-dice-motion={motion.status}
+      className={cn(
+        "dice-motion-panel absolute z-40 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]",
+        motion ? "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" : "right-3 top-3",
+      )}
+      data-dice-motion={motion?.status ?? "last-roll"}
       role="status"
     >
       <span aria-hidden="true" className="dice-motion-ring" />
@@ -675,10 +679,6 @@ function PropertyHoverOverlay({
   }
 
   const ownership = ownershipByProperty(snapshot).get(property.id) ?? defaultOwnership(property.id);
-  const facts = propertyFacts(property);
-  const boardSpace = propertySpaceById.get(property.id);
-  const art = boardSpace ? SPACE_ART_BY_ID[boardSpace.id] : null;
-
   return (
     <div
       aria-label={`Property detail: ${property.name}`}
@@ -687,42 +687,12 @@ function PropertyHoverOverlay({
       id={tooltipId}
       role="tooltip"
     >
-      <article className="w-full max-w-md rounded-md border-2 border-[#1f2a1f] bg-white p-4 text-left text-[#1f2a1f] shadow-[0_22px_60px_rgba(31,42,31,0.35)]">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase text-neutral-500">Property detail</p>
-            <h4 className="mt-1 text-base font-semibold text-neutral-950">{property.name}</h4>
-            <p className="mt-1 text-xs font-medium text-neutral-600">{propertyGroupName(property)}</p>
-          </div>
-          {art ? (
-            <div
-              className="grid size-16 shrink-0 place-items-center rounded border border-neutral-200 bg-neutral-50 p-1"
-              data-property-art=""
-            >
-              <SpaceMotif art={art} className="size-14" />
-            </div>
-          ) : (
-            <span
-              aria-hidden="true"
-              className="mt-1 size-5 shrink-0 rounded-sm border border-neutral-300"
-              style={{ backgroundColor: groupColorById.get(property.group) ?? "#d4d4d4" }}
-            />
-          )}
-        </div>
-
-        <div className="mt-3 grid gap-1.5 text-xs text-neutral-700">
-          <p>Price {money(property.price)}</p>
-          <p>Mortgage value {money(property.mortgage_value)}</p>
-          <p>Owner {ownerName(game, ownership.owner_id)}</p>
-          <p>{ownership.mortgaged ? "Mortgaged" : "Unmortgaged"}</p>
-          <p>Houses: {ownership.houses}</p>
-          <p>Hotels: {ownership.hotels}</p>
-          {facts.map((fact) => (
-            <p key={fact}>{fact}</p>
-          ))}
-          <p>{hotelConversionText(property, ownership)}</p>
-        </div>
-      </article>
+      <PropertyDeedCard
+        className="w-full max-w-md text-left shadow-[0_22px_60px_rgba(31,42,31,0.35)]"
+        game={game}
+        ownership={ownership}
+        property={property}
+      />
     </div>
   );
 }
@@ -848,7 +818,7 @@ function TokenStack({
   space: StaticDataBoardSpace;
 }>) {
   return (
-    <div className="flex min-h-4 flex-wrap items-center justify-center gap-0.5" aria-label={`Tokens on ${space.name}`}>
+    <div className="flex min-h-6 flex-wrap items-center justify-center gap-1" aria-label={`Tokens on ${space.name}`}>
       {players.map((player) => {
         const color = getPlayerColor(game, player.seat_order);
         const icon = getPlayerIcon(game, player.seat_order);
@@ -859,7 +829,7 @@ function TokenStack({
           <span
             key={player.id}
             aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
-            className={`board-token group/token relative inline-grid size-5 place-items-center rounded-full text-[14px] font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e] ${
+            className={`board-token group/token relative inline-grid size-6 place-items-center rounded-full text-base font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e] ${
               isMovingToken ? "board-token-moving z-20" : ""
             } ${isLandingToken ? "board-token-landing z-20" : ""}`}
             data-token-landing={isLandingToken ? "true" : undefined}
@@ -931,7 +901,7 @@ function MotionTokenOverlay({
   return (
     <span
       aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
-      className="board-token board-token-moving board-token-motion-overlay group/token absolute z-50 grid size-6 place-items-center rounded-full text-base font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e]"
+      className="board-token board-token-moving board-token-motion-overlay group/token absolute z-50 grid size-8 place-items-center rounded-full text-xl font-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e]"
       data-player-id={player.id}
       data-player-token=""
       data-space-index={space.position}
@@ -995,6 +965,104 @@ function StreetPropertyCell({
   );
 }
 
+function JailTurnMeter({ turns }: Readonly<{ turns: number }>) {
+  const cappedTurns = Math.max(0, Math.min(3, turns));
+  return (
+    <div className="mt-1 grid gap-0.5" data-jail-turn-meter="">
+      <div className="flex items-center justify-center gap-0.5" aria-hidden="true">
+        {Array.from({ length: 3 }, (_, index) => (
+          <span
+            key={index}
+            className={cn(
+              "size-1.5 rounded-full border border-[#2f2418]/35",
+              index < cappedTurns ? "bg-[#d9552b]" : "bg-white/70",
+            )}
+          />
+        ))}
+      </div>
+      <p className="text-[7px] font-black uppercase leading-none text-[#6f604c]">
+        {turns} {turns === 1 ? "turn" : "turns"}
+      </p>
+    </div>
+  );
+}
+
+function JailSpaceCell({
+  game,
+  motion,
+  players,
+  snapshot,
+  space,
+}: Readonly<{
+  game: GameMetadata;
+  motion?: BoardMotion;
+  players: GamePlayer[];
+  snapshot?: GameStateResponse;
+  space: StaticDataBoardSpace;
+}>) {
+  const jailedPlayers = players.filter((player) => playerJailStatus(player, snapshot).inJail);
+  const visitingPlayers = players.filter((player) => !playerJailStatus(player, snapshot).inJail);
+
+  return (
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1 px-1 py-1" data-jail-space-cell="">
+      <p className="text-[9px] font-black uppercase leading-none text-[#1f2a1f]" data-space-name="">
+        Jail / Just Visiting
+      </p>
+      <div className="grid min-h-0 grid-cols-[1.05fr_0.95fr] gap-1">
+        <div className="grid min-h-0 content-between rounded-sm border-2 border-[#2f2418] bg-[#f9e2bf] px-1 py-1" data-jail-zone="jailed">
+          <div className="text-center">
+            <p className="text-[8px] font-black uppercase leading-none text-[#2f2418]">Jail</p>
+            <div aria-hidden="true" className="mt-1 grid grid-cols-4 gap-0.5">
+              {Array.from({ length: 8 }, (_, index) => (
+                <span key={index} className="h-5 rounded-sm bg-[#2f2418]/75" />
+              ))}
+            </div>
+          </div>
+          <TokenStack game={game} motion={motion} players={jailedPlayers} space={space} />
+          {jailedPlayers.length > 0 ? (
+            <div className="grid gap-0.5">
+              {jailedPlayers.map((player) => {
+                const jailStatus = playerJailStatus(player, snapshot);
+                return (
+                  <div key={player.id} className="rounded-sm bg-white/70 px-1 py-0.5 text-center" data-jail-player-turns="">
+                    <p className="truncate text-[7px] font-black leading-none text-[#2f2418]">{player.name}</p>
+                    <JailTurnMeter turns={jailStatus.turns} />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-[7px] font-black uppercase leading-none text-[#6f604c]">Empty</p>
+          )}
+        </div>
+        <div
+          className="grid min-h-0 content-between rounded-sm border-2 border-dashed border-[#2f2418]/45 bg-[#fffbea] px-1 py-1"
+          data-jail-zone="visiting"
+        >
+          <div className="text-center">
+            <p className="text-[8px] font-black uppercase leading-none text-[#2f2418]">Just Visiting</p>
+            <SpaceMotif art={SPACE_ART_BY_ID[space.id]} className="mx-auto mt-1 h-10 w-full max-w-12" />
+          </div>
+          <TokenStack game={game} motion={motion} players={visitingPlayers} space={space} />
+          <p className="text-[7px] font-black uppercase leading-none text-[#6f604c]">
+            {visitingPlayers.length > 0 ? "Passing through" : "Open"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isLargeArtworkSpace(space: StaticDataBoardSpace): boolean {
+  return (
+    space.id === "space_go" ||
+    space.id === "space_free_parking" ||
+    space.id === "space_go_to_jail" ||
+    space.type === "chance" ||
+    space.type === "community_chest"
+  );
+}
+
 function OtherSpaceCell({
   bottom,
   game,
@@ -1015,13 +1083,28 @@ function OtherSpaceCell({
   space: StaticDataBoardSpace;
 }>) {
   const art = SPACE_ART_BY_ID[space.id];
+  const largeArtwork = isLargeArtworkSpace(space);
+  const artClassName = largeArtwork
+    ? isCorner
+      ? "mx-auto h-[58%] min-h-14 w-full max-w-24 shrink"
+      : "mx-auto h-[52%] min-h-10 w-full max-w-20 shrink"
+    : "mx-auto h-[42%] min-h-6 w-full max-w-14 shrink";
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-between gap-0.5 px-1 py-1">
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col justify-between gap-0.5 px-1 py-1",
+        largeArtwork ? "items-stretch" : "",
+      )}
+      data-large-space-art={largeArtwork ? "true" : undefined}
+    >
       {property && ownership ? <BoardOwnerMarker game={game} ownership={ownership} property={property} /> : null}
-      <p className={`${isCorner ? "text-[10px]" : "text-[8px]"} break-words font-black leading-[0.9] text-[#1f2a1f] uppercase`} data-space-name="">
+      <p
+        className={`${largeArtwork ? (isCorner ? "text-[12px]" : "text-[9px]") : isCorner ? "text-[10px]" : "text-[8px]"} break-words font-black leading-[0.9] text-[#1f2a1f] uppercase`}
+        data-space-name=""
+      >
         {space.name}
       </p>
-      <SpaceMotif art={art} className="mx-auto h-[42%] min-h-6 w-full max-w-14 shrink" />
+      <SpaceMotif art={art} className={artClassName} />
       <TokenStack game={game} motion={motion} players={players} space={space} />
       {bottom ? (
         <p className="text-[8px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
@@ -1037,12 +1120,13 @@ function OtherSpaceCell({
 type ClassicGameBoardProps = {
   drawnCard?: DrawnCardView | null;
   game: GameMetadata;
+  lastRoll?: LastRollView | null;
   motion?: BoardMotion;
   onDismissDrawnCard?: () => void;
   snapshot?: GameStateResponse;
 };
 
-export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, snapshot }: ClassicGameBoardProps) {
+export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissDrawnCard, snapshot }: ClassicGameBoardProps) {
   const [boardRotation, setBoardRotation] = useState(0);
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
   const propertyOwnerships = ownershipByProperty(snapshot);
@@ -1106,7 +1190,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
               <div
                 key={space.id}
                 aria-describedby={tooltipId}
-                aria-label={`${space.position}: ${space.name}`}
+                aria-label={space.name}
                 className={`relative flex min-h-0 min-w-0 flex-col overflow-hidden border border-[#2f2418]/45 bg-[#eaf3d7] text-center ${
                   property ? "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0f766e]" : ""
                 }`}
@@ -1139,7 +1223,15 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
                 }}
               >
                 <OrientedSpaceContent rotation={contentRotation}>
-                  {property?.kind === "street" && bandColor ? (
+                  {space.id === "space_jail" ? (
+                    <JailSpaceCell
+                      game={game}
+                      motion={motion}
+                      players={players}
+                      snapshot={snapshot}
+                      space={space}
+                    />
+                  ) : property?.kind === "street" && bandColor ? (
                     <StreetPropertyCell
                       bandColor={bandColor}
                       game={game}
@@ -1167,7 +1259,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
           })}
           <MotionTokenOverlay game={game} motion={motion} />
         </div>
-        <DiceMotionStatus motion={motion} />
+        <DiceMotionStatus lastRoll={lastRoll} motion={motion} />
         <DrawnCardModal card={drawnCard} onDismiss={onDismissDrawnCard} />
         <PropertyHoverOverlay game={game} property={hoveredProperty} snapshot={snapshot} tooltipId={hoveredTooltipId} />
       </div>

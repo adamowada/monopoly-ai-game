@@ -364,8 +364,12 @@ describe("PropertyManagementPanel", () => {
 
     const detail = screen.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
     expect(detail).toHaveTextContent("Property detail");
-    expect(within(detail).getByRole("img", { name: "Mediterranean courtyard motif" })).toBeInTheDocument();
-    expect(container.querySelectorAll("[data-property-art]")).toHaveLength(PROPERTIES.length);
+    expect(within(detail).getByRole("article", { name: "Property card: Mediterranean Avenue" })).toBeInTheDocument();
+    expect(within(detail).getByRole("img", { name: "Ada owns Mediterranean Avenue" })).toHaveAttribute("data-property-owner-token");
+    expect(within(detail).getByRole("img", { name: "Mediterranean Avenue has 2 houses" })).toHaveAttribute(
+      "data-development-strip",
+    );
+    expect(container.querySelectorAll("[data-property-deed-card]")).toHaveLength(PROPERTIES.length);
     expect(detail).toHaveTextContent("Brown");
     expect(detail).toHaveTextContent("Price $60");
     expect(detail).toHaveTextContent("Mortgage value $30");

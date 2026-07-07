@@ -45,6 +45,15 @@ type DecisionContext = {
   rejectedOutputs: AiRejectedOutput[];
 };
 
+type AiNotebookFeedItem = {
+  badge: string;
+  content: string;
+  createdAt: string;
+  id: string;
+  playerId: string;
+  tone: "dialogue" | "memory";
+};
+
 function formatDate(value: string): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
@@ -179,6 +188,85 @@ function StatusBadge({ status }: Readonly<{ status: AiDecision["status"] }>) {
       )}
       {formatTitleCase(status)}
     </span>
+  );
+}
+
+function AiNotebookStream({
+  dialogue,
+  game,
+  isLoading,
+  memory,
+}: Readonly<{
+  dialogue: AiSelfDialogueRecord[];
+  game: GameMetadata;
+  isLoading: boolean;
+  memory: AiMemoryEntry[];
+}>) {
+  const items = useMemo<AiNotebookFeedItem[]>(
+    () =>
+      [
+        ...dialogue.map((entry) => ({
+          badge: `${formatTitleCase(entry.role)} thought`,
+          content: entry.content,
+          createdAt: entry.created_at,
+          id: entry.self_dialogue_id,
+          playerId: entry.player_id,
+          tone: "dialogue" as const,
+        })),
+        ...memory.map((entry) => ({
+          badge: `${formatTitleCase(entry.category)} memory`,
+          content: entry.content,
+          createdAt: entry.created_at,
+          id: entry.memory_entry_id,
+          playerId: entry.player_id,
+          tone: "memory" as const,
+        })),
+      ]
+        .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
+        .slice(-140),
+    [dialogue, memory],
+  );
+
+  return (
+    <section aria-label="AI notebook stream" className="rounded-md border border-neutral-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-950">Notebook stream</h3>
+          <p className="mt-1 text-xs text-neutral-600">AI thoughts and memories, newest at the bottom.</p>
+        </div>
+        <MessageSquareText aria-hidden="true" className="size-4 text-violet-700" />
+      </div>
+
+      <ol className="mt-3 flex max-h-[min(54vh,36rem)] min-h-64 flex-col gap-2 overflow-y-auto rounded-md border border-neutral-200 bg-neutral-50 p-3">
+        {isLoading ? <EmptyState text="Loading notebook stream from the API." /> : null}
+        {!isLoading && items.length === 0 ? <EmptyState text="No AI thoughts or memories returned by the API." /> : null}
+        {items.map((item) => (
+          <li
+            key={item.id}
+            className={cn(
+              "rounded-md border px-3 py-2 text-sm",
+              item.tone === "dialogue" ? "border-violet-200 bg-white text-neutral-800" : "border-emerald-200 bg-emerald-50 text-emerald-950",
+            )}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-neutral-950">{playerName(game, item.playerId)}</span>
+              <span className="text-[11px] font-medium text-neutral-500">{formatDate(item.createdAt)}</span>
+            </div>
+            <p className="mt-1 leading-6">{item.content}</p>
+            <span
+              className={cn(
+                "mt-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ring-1 ring-inset",
+                item.tone === "dialogue"
+                  ? "bg-violet-50 text-violet-700 ring-violet-200"
+                  : "bg-white text-emerald-700 ring-emerald-200",
+              )}
+            >
+              {item.badge}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -598,6 +686,13 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
       </div>
 
       {hasError ? <ErrorNote text="AI notebook records are unavailable." /> : null}
+
+      <AiNotebookStream
+        dialogue={selfDialogue}
+        game={game}
+        isLoading={selfDialogueQuery.isLoading || memoryQuery.isLoading}
+        memory={memory}
+      />
 
       <ProfilesView game={game} isLoading={profilesQuery.isLoading} profiles={profiles} />
 

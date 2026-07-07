@@ -46,10 +46,8 @@ test("desktop play surface is board-first and keeps secondary systems behind tab
     (controlsBox?.width ?? 0) * (controlsBox?.height ?? 0),
   );
 
-  await page.getByRole("button", { name: "Open game menu" }).click();
-  const menu = page.getByRole("menu", { name: "Game menu" });
-  await expect(menu.getByRole("menuitem", { name: "Roll dice" })).toHaveCount(0);
-  await menu.getByRole("menuitem", { name: "AI notebook" }).click();
+  await expect(page.getByRole("button", { name: "Open game menu" })).toBeHidden();
+  await page.getByRole("tab", { name: "AI notebook" }).click();
   await expect(page.getByRole("region", { name: "AI audit" })).toBeVisible();
 });
 
@@ -66,6 +64,7 @@ test("mobile play surface puts current turn immediately after the board", async 
   await expect(controls).toBeVisible();
   await expect(activePlayer).toBeVisible();
   await expect(trays).toBeVisible();
+  await controls.scrollIntoViewIfNeeded();
   await expect(controls.getByRole("button", { name: "Roll dice" })).toBeInViewport();
 
   expect(await top(board)).toBeLessThan(await top(controls));

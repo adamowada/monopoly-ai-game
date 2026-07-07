@@ -32,7 +32,7 @@ type SavedGameRecord = {
   savedAt: string;
 };
 
-type TableViewTarget = "properties" | "deals" | "contracts" | "ai-notebook";
+type TableViewTarget = "game-log" | "properties" | "deals" | "contracts" | "ai-notebook";
 
 type GameTableMenuProps = {
   bankruptcyAction?: LegalAction | null;
@@ -61,7 +61,7 @@ const navigationItems = [
   { label: "Deals", href: "#deals", icon: Handshake, tableView: "deals" },
   { label: "Contracts", href: "#contracts", icon: FileText, tableView: "contracts" },
   { label: "AI notebook", href: "#ai-notebook", icon: Brain, tableView: "ai-notebook" },
-  { label: "Game log", href: "#game-log", icon: ScrollText, tableView: "contracts" },
+  { label: "Game log", href: "#game-log", icon: ScrollText, tableView: "game-log" },
 ] as const;
 
 function formatSavedStatus(status: string): string {
@@ -92,7 +92,7 @@ export function GameTableMenu({
   const bankruptcyPlayerName = currentPlayerName ?? "Current player";
 
   return (
-    <div className="fixed right-4 top-4 z-[80]">
+    <div className="fixed right-4 top-4 z-[80] xl:hidden">
       <button
         aria-expanded={open}
         aria-label={open ? "Close game menu" : "Open game menu"}

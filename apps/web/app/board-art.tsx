@@ -190,9 +190,9 @@ export function SpaceMotif({ art, className = "" }: SpaceMotifProps) {
       case "go-arrow":
         return (
           <>
-            <path d="M20 50 H60" stroke={main} strokeWidth="9" strokeLinecap="round" />
-            <path d="M52 30 L74 50 L52 70" fill="none" stroke={main} strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
-            <circle cx="25" cy="26" r="7" fill={accent} opacity="0.75" />
+            <path d="M76 50 H36" stroke={main} strokeWidth="9" strokeLinecap="round" />
+            <path d="M44 30 L22 50 L44 70" fill="none" stroke={main} strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="70" cy="26" r="7" fill={accent} opacity="0.75" />
           </>
         );
       case "community-chest":

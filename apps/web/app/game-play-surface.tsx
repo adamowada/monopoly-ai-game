@@ -4,6 +4,7 @@ import {
   BOARD_SPACES,
   CHANCE_DECK,
   COMMUNITY_CHEST_DECK,
+  PROPERTY_GROUPS,
   PROPERTIES_BY_ID,
   type StaticDataCard,
   type StaticDataProperty,
@@ -21,6 +22,7 @@ import {
   KeyRound,
   Loader2,
   LogOut,
+  ScrollText,
   ShieldAlert,
   UserRound,
 } from "lucide-react";
@@ -48,10 +50,11 @@ import { cn } from "../lib/ui";
 import { AiAuditPanel } from "./ai-audit-panel";
 import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
 import { ContractsPanel } from "./contracts-panel";
-import { ClassicGameBoard, getPlayerColor, type BoardMotion, type DrawnCardView } from "./game-board";
+import { ClassicGameBoard, getPlayerColor, type BoardMotion, type DrawnCardView, type LastRollView } from "./game-board";
 import { GameTableMenu } from "./game-table-menu";
 import { NegotiationPanel } from "./negotiation-panel";
 import { getPlayerIcon } from "./player-icons";
+import { PropertyDeedCard } from "./property-deed-card";
 import { PropertyManagementPanel } from "./property-management";
 
 type GamePlaySurfaceProps = {
@@ -99,11 +102,14 @@ type SavedGameRecord = {
 
 type CurrentPlayerProperty = {
   id: string;
+  group: StaticDataProperty["group"];
+  hotel: boolean;
+  hotels: number;
+  mortgaged: boolean;
   name: string;
   price: number;
-  mortgaged: boolean;
+  property: StaticDataProperty;
   houses: number;
-  hotel: boolean;
 };
 
 type TurnResultSummary = {
@@ -111,9 +117,10 @@ type TurnResultSummary = {
   detail: string;
 };
 
-type TableView = "properties" | "deals" | "contracts" | "ai-notebook";
+type TableView = "game-log" | "properties" | "deals" | "contracts" | "ai-notebook";
 
 const tableViews: Array<{ id: TableView; label: string }> = [
+  { id: "game-log", label: "Game log" },
   { id: "properties", label: "Properties" },
   { id: "deals", label: "Deals" },
   { id: "contracts", label: "Contracts" },
@@ -144,6 +151,7 @@ const savedGamesStorageKey = "monopoly-ai-game.saved-games";
 const cardsById = new Map<string, StaticDataCard>(
   [...CHANCE_DECK, ...COMMUNITY_CHEST_DECK].map((card) => [card.id, card]),
 );
+const propertyGroupById = new Map<string, (typeof PROPERTY_GROUPS)[number]>(PROPERTY_GROUPS.map((group) => [group.id, group]));
 const diceRevealDelayMs = 700;
 const tokenStepDelayMs = 440;
 const tokenSettleDelayMs = 480;
@@ -242,7 +250,7 @@ function playerPosition(player: GameMetadata["players"][number], snapshot?: Game
   const snapshotPlayer = snapshotPlayerRecord(snapshot, player.id);
   const position = readNumber(snapshotPlayer?.position, readNumber(player.state.position));
   const space = BOARD_SPACES[position];
-  return space ? `${space.name} (${position})` : String(position);
+  return space ? space.name : String(position);
 }
 
 function turnRecord(snapshot: GameStateResponse | undefined): Record<string, unknown> | null {
@@ -563,6 +571,57 @@ function latestDrawnCardFromEvents(
   return null;
 }
 
+function latestRollFromEvents(
+  events: AcceptedEvent[],
+  playersById: Map<string, GameMetadata["players"][number]>,
+): LastRollView | null {
+  for (const event of [...events].reverse()) {
+    if (event.event_type !== "DICE_ROLLED") {
+      continue;
+    }
+    const dice = diceFromEvent(event);
+    if (!dice || dice.length === 0) {
+      continue;
+    }
+    const playerId = eventPayloadString(event, "player_id") ?? event.actor_player_id ?? null;
+    const total = eventPayloadNumber(event, "total") ?? dice.reduce((sum, value) => sum + value, 0);
+    const nextDice = events.find(
+      (candidate) => candidate.sequence > event.sequence && candidate.event_type === "DICE_ROLLED",
+    );
+    const moveEvent = [...events]
+      .filter((candidate) => {
+        if (candidate.sequence <= event.sequence) {
+          return false;
+        }
+        if (nextDice && candidate.sequence >= nextDice.sequence) {
+          return false;
+        }
+        if (candidate.event_type !== "TOKEN_MOVED" && candidate.event_type !== "PLAYER_POSITION_SET") {
+          return false;
+        }
+        const movePlayerId = eventPayloadString(candidate, "player_id") ?? candidate.actor_player_id;
+        return !playerId || !movePlayerId || movePlayerId === playerId;
+      })
+      .at(-1);
+    const landedPosition =
+      moveEvent?.event_type === "TOKEN_MOVED"
+        ? eventPayloadNumber(moveEvent, "to_position")
+        : eventPayloadNumber(moveEvent, "position");
+    const landedSpaceName =
+      landedPosition === null || landedPosition === undefined ? undefined : BOARD_SPACES[normalizedBoardPosition(landedPosition)]?.name;
+
+    return {
+      dice,
+      eventId: event.id,
+      isDoubles: dice.length >= 2 && dice.every((value) => value === dice[0]),
+      landedSpaceName,
+      playerName: playerId ? playersById.get(playerId)?.name : undefined,
+      total,
+    };
+  }
+  return null;
+}
+
 function diceFromEvent(event: AcceptedEvent | undefined): number[] | undefined {
   const payload = eventPayloadRecord(event);
   const dice = payload.dice;
@@ -688,14 +747,53 @@ function currentPlayerProperties(
     return [
       {
         id: property.id,
+        group: property.group,
+        hotel: readBoolean(entry.hotel) || readInteger(entry.hotels) > 0,
+        hotels: Math.max(0, readInteger(entry.hotels)),
+        mortgaged: readBoolean(entry.mortgaged),
         name: property.name,
         price: property.price,
-        mortgaged: readBoolean(entry.mortgaged),
+        property,
         houses: Math.max(0, readInteger(entry.houses)),
-        hotel: readBoolean(entry.hotel) || readInteger(entry.hotels) > 0,
       },
     ];
   });
+}
+
+function groupedPlayerProperties(properties: CurrentPlayerProperty[]): Array<{
+  color: string;
+  id: string;
+  label: string;
+  properties: CurrentPlayerProperty[];
+}> {
+  const order = new Map<string, number>(PROPERTY_GROUPS.map((group, index) => [group.id, index]));
+  const groups = new Map<string, { color: string; id: string; label: string; properties: CurrentPlayerProperty[] }>();
+  for (const property of [...properties].sort((left, right) => left.property.board_position - right.property.board_position)) {
+    const group = propertyGroupById.get(property.group);
+    const key = group?.id ?? property.group;
+    const existing =
+      groups.get(key) ??
+      {
+        color: group?.color ?? "#d4d4d4",
+        id: key,
+        label: group?.name ?? property.group,
+        properties: [],
+      };
+    existing.properties.push(property);
+    groups.set(key, existing);
+  }
+  return [...groups.values()].sort((left, right) => (order.get(left.id) ?? 999) - (order.get(right.id) ?? 999));
+}
+
+function propertyOwnershipForTray(property: CurrentPlayerProperty, ownerId: string) {
+  return {
+    property_id: property.id,
+    owner_id: ownerId,
+    mortgaged: property.mortgaged,
+    houses: property.houses,
+    hotels: property.hotels,
+    hotel: property.hotel,
+  };
 }
 
 function playerRelatedCommitmentEvents(events: AcceptedEvent[], playerId: string | null | undefined): AcceptedEvent[] {
@@ -714,6 +812,303 @@ function playerRelatedCommitmentEvents(events: AcceptedEvent[], playerId: string
       );
     })
     .slice(0, 3);
+}
+
+type GameLogCategory = "turn" | "roll" | "movement" | "card" | "cash" | "property" | "deal" | "ai" | "system";
+
+type GameLogEntry = {
+  badge: string;
+  category: GameLogCategory;
+  detail: string;
+  eventId: string;
+  playerId: string | null;
+  playerName: string;
+  sequence: number;
+  time: string;
+};
+
+const gameLogCategories: Array<{ id: GameLogCategory; label: string }> = [
+  { id: "turn", label: "Turn order" },
+  { id: "roll", label: "Dice rolls" },
+  { id: "movement", label: "Movement" },
+  { id: "card", label: "Cards" },
+  { id: "cash", label: "Cash" },
+  { id: "property", label: "Property" },
+  { id: "deal", label: "Deals & contracts" },
+  { id: "ai", label: "AI decisions" },
+  { id: "system", label: "Game state" },
+];
+
+function gameLogTime(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function gameLogEntryFromEvent(event: AcceptedEvent, events: AcceptedEvent[], game: GameMetadata): GameLogEntry | null {
+  const playerId = eventPayloadString(event, "player_id") ?? event.actor_player_id ?? null;
+  const actor = playerName(game, playerId);
+  const base = {
+    eventId: event.id,
+    playerId,
+    playerName: actor,
+    sequence: event.sequence,
+    time: gameLogTime(event.created_at),
+  };
+
+  if (event.event_type === "TURN_STATE_SET") {
+    const phase = eventPayloadString(event, "phase");
+    const currentPlayerId = eventPayloadString(event, "current_player_id");
+    if (phase !== "START_TURN" && phase !== "ROLL_PENDING") {
+      return null;
+    }
+    return {
+      ...base,
+      badge: "Turn",
+      category: "turn",
+      detail: `${playerName(game, currentPlayerId)} is up.`,
+      playerId: currentPlayerId,
+      playerName: playerName(game, currentPlayerId),
+    };
+  }
+
+  if (event.event_type === "DICE_ROLLED") {
+    const dice = diceFromEvent(event) ?? [];
+    const total = eventPayloadNumber(event, "total") ?? dice.reduce((sum, value) => sum + value, 0);
+    const doubles = dice.length >= 2 && dice.every((value) => value === dice[0]);
+    return {
+      ...base,
+      badge: "Roll",
+      category: "roll",
+      detail: `${actor} rolled ${dice.join(" + ")} = ${total}${doubles ? " (doubles)" : ""}.`,
+    };
+  }
+
+  if (event.event_type === "TOKEN_MOVED" || event.event_type === "PLAYER_POSITION_SET") {
+    const position = eventPayloadNumber(event, event.event_type === "TOKEN_MOVED" ? "to_position" : "position");
+    return {
+      ...base,
+      badge: "Move",
+      category: "movement",
+      detail: `${actor} moved to ${position === null ? "an unknown space" : boardSpaceName(position)}.`,
+    };
+  }
+
+  if (event.event_type === "CARD_DRAWN") {
+    const card = cardsById.get(eventPayloadString(event, "card_id") ?? "");
+    const deck = deckLabel(eventPayloadString(event, "deck") ?? card?.deck ?? null);
+    return {
+      ...base,
+      badge: deck,
+      category: "card",
+      detail: `${actor} drew ${card?.title ?? "a card"}.`,
+    };
+  }
+
+  if (event.event_type === "PLAYER_CASH_DELTA") {
+    return {
+      ...base,
+      badge: "Cash",
+      category: "cash",
+      detail: cashTransferSummary(game, events, event),
+    };
+  }
+
+  if (event.event_type === "PROPERTY_OWNER_SET") {
+    const ownerId = eventPayloadString(event, "owner_id");
+    const propertyId = eventPayloadString(event, "property_id");
+    return {
+      ...base,
+      badge: "Deed",
+      category: "property",
+      detail: ownerId
+        ? `${playerName(game, ownerId)} now owns ${propertyName(propertyId)}.`
+        : `${propertyName(propertyId)} returned to the bank.`,
+      playerId: ownerId,
+      playerName: playerName(game, ownerId),
+    };
+  }
+
+  if (event.event_type === "PROPERTY_MORTGAGE_SET") {
+    return {
+      ...base,
+      badge: "Mortgage",
+      category: "property",
+      detail: `${propertyName(eventPayloadString(event, "property_id"))} is ${eventPayloadBoolean(event, "mortgaged") ? "mortgaged" : "unmortgaged"}.`,
+    };
+  }
+
+  if (event.event_type === "PROPERTY_IMPROVEMENTS_SET") {
+    const houses = eventPayloadNumber(event, "houses") ?? 0;
+    const hotel = eventPayloadBoolean(event, "hotel") ?? false;
+    return {
+      ...base,
+      badge: "Build",
+      category: "property",
+      detail: hotel
+        ? `${propertyName(eventPayloadString(event, "property_id"))} now has a hotel.`
+        : `${propertyName(eventPayloadString(event, "property_id"))} now has ${houses} houses.`,
+    };
+  }
+
+  if (event.event_type === "AUCTION_RESULT") {
+    const winnerId = eventPayloadString(event, "winner_id");
+    const winningBid = eventPayloadNumber(event, "winning_bid");
+    return {
+      ...base,
+      badge: "Auction",
+      category: "property",
+      detail: `${playerName(game, winnerId)} won ${propertyName(eventPayloadString(event, "property_id"))} for ${
+        winningBid === null ? "an unknown amount" : money(winningBid)
+      }.`,
+      playerId: winnerId,
+      playerName: playerName(game, winnerId),
+    };
+  }
+
+  if (/(DEAL|CONTRACT|OBLIGATION|NEGOTIATION)/.test(event.event_type)) {
+    return {
+      ...base,
+      badge: "Deal",
+      category: "deal",
+      detail: eventPayloadString(event, "summary") ?? `${formatTitleCase(event.event_type)} was recorded.`,
+    };
+  }
+
+  if (/AI|DECISION|MEMORY|DIALOGUE/.test(event.event_type)) {
+    return {
+      ...base,
+      badge: "AI",
+      category: "ai",
+      detail: eventPayloadString(event, "summary") ?? `${formatTitleCase(event.event_type)} was recorded.`,
+    };
+  }
+
+  if (/(BANKRUPT|GAME_OVER|WINNER)/.test(event.event_type)) {
+    return {
+      ...base,
+      badge: "Game",
+      category: "system",
+      detail: eventPayloadString(event, "summary") ?? `${formatTitleCase(event.event_type)} was recorded.`,
+    };
+  }
+
+  return null;
+}
+
+function GameLogChatPanel({
+  events,
+  game,
+}: Readonly<{
+  events: AcceptedEvent[];
+  game: GameMetadata;
+}>) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [enabledCategories, setEnabledCategories] = useState<ReadonlySet<GameLogCategory>>(
+    () => new Set(gameLogCategories.map((category) => category.id)),
+  );
+  const entries = useMemo(
+    () =>
+      events
+        .map((event) => gameLogEntryFromEvent(event, events, game))
+        .filter((entry): entry is GameLogEntry => entry !== null && enabledCategories.has(entry.category))
+        .slice(-120),
+    [enabledCategories, events, game],
+  );
+
+  function toggleCategory(category: GameLogCategory) {
+    setEnabledCategories((current) => {
+      const next = new Set(current);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <section aria-label="Game log" className="grid min-h-0 gap-3" data-game-log-chat="" id="game-log">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-black uppercase text-[#2f2418]">Game log</h2>
+          <p className="mt-1 text-xs font-semibold text-[#6f604c]">Important table events, newest at the bottom.</p>
+        </div>
+        <div className="relative">
+          <button
+            aria-expanded={filtersOpen}
+            className="inline-flex items-center gap-1.5 rounded border border-[#2f2418]/25 bg-white px-2.5 py-1.5 text-xs font-black text-[#2f2418] hover:bg-[#fffbea] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]"
+            onClick={() => setFiltersOpen((current) => !current)}
+            type="button"
+          >
+            <ScrollText aria-hidden="true" className="size-3.5" />
+            Filters
+          </button>
+          {filtersOpen ? (
+            <div className="absolute right-0 top-full z-30 mt-2 w-64 rounded-md border-2 border-[#2f2418]/35 bg-[#fff8e8] p-3 shadow-[0_18px_40px_rgba(47,36,24,0.2)]">
+              <p className="text-[10px] font-black uppercase text-[#6f604c]">Show categories</p>
+              <div className="mt-2 grid gap-2">
+                {gameLogCategories.map((category) => (
+                  <label key={category.id} className="flex items-center gap-2 text-xs font-semibold text-[#2f2418]">
+                    <input
+                      checked={enabledCategories.has(category.id)}
+                      className="size-4 accent-[#0f766e]"
+                      onChange={() => toggleCategory(category.id)}
+                      type="checkbox"
+                    />
+                    {category.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <ol className="flex max-h-[min(58vh,38rem)] min-h-[22rem] flex-col gap-2 overflow-y-auto rounded-md border border-[#2f2418]/20 bg-white/65 p-3">
+        {entries.length > 0 ? (
+          entries.map((entry) => {
+            const player = entry.playerId ? game.players.find((candidate) => candidate.id === entry.playerId) : null;
+            const playerColor = player ? getPlayerColor(game, player.seat_order) : "#173c45";
+            const playerIcon = player ? getPlayerIcon(game, player.seat_order) : null;
+            return (
+              <li key={`${entry.sequence}:${entry.eventId}`} className="grid gap-1 rounded-md border border-[#2f2418]/10 bg-[#fffbea] px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                    {playerIcon ? (
+                      <span
+                        aria-hidden="true"
+                        className="grid size-6 shrink-0 place-items-center rounded-sm border border-[#2f2418]/40 text-xs"
+                        style={{ backgroundColor: playerColor, color: "#fff" }}
+                      >
+                        {playerIcon}
+                      </span>
+                    ) : null}
+                    <span className="truncate text-xs font-black text-[#2f2418]">{entry.playerName}</span>
+                  </span>
+                  <span className="shrink-0 text-[10px] font-bold uppercase text-[#6f604c]">{entry.time}</span>
+                </div>
+                <p className="text-sm font-semibold leading-5 text-[#2f2418]">{entry.detail}</p>
+                <span className="w-fit rounded-sm bg-[#173c45] px-1.5 py-0.5 text-[9px] font-black uppercase text-[#f7d977]">
+                  {entry.badge}
+                </span>
+              </li>
+            );
+          })
+        ) : (
+          <li className="rounded border border-dashed border-[#2f2418]/25 bg-[#fffbea] px-3 py-2 text-sm font-semibold text-[#6f604c]">
+            No matching log events yet.
+          </li>
+        )}
+      </ol>
+    </section>
+  );
 }
 
 function uniqueLegalActions(actions: LegalAction[]): LegalAction[] {
@@ -1032,93 +1427,181 @@ function ActivePlayerPanel({
 
 function PlayerTrayRail({
   currentPlayerId,
+  events,
   game,
   snapshot,
 }: Readonly<{
   currentPlayerId: string | null;
+  events: AcceptedEvent[];
   game: GameMetadata;
   snapshot: GameStateResponse | undefined;
 }>) {
+  const [selectedPlayerId, setSelectedPlayerId] = useState(currentPlayerId ?? game.players[0]?.id ?? null);
+
+  useEffect(() => {
+    if (!selectedPlayerId || !game.players.some((player) => player.id === selectedPlayerId)) {
+      setSelectedPlayerId(currentPlayerId ?? game.players[0]?.id ?? null);
+    }
+  }, [currentPlayerId, game.players, selectedPlayerId]);
+
+  const selectedPlayer = game.players.find((player) => player.id === selectedPlayerId) ?? game.players[0] ?? null;
+  const selectedProperties = currentPlayerProperties(snapshot, selectedPlayer?.id);
+  const propertyGroups = groupedPlayerProperties(selectedProperties);
+  const commitmentEvents = playerRelatedCommitmentEvents(events, selectedPlayer?.id);
+
   return (
     <section
       id="player-trays"
       aria-label="Player trays"
       className="rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_14px_30px_rgba(47,36,24,0.14)]"
     >
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-black uppercase text-[#2f2418]">Player trays</h2>
-        <span className="text-xs font-semibold text-[#6f604c]">{game.players.length} seats</span>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-sm font-black uppercase text-[#2f2418]">Player trays</h2>
+          <p className="mt-1 text-xs font-semibold text-[#6f604c]">Switch seats without shrinking every player into a tiny card.</p>
+        </div>
+        <span className="w-fit rounded-sm bg-[#173c45] px-2 py-1 text-xs font-black uppercase text-[#f7d977]">
+          {game.players.length} seats
+        </span>
       </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+
+      <div aria-label="Player tray tabs" className="mt-3 flex gap-1 overflow-x-auto rounded-md border border-[#2f2418]/20 bg-white/55 p-1" role="tablist">
         {game.players.map((player) => {
           const isCurrent = player.id === currentPlayerId;
+          const isSelected = player.id === selectedPlayer?.id;
           const color = getPlayerColor(game, player.seat_order);
           const icon = getPlayerIcon(game, player.seat_order);
-          const ownedProperties = currentPlayerProperties(snapshot, player.id);
           return (
-            <article
+            <button
               key={player.id}
-              aria-label={`${player.name} player tray${isCurrent ? " current turn" : ""}`}
+              aria-controls="active-player-tray-panel"
+              aria-selected={isSelected}
               className={cn(
-                "min-w-0 rounded-md border bg-white/80 p-3 text-[#2f2418] shadow-sm",
-                isCurrent
-                  ? "border-[#2f2418] ring-2 ring-[#d7a84c]"
-                  : "border-[#b99768]/70",
+                "flex min-w-[10rem] items-center gap-2 rounded px-2.5 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]",
+                isSelected ? "bg-[#173c45] text-[#fff8e8] shadow-[0_2px_0_rgba(47,36,24,0.25)]" : "text-[#2f2418] hover:bg-white",
               )}
               data-current-player={isCurrent ? "true" : undefined}
-              role="article"
+              id={`${player.id}-tray-tab`}
+              onClick={() => setSelectedPlayerId(player.id)}
+              role="tab"
+              type="button"
             >
+              <span
+                aria-label={`${player.name} token`}
+                className="grid size-8 shrink-0 place-items-center rounded-sm border-2 border-[#2f2418] text-base font-black"
+                data-token-icon={icon}
+                role="img"
+                style={{ backgroundColor: color, color: "#fff" }}
+              >
+                <span aria-hidden="true" className="leading-none" data-player-token-icon="">
+                  {icon}
+                </span>
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-black">{player.name}</span>
+                <span className={cn("mt-0.5 block truncate text-[10px] font-bold", isSelected ? "text-[#f7d977]" : "text-[#6f604c]")}>
+                  {isCurrent ? "Current turn" : playerCash(player, snapshot)}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedPlayer ? (
+        <article
+          aria-label={`${selectedPlayer.name} active player tray${selectedPlayer.id === currentPlayerId ? " current turn" : ""}`}
+          className="mt-3 rounded-md border border-[#b99768]/70 bg-white/80 p-3 text-[#2f2418]"
+          data-active-player-tray=""
+          data-current-player={selectedPlayer.id === currentPlayerId ? "true" : undefined}
+          id="active-player-tray-panel"
+          role="tabpanel"
+        >
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,0.65fr)_minmax(0,1.35fr)]">
+            <div className="rounded-md border border-[#2f2418]/15 bg-[#fffbea] p-3">
               <div className="flex items-start gap-3">
                 <span
-                  aria-label={`${player.name} token`}
-                  className="grid size-9 shrink-0 place-items-center rounded-[0.35rem] border-2 border-[#2f2418] text-lg font-black shadow-[0_3px_0_rgba(47,36,24,0.25)]"
-                  data-token-icon={icon}
+                  aria-label={`${selectedPlayer.name} token`}
+                  className="grid size-12 shrink-0 place-items-center rounded-md border-2 border-[#2f2418] text-2xl font-black shadow-[0_3px_0_rgba(47,36,24,0.25)]"
+                  data-token-icon={getPlayerIcon(game, selectedPlayer.seat_order)}
                   role="img"
-                  style={{
-                    backgroundColor: color,
-                    color: "#fff",
-                  }}
+                  style={{ backgroundColor: getPlayerColor(game, selectedPlayer.seat_order), color: "#fff" }}
                 >
                   <span aria-hidden="true" className="leading-none" data-player-token-icon="">
-                    {icon}
+                    {getPlayerIcon(game, selectedPlayer.seat_order)}
                   </span>
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="truncate text-sm font-black">{player.name}</h3>
-                    {isCurrent ? (
-                      <span className="shrink-0 rounded-sm bg-[#173c45] px-1.5 py-0.5 text-[10px] font-black uppercase text-[#f7d977]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate text-lg font-black">{selectedPlayer.name}</h3>
+                    {selectedPlayer.id === currentPlayerId ? (
+                      <span className="rounded-sm bg-[#173c45] px-1.5 py-0.5 text-[10px] font-black uppercase text-[#f7d977]">
                         Current turn
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-lg font-black leading-none text-[#173c45]">{playerCash(player, snapshot)}</p>
-                  <p className="mt-1 truncate text-xs font-semibold text-[#6f604c]">{playerPosition(player, snapshot)}</p>
+                  <p className="mt-1 text-2xl font-black leading-none text-[#173c45]">{playerCash(selectedPlayer, snapshot)}</p>
+                  <p className="mt-1 text-sm font-semibold text-[#6f604c]">{playerPosition(selectedPlayer, snapshot)}</p>
+                  <p className="mt-2 text-xs font-black uppercase text-[#6f604c]">{formatControllerType(selectedPlayer.controller_type)}</p>
                 </div>
               </div>
-              <div className="mt-3 border-t border-[#b99768]/40 pt-2">
-                <p className="text-[10px] font-black uppercase text-[#6f604c]">
-                  {ownedProperties.length} {ownedProperties.length === 1 ? "property" : "properties"}
+
+              <div className="mt-3 rounded border border-[#2f2418]/10 bg-white/60 px-3 py-2">
+                <p className="text-[10px] font-black uppercase text-[#6f604c]">Holdings</p>
+                <p className="mt-1 text-sm font-black text-[#2f2418]">
+                  {selectedProperties.length} {selectedProperties.length === 1 ? "deed" : "deeds"}
                 </p>
-                {ownedProperties.length > 0 ? (
-                  <ul className="mt-1 flex flex-wrap gap-1">
-                    {ownedProperties.slice(0, 4).map((property) => (
-                      <li
-                        key={property.id}
-                        className="max-w-full truncate rounded-sm border border-[#b99768]/60 bg-[#fffbea] px-1.5 py-0.5 text-[11px] font-semibold text-[#2f2418]"
-                      >
-                        {property.name}
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {propertyGroups.length > 0 ? (
+                propertyGroups.map((group) => (
+                  <section key={group.id} aria-label={`${selectedPlayer.name} ${group.label} deeds`} className="grid gap-2">
+                    <div className="flex items-center gap-2">
+                      <span aria-hidden="true" className="h-3 w-10 rounded-sm border border-[#2f2418]/20" style={{ backgroundColor: group.color }} />
+                      <h4 className="text-xs font-black uppercase text-[#6f604c]">{group.label}</h4>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+                      {group.properties.map((property) => (
+                        <PropertyDeedCard
+                          key={property.id}
+                          game={game}
+                          ownership={propertyOwnershipForTray(property, selectedPlayer.id)}
+                          property={property.property}
+                          variant="compact"
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))
+              ) : (
+                <p className="rounded border border-[#b99768]/60 bg-[#fffbea] px-3 py-2 text-sm font-semibold text-[#6f604c]">
+                  No deeds yet.
+                </p>
+              )}
+
+              <section aria-label={`${selectedPlayer.name} contracts and obligations`} className="rounded border border-[#2f2418]/15 bg-[#fffbea] p-3">
+                <h4 className="text-xs font-black uppercase text-[#6f604c]">Contracts & obligations</h4>
+                {commitmentEvents.length > 0 ? (
+                  <ul className="mt-2 grid gap-2">
+                    {commitmentEvents.map((event) => (
+                      <li key={event.id} className="rounded bg-white/70 px-2 py-1.5 text-xs font-semibold text-[#2f2418]">
+                        <span className="block font-black">{formatTitleCase(event.event_type)}</span>
+                        <span className="mt-0.5 block text-[#6f604c]">
+                          {eventPayloadString(event, "summary") ?? `Recorded sequence ${event.sequence}.`}
+                        </span>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-1 text-xs font-semibold text-[#6f604c]">No deeds yet</p>
+                  <p className="mt-2 text-xs font-semibold text-[#6f604c]">No current contracts or obligations.</p>
                 )}
-              </div>
-            </article>
-          );
-        })}
-      </div>
+              </section>
+            </div>
+          </div>
+        </article>
+      ) : null}
     </section>
   );
 }
@@ -1380,7 +1863,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const router = useRouter();
   const queryClient = useQueryClient();
   const baseUrl = backendBaseUrl(apiBaseUrl);
-  const [activeTableView, setActiveTableView] = useState<TableView>("properties");
+  const [activeTableView, setActiveTableView] = useState<TableView>(() =>
+    initialGame.players.some((player) => player.controller_type === "human") ? "properties" : "game-log",
+  );
   const [localRejectedAction, setLocalRejectedAction] = useState<ActionRejectedResponse | null>(null);
   const [acceptedEvents, setAcceptedEvents] = useState<AcceptedEvent[]>([]);
   const [pendingActionType, setPendingActionType] = useState<string | null>(null);
@@ -1577,6 +2062,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     onMutate: (action) => {
       setLocalRejectedAction(null);
       setAiStepResult(null);
+      setDismissedCardEventId(revealedCardEventId);
+      setRevealedCardEventId(null);
       setPendingActionType(action.type);
       setQueuedBoardMotion(null);
       setBoardMotion(
@@ -1672,6 +2159,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       }),
     onMutate: () => {
       setAiStepResult(null);
+      setDismissedCardEventId(revealedCardEventId);
+      setRevealedCardEventId(null);
       setQueuedBoardMotion(null);
       setBoardMotion(null);
     },
@@ -1718,6 +2207,10 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
   const latestDrawnCard = useMemo(
     () => latestDrawnCardFromEvents(visibleEvents, playersById),
+    [playersById, visibleEvents],
+  );
+  const latestRoll = useMemo(
+    () => latestRollFromEvents(visibleEvents, playersById),
     [playersById, visibleEvents],
   );
   const latestDrawnCardEventId = latestDrawnCard?.eventId ?? null;
@@ -1834,6 +2327,52 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
   const hasAuctionContext = Boolean(activeAuction) || auctionLegalActions.length > 0;
   const turnResultSummary = lastTurnResultFromEvents(visibleEvents, game);
+  const tableViewPanel = (
+    <section aria-label="Table workspace" className="grid min-h-0 gap-3 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_14px_30px_rgba(47,36,24,0.12)]">
+      <TableViewTabs activeView={activeTableView} onChange={setActiveTableView} />
+      <div
+        aria-labelledby={`${activeTableView}-tab`}
+        className="min-h-0"
+        id={`${activeTableView}-panel`}
+        role="tabpanel"
+      >
+        {activeTableView === "game-log" ? <GameLogChatPanel events={visibleEvents} game={game} /> : null}
+        {activeTableView === "properties" ? (
+          <div id="properties">
+            <PropertyManagementPanel
+              controlsDisabled={directActionControlsDisabled}
+              game={game}
+              legalActions={legalActions}
+              onSubmit={handleSubmit}
+              pendingActionType={pendingActionType}
+              snapshot={stateQuery.data}
+            />
+          </div>
+        ) : null}
+        {activeTableView === "deals" ? (
+          <div id="deals">
+            <NegotiationPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
+          </div>
+        ) : null}
+        {activeTableView === "contracts" ? (
+          <div id="contracts">
+            <ContractsPanel
+              apiBaseUrl={baseUrl}
+              events={visibleEvents}
+              game={game}
+              gameId={gameId}
+              rejectedActions={rejectedActionsQuery.data ?? []}
+            />
+          </div>
+        ) : null}
+        {activeTableView === "ai-notebook" ? (
+          <div id="ai-notebook">
+            <AiAuditPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
   const turnControlsPanel = (
     <section id="current-turn" aria-label="Turn controls" className="rounded-md border border-neutral-200 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
@@ -1929,7 +2468,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   );
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:px-8">
+    <div className="mx-auto grid max-w-[1600px] gap-4 px-4 py-4 sm:px-6 lg:px-8">
       <GameTableMenu
         bankruptcyAction={bankruptcyAction}
         bankruptcyDisabled={bankruptcyAction ? !canSubmitDirectAction(bankruptcyAction) : true}
@@ -1948,30 +2487,28 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         showLoadGames={showLoadGames}
         status={formatGameStatus(game.status)}
       />
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="grid content-start gap-3">
+      <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)_320px] xl:items-start">
+        <aside className="order-4 min-h-0 xl:sticky xl:top-4 xl:order-1 xl:row-span-2 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+          {tableViewPanel}
+        </aside>
+
+        <main className="order-1 grid content-start gap-3 xl:order-2">
           <div id="game-board">
             <ClassicGameBoard
               drawnCard={visibleDrawnCard}
               game={game}
+              lastRoll={latestRoll}
               motion={boardMotion ?? undefined}
               onDismissDrawnCard={() => setDismissedCardEventId(visibleDrawnCard?.eventId ?? null)}
               snapshot={stateQuery.data}
             />
           </div>
-        </div>
-        <aside className="grid content-start gap-4">
+        </main>
+
+        <aside className="order-2 grid content-start gap-4 xl:sticky xl:top-4 xl:order-3 xl:row-span-2 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
           {turnControlsPanel}
           <ActivePlayerPanel player={currentPlayer} phase={phase} />
-        </aside>
-        <div className="xl:col-start-1">
-          <PlayerTrayRail currentPlayerId={currentPlayer?.id ?? null} game={game} snapshot={stateQuery.data} />
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <CurrentPlayerHoldingsPanel events={visibleEvents} player={currentPlayer} snapshot={stateQuery.data} />
-        <section aria-label="Turn context" className="grid content-start gap-4">
+          <section aria-label="Turn context" className="grid content-start gap-4">
           {hasAuctionContext ? (
             <AuctionPanel
               controlsDisabled={auctionControlsDisabled}
@@ -1992,54 +2529,20 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           ) : (
             <LastTurnResultPanel summary={turnResultSummary} />
           )}
-        </section>
+          </section>
+        </aside>
+
+        <div className="order-3 xl:order-4 xl:col-start-2">
+          <PlayerTrayRail
+            currentPlayerId={currentPlayer?.id ?? null}
+            events={visibleEvents}
+            game={game}
+            snapshot={stateQuery.data}
+          />
+        </div>
       </div>
 
       {visibleRejection ? <RejectedActionAlert rejection={visibleRejection} /> : null}
-
-      <section aria-label="Secondary table views" className="grid gap-3">
-        <TableViewTabs activeView={activeTableView} onChange={setActiveTableView} />
-        <div
-          aria-labelledby={`${activeTableView}-tab`}
-          className="grid gap-4"
-          id={`${activeTableView}-panel`}
-          role="tabpanel"
-        >
-          {activeTableView === "properties" ? (
-            <div id="properties">
-              <PropertyManagementPanel
-                controlsDisabled={directActionControlsDisabled}
-                game={game}
-                legalActions={legalActions}
-                onSubmit={handleSubmit}
-                pendingActionType={pendingActionType}
-                snapshot={stateQuery.data}
-              />
-            </div>
-          ) : null}
-          {activeTableView === "deals" ? (
-            <div id="deals">
-              <NegotiationPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
-            </div>
-          ) : null}
-          {activeTableView === "contracts" ? (
-            <div id="contracts">
-              <ContractsPanel
-                apiBaseUrl={baseUrl}
-                events={visibleEvents}
-                game={game}
-                gameId={gameId}
-                rejectedActions={rejectedActionsQuery.data ?? []}
-              />
-            </div>
-          ) : null}
-          {activeTableView === "ai-notebook" ? (
-            <div id="ai-notebook">
-              <AiAuditPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
-            </div>
-          ) : null}
-        </div>
-      </section>
     </div>
   );
 }

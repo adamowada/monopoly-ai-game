@@ -6,18 +6,15 @@ import {
   CircleDollarSign,
   Hammer,
   Home,
-  Hotel,
   Loader2,
   LockKeyhole,
   Undo2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
-  BOARD_SPACES,
   PROPERTIES,
   PROPERTIES_BY_ID,
   PROPERTY_GROUPS,
-  type StaticDataBoardSpace,
   type StaticDataProperty,
   type StaticDataPropertyGroup,
 } from "@monopoly-ai-game/schemas";
@@ -26,7 +23,7 @@ import { Button } from "../components/ui/button";
 import type { GameStateResponse, LegalAction } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
 import { cn } from "../lib/ui";
-import { SPACE_ART_BY_ID, SpaceMotif } from "./board-art";
+import { PropertyDeedCard } from "./property-deed-card";
 
 const MANAGEMENT_ACTION_TYPES = [
   "BUY_HOUSE",
@@ -73,9 +70,6 @@ export type PropertyManagementPanelProps = {
 };
 
 const groupById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group]));
-const propertySpaceById = new Map<string, StaticDataBoardSpace>(
-  BOARD_SPACES.flatMap((space) => (space.property_id ? [[space.property_id, space] as const] : [])),
-);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -211,25 +205,6 @@ function buildPropertyActionCards(
       actions: actionsForProperty(legalActions, property.id),
     };
   }).filter((card) => !onlyActionable || hasAnyManagementAction(card.actions));
-}
-
-function propertyFacts(property: StaticDataProperty): string[] {
-  if (property.kind === "street") {
-    return [
-      `Rent ${formatMoney(property.rents[0])} base`,
-      `1 house ${formatMoney(property.rents[1])}`,
-      `Hotel rent ${formatMoney(property.rents[5])}`,
-      `House cost ${formatMoney(property.house_cost)}`,
-    ];
-  }
-  if (property.kind === "railroad") {
-    return [
-      `Rent ${formatMoney(property.rent_by_owned_count[0])}-${formatMoney(
-        property.rent_by_owned_count[property.rent_by_owned_count.length - 1],
-      )} by railroads owned`,
-    ];
-  }
-  return [`Rent multiplier ${property.rent_multipliers[0]}x/${property.rent_multipliers[1]}x dice`];
 }
 
 function buildOwnerGroups(game: GameMetadata, ownerships: Map<string, PropertyOwnershipView>): OwnerGroup[] {
@@ -465,14 +440,11 @@ function PropertyDetailCard({
   pendingActionType: string | null;
   onSubmit: (action: LegalAction) => void;
 }>) {
-  const facts = propertyFacts(property);
   const buyAction = actions.BUY_HOUSE;
   const sellAction = actions.SELL_HOUSE;
   const mortgageAction = actions.MORTGAGE_PROPERTY;
   const unmortgageAction = actions.UNMORTGAGE_PROPERTY;
   const hasAnyAction = hasAnyManagementAction(actions);
-  const boardSpace = propertySpaceById.get(property.id);
-  const art = boardSpace ? SPACE_ART_BY_ID[boardSpace.id] : null;
 
   return (
     <article
@@ -480,38 +452,10 @@ function PropertyDetailCard({
       className="rounded-md border border-neutral-200 bg-white p-3"
       role="region"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase text-neutral-500">Property detail</p>
-          <h4 className="mt-1 text-sm font-semibold text-neutral-950">{property.name}</h4>
-          <p className="mt-1 text-xs font-medium text-neutral-600">{propertyGroupName(property)}</p>
-        </div>
-        {art ? (
-          <div
-            data-property-art=""
-            className="grid size-14 shrink-0 place-items-center rounded border border-neutral-200 bg-neutral-50 p-1"
-          >
-            <SpaceMotif art={art} className="size-12" />
-          </div>
-        ) : (
-          <span
-            aria-hidden="true"
-            className="mt-1 size-4 shrink-0 rounded-sm border border-neutral-300"
-            style={{ backgroundColor: groupById.get(property.group)?.color ?? "#d4d4d4" }}
-          />
-        )}
-      </div>
+      <p className="sr-only">Property detail</p>
+      <PropertyDeedCard game={game} ownership={ownership} property={property} />
 
       <div className="mt-3 grid gap-1.5 text-xs text-neutral-700">
-        <p>Price {formatMoney(property.price)}</p>
-        <p>Mortgage value {formatMoney(property.mortgage_value)}</p>
-        <p>Owner {ownerName(game, ownership.owner_id)}</p>
-        <p>{ownership.mortgaged ? "Mortgaged" : "Unmortgaged"}</p>
-        <p>Houses: {ownership.houses}</p>
-        <p>Hotels: {ownership.hotels}</p>
-        {facts.map((fact) => (
-          <p key={fact}>{fact}</p>
-        ))}
         <p>{hotelConversionText(property, ownership, buyAction, sellAction)}</p>
       </div>
 

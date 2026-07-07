@@ -863,19 +863,17 @@ describe("GamePlaySurface turn controls", () => {
     expect(await screen.findByRole("region", { name: "Turn controls" })).toBeInTheDocument();
 
     const trays = await screen.findByRole("region", { name: "Player trays" });
-    const adaTray = within(trays).getByRole("article", { name: "Ada player tray current turn" });
-    const graceTray = within(trays).getByRole("article", { name: "Grace player tray" });
+    const adaTray = within(trays).getByRole("tabpanel", { name: "Ada active player tray current turn" });
     expect(adaTray).toHaveAttribute("data-current-player", "true");
     expect(adaTray).toHaveTextContent("$1,500");
-    expect(adaTray).toHaveTextContent("GO (0)");
+    expect(adaTray).toHaveTextContent("GO");
     expect(adaTray).toHaveTextContent("Oriental Avenue");
+    expect(adaTray).not.toHaveTextContent("Park Place");
+
+    fireEvent.click(within(trays).getByRole("tab", { name: /Grace/ }));
+    const graceTray = within(trays).getByRole("tabpanel", { name: "Grace active player tray" });
     expect(graceTray).toHaveTextContent("$1,500");
     expect(graceTray).toHaveTextContent("Park Place");
-
-    const holdings = await screen.findByRole("region", { name: "Current player holdings" });
-    expect(holdings).toHaveTextContent("Ada holdings");
-    expect(holdings).toHaveTextContent("Oriental Avenue");
-    expect(holdings).not.toHaveTextContent("Park Place");
 
     const context = await screen.findByRole("region", { name: "Turn context" });
     expect(context).toHaveTextContent("Last turn result");
@@ -1055,7 +1053,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(screen.getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("3 + 4");
     const activePlayer = screen.getByRole("region", { name: "Active player" });
     expect(within(activePlayer).getByText("Space")).toBeInTheDocument();
-    expect(within(activePlayer).getByText("Chance (7)")).toBeInTheDocument();
+    expect(within(activePlayer).getByText("Chance")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Contracts" }));
     const log = await screen.findByRole("region", { name: "Game log" });
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
@@ -1162,9 +1160,13 @@ describe("GamePlaySurface turn controls", () => {
         ),
       { timeout: 3_000 },
     );
-    await waitFor(() => expect(within(board).queryByRole("status", { name: "Dice roll animation" })).not.toBeInTheDocument(), {
-      timeout: 5_000,
-    });
+    await waitFor(
+      () => expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute("data-dice-motion", "last-roll"),
+      {
+        timeout: 5_000,
+      },
+    );
+    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("Ada rolled to Reading Railroad");
   }, 14_000);
 
   it("shows chance and community chest draws as a modal over the board", async () => {
