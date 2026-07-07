@@ -209,6 +209,71 @@ test("rejects forged debt settlement payload without mutating payment state", as
   });
 });
 
+test("settles an income tax bank debt from the browser", async ({ page }) => {
+  const gameId = await createGame(page, "stage-10-5-income-tax-bank-debt", twoHumanPlayers);
+
+  const controls = page.getByRole("region", { name: "Turn controls" });
+  const log = page.getByRole("region", { name: "Game log" });
+
+  await expectActivePlayer(page, "Ada");
+  await clickTurnControl(page, "Roll dice");
+  await expect(page.getByLabel("Ada token at Income Tax, position 4")).toBeVisible();
+  await expect(log).toContainText("Ada owes the bank $200 for tax:space_income_tax");
+  await expect(controls.getByRole("button", { name: "Settle debt" })).toBeEnabled();
+
+  const before = await readMockJson<{
+    state_hash: string;
+    event_sequence: number;
+    state: {
+      pending_debt: {
+        id: string;
+        debtor_player_id: string;
+        creditor_player_id: string | null;
+        amount: number;
+        reason: string;
+      };
+    };
+  }>(page, `/games/${gameId}/state`);
+  expect(before.state.pending_debt).toMatchObject({
+    creditor_player_id: null,
+    amount: 200,
+    reason: "tax:space_income_tax",
+  });
+
+  await clickTurnControl(page, "Settle debt");
+
+  await expect(await expectActivePlayer(page, "Ada")).toContainText("$1,300");
+  await expect(log).toContainText("TAX_PAID");
+  await expect(log).toContainText("ACTIVE_PAYMENT_SET");
+
+  const after = await readMockJson<{
+    event_sequence: number;
+    state: {
+      pending_debt: null;
+      players: { name?: string; id: string; cash: number }[];
+    };
+  }>(page, `/games/${gameId}/state`);
+  expect(after.event_sequence).toBeGreaterThan(before.event_sequence);
+  expect(after.state.pending_debt).toBeNull();
+  expect(after.state.players[0]?.cash).toBe(1300);
+
+  const events = await readMockJson<{
+    events: { event_type: string; payload: Record<string, unknown> }[];
+  }>(page, `/games/${gameId}/events`);
+  expect(events.events.some((event) => event.event_type === "PLAYER_CASH_DELTA" && event.payload.amount === -200)).toBe(
+    true,
+  );
+  expect(
+    events.events.some(
+      (event) =>
+        event.event_type === "ACTIVE_PAYMENT_SET" &&
+        event.payload.active === false &&
+        !("debtor_id" in event.payload) &&
+        !("creditor_id" in event.payload),
+    ),
+  ).toBe(true);
+});
+
 test("completes a 5-player mixed human/fake-AI full-table browser round", async ({ page }) => {
   await createGame(page, "stage-10-5-five-player-mixed-round", mixedPlayers);
 

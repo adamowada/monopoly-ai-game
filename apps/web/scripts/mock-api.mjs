@@ -8,6 +8,7 @@ const games = new Map();
 let gameCounter = 0;
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const classicData = JSON.parse(readFileSync(resolve(scriptDir, "../../../content/rules/classic_monopoly.json"), "utf8"));
+const boardData = classicData.board;
 const propertyData = classicData.properties;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
@@ -271,6 +272,10 @@ function propertyAtPosition(position) {
   return propertyData.find((property) => property.board_position === position) ?? null;
 }
 
+function spaceAtPosition(position) {
+  return boardData.find((space) => space.position === position) ?? null;
+}
+
 function purchasablePropertyId(game) {
   const actor = activePlayer(game);
   if (!actor) {
@@ -403,6 +408,10 @@ function isStage105MixedRoundSeed(seed) {
 
 function isStage105ContractSeed(seed) {
   return typeof seed === "string" && seed.startsWith("stage-10-5-contract-enforcement");
+}
+
+function isStage105IncomeTaxSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-10-5-income-tax-bank-debt");
 }
 
 function ensureMockAiProfiles(game) {
@@ -1416,6 +1425,9 @@ function broadcastSse(game, event) {
 }
 
 function stage105RollDestination(game, actor) {
+  if (isStage105IncomeTaxSeed(game.seed)) {
+    return 4;
+  }
   if (isStage105TwoHumanRoundSeed(game.seed)) {
     return 1;
   }
@@ -1461,7 +1473,29 @@ function pendingRentDebtForLanding(game, actor, property) {
   };
 }
 
+function pendingTaxDebtForLanding(game, actor, space) {
+  if (!actor || !space || space.type !== "tax" || !Number.isInteger(space.amount) || space.amount <= 0) {
+    return null;
+  }
+  return {
+    id: `${game.id}-debt-${game.event_sequence + 1}`,
+    debtor_player_id: actor.id,
+    creditor_player_id: null,
+    property_id: null,
+    space_id: space.id,
+    amount: space.amount,
+    reason: `tax:${space.id}`,
+  };
+}
+
 function phaseAfterLanding(game, actor) {
+  const space = spaceAtPosition(actor?.state.position ?? 0);
+  const taxDebt = pendingTaxDebtForLanding(game, actor, space);
+  if (taxDebt) {
+    game.pending_debt = taxDebt;
+    return "PAYMENT_RESOLUTION";
+  }
+
   const property = propertyAtPosition(actor?.state.position ?? 0);
   if (!property) {
     game.pending_debt = null;
@@ -1509,17 +1543,30 @@ function acceptRollDice(game, action) {
     actor?.id ?? null,
   );
   const acceptedEvents = [rolled, moved];
-  for (const event of acceptedEvents) {
-    broadcastSse(game, event);
+  if (game.pending_debt) {
+    acceptedEvents.push(
+      createAcceptedEvent(
+        game,
+        "ACTIVE_PAYMENT_SET",
+        {
+          active: true,
+          debtor_id: game.pending_debt.debtor_player_id,
+          creditor_id: game.pending_debt.creditor_player_id,
+          amount_owed: game.pending_debt.amount,
+          amount_paid: 0,
+          reason: game.pending_debt.reason,
+          negotiation_allowed: game.pending_debt.creditor_player_id !== null,
+          summary: `${actor?.name ?? "Unknown"} owes ${
+            game.pending_debt.creditor_player_id
+              ? (playerById(game, game.pending_debt.creditor_player_id)?.name ?? "Unknown")
+              : "the bank"
+          } $${game.pending_debt.amount} for ${game.pending_debt.reason}`,
+        },
+        actor?.id ?? null,
+      ),
+    );
   }
-  return {
-    status: "accepted",
-    game_id: game.id,
-    accepted_events: acceptedEvents,
-    state: gameState(game).state,
-    state_hash: stateHash(game),
-    event_sequence: game.event_sequence,
-  };
+  return createAcceptedResponse(game, acceptedEvents);
 }
 
 function rejectAction(game, action, reasonCode, message, field = "expected_state_hash") {
@@ -1623,8 +1670,8 @@ function acceptSettleDebt(game, action) {
   if (mismatch) {
     return rejectDebtPayloadMismatch(game, action, mismatch);
   }
-  const creditor = playerById(game, debt.creditor_player_id);
-  if (!creditor) {
+  const creditor = debt.creditor_player_id ? playerById(game, debt.creditor_player_id) : null;
+  if (debt.creditor_player_id && !creditor) {
     return rejectAction(game, action, "illegal_action", "debt creditor is not an active player", "payload.creditor_player_id");
   }
   if ((actor.state.cash ?? 0) < debt.amount) {
@@ -1635,30 +1682,53 @@ function acceptSettleDebt(game, action) {
     ...actor.state,
     cash: (actor.state.cash ?? 0) - debt.amount,
   };
-  creditor.state = {
-    ...creditor.state,
-    cash: (creditor.state.cash ?? 0) + debt.amount,
-  };
   actor.updated_at = nowIso();
-  creditor.updated_at = nowIso();
+  if (creditor) {
+    creditor.state = {
+      ...creditor.state,
+      cash: (creditor.state.cash ?? 0) + debt.amount,
+    };
+    creditor.updated_at = nowIso();
+  }
   game.pending_debt = null;
   game.current_phase = "END_TURN";
 
-  return createAcceptedResponse(game, [
+  const acceptedEvents = [
     createAcceptedEvent(game, "PLAYER_CASH_DELTA", { player_id: actor.id, amount: -debt.amount }, actor.id),
-    createAcceptedEvent(game, "PLAYER_CASH_DELTA", { player_id: creditor.id, amount: debt.amount }, actor.id),
-    createAcceptedEvent(
-      game,
-      "RENT_PAID",
-      {
-        debtor_player_id: actor.id,
-        creditor_player_id: creditor.id,
-        property_id: debt.property_id,
-        amount: debt.amount,
-      },
-      actor.id,
-    ),
-  ]);
+  ];
+  if (creditor) {
+    acceptedEvents.push(
+      createAcceptedEvent(game, "PLAYER_CASH_DELTA", { player_id: creditor.id, amount: debt.amount }, actor.id),
+      createAcceptedEvent(
+        game,
+        "RENT_PAID",
+        {
+          debtor_player_id: actor.id,
+          creditor_player_id: creditor.id,
+          property_id: debt.property_id,
+          amount: debt.amount,
+        },
+        actor.id,
+      ),
+    );
+  } else {
+    acceptedEvents.push(
+      createAcceptedEvent(
+        game,
+        "TAX_PAID",
+        {
+          debtor_player_id: actor.id,
+          space_id: debt.space_id ?? null,
+          amount: debt.amount,
+          summary: `${actor.name} paid the bank $${debt.amount} for ${debt.reason}.`,
+        },
+        actor.id,
+      ),
+    );
+  }
+  acceptedEvents.push(createAcceptedEvent(game, "ACTIVE_PAYMENT_SET", { active: false }, actor.id));
+
+  return createAcceptedResponse(game, acceptedEvents);
 }
 
 function acceptEndTurn(game, action) {

@@ -323,7 +323,7 @@ async def _enforce_action_decision(
                     event_templates=[
                         AcceptedEventTemplate(
                             event_type=event.type,
-                            payload=event.payload.model_dump(mode="json"),
+                            payload=event.payload.model_dump(mode="json", exclude_unset=True),
                         )
                         for event in execution.events
                     ],

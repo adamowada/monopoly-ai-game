@@ -541,7 +541,7 @@ def _build_game_event(
 
 
 def _payload_for_storage(payload: EventModel) -> dict[str, Any]:
-    return payload.model_dump(mode="json")
+    return payload.model_dump(mode="json", exclude_unset=True)
 
 
 async def _update_game_current_state(

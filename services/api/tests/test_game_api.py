@@ -267,6 +267,108 @@ async def test_legal_action_commits_real_ordered_events_without_rejection(
 
 
 @pytest.mark.asyncio
+async def test_income_tax_bank_debt_settlement_persists_clean_clear_event(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "income-tax-regression-29",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "human"},
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    actor_id = created["players"][0]["id"]
+    try:
+        legal_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": actor_id},
+        )
+        roll_action = next(
+            action
+            for action in legal_response.json()["legal_actions"]
+            if action["type"] == "ROLL_DICE"
+        )
+        roll_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "income-tax-regression-roll"},
+            json=roll_action,
+        )
+
+        assert roll_response.status_code == 200, roll_response.text
+        rolled_state = roll_response.json()["state"]
+        assert rolled_state["turn"]["phase"] == "PAYMENT_RESOLUTION"
+        assert rolled_state["players"][0]["position"] == 4
+        assert rolled_state["active_payment"] == {
+            "debtor_id": actor_id,
+            "creditor_id": None,
+            "amount_owed": 200,
+            "amount_paid": 0,
+            "reason": "tax:space_income_tax",
+            "negotiation_allowed": False,
+        }
+
+        debt_actions = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": actor_id},
+        )
+        settle_action = next(
+            action
+            for action in debt_actions.json()["legal_actions"]
+            if action["type"] == "SETTLE_DEBT"
+        )
+        assert settle_action["payload"] == {
+            "debt_id": (
+                f"active-debt:{game_id}:{roll_response.json()['event_sequence']}:"
+                f"{actor_id}:bank:200:0:tax:space_income_tax"
+            ),
+            "creditor_player_id": None,
+            "amount": 200,
+        }
+
+        settle_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "income-tax-regression-settle"},
+            json=settle_action,
+        )
+
+        assert settle_response.status_code == 200, settle_response.text
+        settled = settle_response.json()
+        assert [event["event_type"] for event in settled["accepted_events"]] == [
+            "PLAYER_CASH_DELTA",
+            "ACTIVE_PAYMENT_SET",
+            "TURN_STATE_SET",
+        ]
+        clear_event = next(
+            event for event in settled["accepted_events"] if event["event_type"] == "ACTIVE_PAYMENT_SET"
+        )
+        assert clear_event["payload"] == {"active": False}
+        assert settled["state"]["active_payment"] is None
+        assert settled["state"]["players"][0]["cash"] == 1300
+
+        replayed = await client.get(f"/games/{game_id}/state")
+        events = await client.get(f"/games/{game_id}/events")
+
+        assert replayed.status_code == 200, replayed.text
+        assert replayed.json()["state"]["active_payment"] is None
+        assert replayed.json()["state"]["players"][0]["cash"] == 1300
+        assert events.status_code == 200
+        stored_clear_event = next(
+            event for event in events.json()["events"] if event["event_type"] == "ACTIVE_PAYMENT_SET" and event["payload"] == {"active": False}
+        )
+        assert stored_clear_event["payload"] == {"active": False}
+        assert await table_count(session_factory, rejected_actions, str(game_id)) == 0
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
 async def test_illegal_action_creates_rejection_without_appending_event(
     client: httpx.AsyncClient,
     session_factory: async_sessionmaker,
