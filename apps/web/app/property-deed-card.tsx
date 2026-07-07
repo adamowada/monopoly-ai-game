@@ -1,7 +1,7 @@
 "use client";
 
 import { Building2, CircleDollarSign, Home, Landmark, TrainFront, Zap } from "lucide-react";
-import { PROPERTY_GROUPS, type StaticDataProperty } from "@monopoly-ai-game/schemas";
+import { PROPERTIES_BY_ID, PROPERTY_GROUPS, type StaticDataProperty } from "@monopoly-ai-game/schemas";
 
 import type { GameMetadata } from "../lib/api/games";
 import { cn } from "../lib/ui";
@@ -24,6 +24,13 @@ type PropertyDeedCardProps = {
   variant?: "full" | "compact";
 };
 
+type PropertyReferenceProps = {
+  className?: string;
+  game: GameMetadata;
+  ownerId?: string | null;
+  propertyId: string | null | undefined;
+};
+
 type PlayerColorSetting = {
   seat_order: number;
   color: string;
@@ -31,6 +38,8 @@ type PlayerColorSetting = {
 
 const groupById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group]));
 const fallbackPlayerColor = "#525866";
+const propertyIdPattern = /property_[a-z0-9_]+/gi;
+const propertiesById = PROPERTIES_BY_ID as Readonly<Record<string, StaticDataProperty | undefined>>;
 
 function money(value: number): string {
   return `$${value.toLocaleString("en-US")}`;
@@ -304,5 +313,62 @@ export function PropertyDeedCard({
         </div>
       ) : null}
     </article>
+  );
+}
+
+export function propertyIdsFromText(value: string): string[] {
+  const ids = new Set<string>();
+  for (const match of value.matchAll(propertyIdPattern)) {
+    const propertyId = match[0];
+    if (propertiesById[propertyId]) {
+      ids.add(propertyId);
+    }
+  }
+  return [...ids];
+}
+
+export function PropertyReference({
+  className,
+  game,
+  ownerId = null,
+  propertyId,
+}: Readonly<PropertyReferenceProps>) {
+  const property = propertyId ? propertiesById[propertyId] : undefined;
+  if (!property) {
+    return propertyId ? (
+      <span className={cn("rounded-sm bg-neutral-100 px-1.5 py-0.5 font-medium text-neutral-700", className)}>
+        {propertyId}
+      </span>
+    ) : null;
+  }
+
+  return (
+    <span className={cn("group/property-ref relative inline-flex align-baseline", className)} data-property-reference="">
+      <button
+        aria-label={`Show property card for ${property.name}`}
+        className="inline-flex items-center rounded-sm border border-[#2f2418]/20 bg-[#fffbea] px-1.5 py-0.5 text-[11px] font-black text-[#173c45] shadow-sm transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]"
+        type="button"
+      >
+        {property.name}
+      </button>
+      <span
+        className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-72 max-w-[80vw] group-hover/property-ref:block group-focus-within/property-ref:block"
+        data-property-reference-card=""
+      >
+        <PropertyDeedCard
+          game={game}
+          ownership={{
+            property_id: property.id,
+            owner_id: ownerId ?? null,
+            mortgaged: false,
+            houses: 0,
+            hotels: 0,
+            hotel: false,
+          }}
+          property={property}
+          variant="compact"
+        />
+      </span>
+    </span>
   );
 }

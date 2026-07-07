@@ -85,10 +85,11 @@ function contractFixture(): ContractRecord {
     terms: [
       {
         kind: "rent_share",
-        summary: "Ada pays Grace $50 when the orange rent is collected.",
+        property_id: "property_reading_railroad",
+        summary: "Ada pays Grace $50 when Reading Railroad rent is collected.",
       },
     ],
-    term_summary: "Ada pays Grace $50 when the orange rent is collected.",
+    term_summary: "Ada pays Grace $50 when Reading Railroad rent is collected.",
     created_at: "2026-07-04T00:01:00.000Z",
     effective_at: "2026-07-04T00:02:00.000Z",
   };
@@ -330,7 +331,7 @@ describe("ContractsPanel", () => {
     expect(panel).toHaveTextContent("Agreement between Ada, Grace");
     expect(panel).toHaveTextContent("Parties Ada, Grace");
     expect(panel).toHaveTextContent("Active");
-    expect(panel).toHaveTextContent("Ada pays Grace $50 when the orange rent is collected.");
+    expect(panel).toHaveTextContent("Ada pays Grace $50 when Reading Railroad rent is collected.");
     expect(panel).toHaveTextContent("Created Jul 04, 2026");
     expect(panel).toHaveTextContent("Effective Jul 04, 2026");
     expect(panel).not.toHaveTextContent("deal_id deal-1");
@@ -355,6 +356,7 @@ describe("ContractsPanel", () => {
     expect(panel).toHaveTextContent("decision rent_share_cash_transfer");
 
     const activeContract = within(panel).getByRole("article", { name: "Contract between Ada, Grace" });
+    expect(within(activeContract).getByRole("button", { name: "Show property card for Reading Railroad" })).toBeInTheDocument();
     fireEvent.click(within(activeContract).getByRole("button", { name: "Show contract technical record" }));
     expect(activeContract).toHaveTextContent("deal_id deal-1");
     expect(activeContract).toHaveTextContent("source_agreement_id agreement-1");

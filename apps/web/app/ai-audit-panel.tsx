@@ -31,6 +31,7 @@ import {
 } from "../lib/api/ai-audit";
 import type { GameMetadata } from "../lib/api/games";
 import { cn } from "../lib/ui";
+import { PropertyReference, propertyIdsFromText } from "./property-deed-card";
 
 type AiAuditPanelProps = {
   game: GameMetadata;
@@ -253,6 +254,13 @@ function AiNotebookStream({
               <span className="text-[11px] font-medium text-neutral-500">{formatDate(item.createdAt)}</span>
             </div>
             <p className="mt-1 leading-6">{item.content}</p>
+            {propertyIdsFromText(item.content).length > 0 ? (
+              <span className="mt-2 flex flex-wrap gap-1.5" data-ai-notebook-property-references="">
+                {propertyIdsFromText(item.content).map((propertyId) => (
+                  <PropertyReference key={propertyId} game={game} propertyId={propertyId} />
+                ))}
+              </span>
+            ) : null}
             <span
               className={cn(
                 "mt-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ring-1 ring-inset",

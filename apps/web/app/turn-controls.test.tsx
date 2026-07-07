@@ -1523,6 +1523,10 @@ describe("GamePlaySurface turn controls", () => {
 
     await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done"));
     const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
+    await waitFor(() => expect(board).toHaveAttribute("data-board-motion", "moving"), { timeout: 2_000 });
+    const movingGrace = within(board).getByLabelText("Grace token at GO, position 0");
+    expect(movingGrace).toHaveAttribute("data-token-motion-overlay", "true");
+    expect(movingGrace).toHaveAttribute("data-token-slide", "true");
     const diceStatus = within(board).getByRole("status", { name: "Dice roll animation" });
     expect(diceStatus).toHaveTextContent("5 + 2 = 7");
     expect(diceStatus).not.toHaveTextContent("?");

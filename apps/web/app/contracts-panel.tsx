@@ -20,6 +20,7 @@ import type { GameMetadata } from "../lib/api/games";
 import { readDeals, type Deal } from "../lib/api/negotiations";
 import type { RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
+import { PropertyReference, propertyIdsFromText } from "./property-deed-card";
 
 type ContractsPanelProps = {
   game: GameMetadata;
@@ -106,6 +107,63 @@ function contractTermText(contract: ContractRecord): string {
     .map((term) => (typeof term.summary === "string" && term.summary.trim() ? term.summary : term.kind))
     .filter(Boolean);
   return summaries.join("; ") || "No term summary supplied.";
+}
+
+function propertyIdsFromTermRecord(term: Record<string, unknown>): string[] {
+  const ids = new Set<string>();
+  const propertyId = payloadString(term, "property_id");
+  if (propertyId) {
+    ids.add(propertyId);
+  }
+  const collateralPropertyIds = term.collateral_property_ids;
+  if (Array.isArray(collateralPropertyIds)) {
+    for (const item of collateralPropertyIds) {
+      if (typeof item === "string") {
+        ids.add(item);
+      }
+    }
+  }
+  const trigger = term.trigger;
+  if (trigger && typeof trigger === "object" && !Array.isArray(trigger)) {
+    const triggerPropertyId = payloadString(trigger as Record<string, unknown>, "property_id");
+    if (triggerPropertyId) {
+      ids.add(triggerPropertyId);
+    }
+  }
+  const summary = typeof term.summary === "string" ? term.summary : "";
+  for (const id of propertyIdsFromText(summary)) {
+    ids.add(id);
+  }
+  return [...ids];
+}
+
+function propertyIdsFromContract(contract: ContractRecord): string[] {
+  const ids = new Set<string>(propertyIdsFromText(contractTermText(contract)));
+  for (const term of contract.terms) {
+    for (const propertyId of propertyIdsFromTermRecord(term)) {
+      ids.add(propertyId);
+    }
+  }
+  return [...ids];
+}
+
+function PropertyReferences({
+  game,
+  propertyIds,
+}: Readonly<{
+  game: GameMetadata;
+  propertyIds: string[];
+}>) {
+  if (propertyIds.length === 0) {
+    return null;
+  }
+  return (
+    <span className="mt-2 flex flex-wrap gap-1.5" data-contract-property-references="">
+      {propertyIds.map((propertyId) => (
+        <PropertyReference key={propertyId} game={game} propertyId={propertyId} />
+      ))}
+    </span>
+  );
 }
 
 function obligationAssetText(obligation: ObligationRecord): string {
@@ -371,9 +429,10 @@ function ActiveContracts({
                 <p>Created {formatDate(contract.created_at)}</p>
                 <p>Effective {formatDate(contract.effective_at)}</p>
               </div>
-              <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs leading-5 text-neutral-700">
+              <div className="mt-3 rounded-md bg-white px-3 py-2 text-xs leading-5 text-neutral-700">
                 {contractTermText(contract)}
-              </p>
+                <PropertyReferences game={game} propertyIds={propertyIdsFromContract(contract)} />
+              </div>
               <TechnicalRecord buttonLabel="Show contract technical record">
                 <p>contract_id {contract.id}</p>
                 <p>deal_id {contract.deal_id ?? "not linked"}</p>
@@ -446,7 +505,10 @@ function UpcomingObligations({
                 </div>
                 <div className="mt-3 grid gap-1 text-xs text-neutral-700">
                   <p>{dueText(obligation)}</p>
-                  <p>{obligationAssetText(obligation)}</p>
+                  <div>
+                    {obligationAssetText(obligation)}
+                    <PropertyReferences game={game} propertyIds={propertyIdsFromText(obligationAssetText(obligation))} />
+                  </div>
                   <p>Counterparty {playerName(game, obligation.counterparty_player_id)}</p>
                 </div>
                 <div className="mt-3 grid gap-2">
@@ -623,7 +685,7 @@ function LogKindIcon({ kind }: Readonly<{ kind: LogFilter }>) {
   return <ArrowRightLeft aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-neutral-700" />;
 }
 
-function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
+function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game: GameMetadata }>) {
   const [filters, setFilters] = useState<Record<LogFilter, boolean>>({
     actions: true,
     deals: true,
@@ -685,6 +747,7 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
                     </span>
                   </div>
                   <p className="mt-1 text-xs leading-5 text-neutral-700">{entry.detail}</p>
+                  <PropertyReferences game={game} propertyIds={propertyIdsFromText(entry.detail)} />
                   {entry.sourceAgreementId || entry.dealId || entry.contractId ? (
                     <p className="mt-1 text-xs text-neutral-500">
                       {entry.sourceAgreementId ? `Source agreement ${entry.sourceAgreementId}` : null}
@@ -790,7 +853,7 @@ export function ContractsPanel({
       />
       <SettlementHistory isLoading={obligationsQuery.isLoading} obligations={obligations} />
       <ContractOutcomeExplanations isLoading={outcomesQuery.isLoading} outcomes={outcomes} />
-      <FullGameLog entries={logEntries} />
+      <FullGameLog entries={logEntries} game={game} />
     </section>
   );
 }

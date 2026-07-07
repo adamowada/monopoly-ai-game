@@ -363,6 +363,8 @@ describe("NegotiationPanel", () => {
     const preview = screen.getByRole("region", { name: "Contract preview" });
     expect(preview).toHaveTextContent("Contract preview");
     expect(preview).toHaveTextContent("Complex instruments");
+    expect(within(preview).getByRole("button", { name: "Show property card for Oriental Avenue" })).toBeInTheDocument();
+    expect(within(preview).getAllByRole("button", { name: "Show property card for Reading Railroad" }).length).toBeGreaterThan(0);
     for (const termKind of [
       "Immediate Cash Transfer",
       "Deferred Cash Payment",
@@ -380,6 +382,7 @@ describe("NegotiationPanel", () => {
     expect(deal).toHaveTextContent("Deal v1");
     expect(deal).toHaveTextContent("Proposed");
     expect(deal).toHaveTextContent("Immediate Cash Transfer");
+    expect(within(deal).getByRole("button", { name: "Show property card for Oriental Avenue" })).toBeInTheDocument();
 
     const dealSubmission = fetchMock.mock.calls.find(
       ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/deals` && init?.method === "POST",

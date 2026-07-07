@@ -286,7 +286,7 @@ function memoryFixture(): AiMemoryEntry[] {
       sequence: 1,
       category: "player_trust_model",
       visibility: "private",
-      content: "Grace remembers Ada prefers keeping $200 cash after trades.",
+      content: "Grace remembers Ada prefers keeping $200 cash after trades involving property_boardwalk.",
       importance: 7,
       metadata: { source: "unit-test" },
       created_at: "2026-07-04T00:01:30.000Z",
@@ -435,7 +435,8 @@ describe("AiAuditPanel", () => {
 
     expect(panel).toHaveTextContent("Memory entries");
     expect(panel).toHaveTextContent("player_trust_model");
-    expect(panel).toHaveTextContent("Grace remembers Ada prefers keeping $200 cash after trades.");
+    expect(panel).toHaveTextContent("Grace remembers Ada prefers keeping $200 cash after trades involving property_boardwalk.");
+    expect(within(panel).getByRole("button", { name: "Show property card for Boardwalk" })).toBeInTheDocument();
 
     expect(panel).toHaveTextContent("Retrieved context records");
     expect(panel).toHaveTextContent("Retrieved context confirms Ada cash-reserve behavior.");

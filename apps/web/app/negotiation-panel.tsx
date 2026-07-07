@@ -39,6 +39,7 @@ import {
 } from "../lib/api/negotiations";
 import type { GameMetadata } from "../lib/api/games";
 import { cn } from "../lib/ui";
+import { PropertyReference } from "./property-deed-card";
 
 type NegotiationPanelProps = {
   gameId: string;
@@ -181,6 +182,48 @@ function termSummary(game: GameMetadata, term: DealTerm): string {
     return `${to} receives risk coverage from ${from}`;
   }
   return `${from} owes ${to} a conditional payment`;
+}
+
+function propertyIdsFromTerm(term: DealTerm): string[] {
+  const ids = new Set<string>();
+  const propertyId = readString(term.property_id);
+  if (propertyId) {
+    ids.add(propertyId);
+  }
+  const collateralPropertyIds = term.collateral_property_ids;
+  if (Array.isArray(collateralPropertyIds)) {
+    for (const item of collateralPropertyIds) {
+      const id = readString(item);
+      if (id) {
+        ids.add(id);
+      }
+    }
+  }
+  const trigger = term.trigger;
+  if (trigger && typeof trigger === "object" && !Array.isArray(trigger)) {
+    const triggerPropertyId = readString((trigger as Record<string, unknown>).property_id);
+    if (triggerPropertyId) {
+      ids.add(triggerPropertyId);
+    }
+  }
+  return [...ids];
+}
+
+function TermSummaryLine({ game, term }: Readonly<{ game: GameMetadata; term: DealTerm }>) {
+  const propertyIds = propertyIdsFromTerm(term);
+  const ownerId = readString(term.from_player_id) ?? readString(term.lender_player_id) ?? null;
+  return (
+    <>
+      <span className="font-semibold text-neutral-950">{termKindLabel(term.kind)}</span> - {termSummary(game, term)}
+      {propertyIds.length > 0 ? (
+        <span className="mt-1 flex flex-wrap gap-1.5">
+          {propertyIds.map((propertyId) => (
+            <PropertyReference key={propertyId} game={game} ownerId={ownerId} propertyId={propertyId} />
+          ))}
+        </span>
+      ) : null}
+    </>
+  );
 }
 
 function defaultTermDraft(game: GameMetadata, participants: string[]): TermDraft {
@@ -1151,7 +1194,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                           <ul className="mt-3 grid gap-1.5 text-sm text-neutral-700">
                             {deal.terms.map((term, index) => (
                               <li key={`${deal.id}-${term.kind}-${index}`} className="rounded border border-neutral-200 bg-white px-2 py-1.5">
-                                <span className="font-semibold text-neutral-950">{termKindLabel(term.kind)}</span> - {termSummary(game, term)}
+                                <TermSummaryLine game={game} term={term} />
                               </li>
                             ))}
                           </ul>
@@ -1416,7 +1459,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
             <ul className="mt-3 grid gap-2 text-sm text-neutral-700">
               {previewTerms.map((term, index) => (
                 <li key={`${term.kind}-${index}`} className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-                  <span className="font-semibold text-neutral-950">{termKindLabel(term.kind)}</span> - {termSummary(game, term)}
+                  <TermSummaryLine game={game} term={term} />
                 </li>
               ))}
             </ul>
