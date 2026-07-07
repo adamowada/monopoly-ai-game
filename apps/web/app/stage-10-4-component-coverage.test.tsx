@@ -768,7 +768,7 @@ describe("Stage 10.4 frontend component coverage", () => {
     expect(within(board).getByLabelText("Ada token at GO, position 0")).toBeInTheDocument();
     expect(within(board).getByLabelText("Grace token at Boardwalk, position 39")).toBeInTheDocument();
     expect(within(board).getByLabelText("Linus token at Chance, position 7")).toBeInTheDocument();
-    expect(within(board).getByText("Boardwalk")).toBeInTheDocument();
+    expect(board.querySelector("[data-space-index='39'] [data-space-name]")).toHaveTextContent("Boardwalk");
     expect(within(board).queryByText("Turn controls")).not.toBeInTheDocument();
     expect(within(board).queryByText("Create game")).not.toBeInTheDocument();
     expect(within(board).queryByText("Propose deal")).not.toBeInTheDocument();

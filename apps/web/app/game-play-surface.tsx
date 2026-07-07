@@ -40,7 +40,7 @@ import { cn } from "../lib/ui";
 import { AiAuditPanel } from "./ai-audit-panel";
 import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
 import { ContractsPanel } from "./contracts-panel";
-import { ClassicGameBoard, getPlayerColor } from "./game-board";
+import { ClassicGameBoard, getPlayerColor, type BoardMotion } from "./game-board";
 import { NegotiationPanel } from "./negotiation-panel";
 import { PropertyManagementPanel } from "./property-management";
 
@@ -56,6 +56,14 @@ type AiStepRequest = {
   mode: AiStepMode;
   playerId: string;
 };
+
+type BoardMotionState =
+  | (Extract<BoardMotion, { status: "rolling" }> & { motionKey: string })
+  | (Extract<BoardMotion, { status: "moving" | "settled" }> & {
+      motionKey: string;
+      path: number[];
+      stepIndex: number;
+    });
 
 type NegotiationCutoffs = {
   max_rounds?: number;
@@ -213,6 +221,84 @@ function mergeEvents(events: AcceptedEvent[], optimisticEvents: AcceptedEvent[])
     byKey.set(`${event.sequence}:${event.id}`, event);
   }
   return [...byKey.values()].sort((left, right) => left.sequence - right.sequence);
+}
+
+function eventPayloadRecord(event: AcceptedEvent | undefined): Record<string, unknown> {
+  return isRecord(event?.payload) ? event.payload : {};
+}
+
+function eventPayloadNumber(event: AcceptedEvent | undefined, key: string): number | null {
+  const value = eventPayloadRecord(event)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function eventPayloadString(event: AcceptedEvent | undefined, key: string): string | null {
+  const value = eventPayloadRecord(event)[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+function diceFromEvent(event: AcceptedEvent | undefined): number[] | undefined {
+  const dice = eventPayloadRecord(event).dice;
+  if (!Array.isArray(dice)) {
+    return undefined;
+  }
+  const values = dice.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return values.length > 0 ? values : undefined;
+}
+
+function boardPath(fromPosition: number, toPosition: number): number[] {
+  const path = [fromPosition];
+  let position = fromPosition;
+  while (position !== toPosition && path.length <= BOARD_SPACES.length) {
+    position = (position + 1) % BOARD_SPACES.length;
+    path.push(position);
+  }
+  return path;
+}
+
+function boardMotionFromAcceptedEvents(events: AcceptedEvent[], fallbackPlayerId: string): BoardMotionState | null {
+  const diceEvent = events.find((event) => event.event_type === "DICE_ROLLED");
+  const moveEvent = events.find((event) => event.event_type === "TOKEN_MOVED");
+  const dice = diceFromEvent(diceEvent);
+  const total = eventPayloadNumber(diceEvent, "total") ?? undefined;
+
+  if (moveEvent) {
+    const playerId = eventPayloadString(moveEvent, "player_id") ?? fallbackPlayerId;
+    const fromPosition = eventPayloadNumber(moveEvent, "from_position");
+    const toPosition = eventPayloadNumber(moveEvent, "to_position");
+    if (fromPosition !== null && toPosition !== null) {
+      const path = boardPath(fromPosition, toPosition);
+      return {
+        dice,
+        displayPosition: path[0] ?? fromPosition,
+        fromPosition,
+        motionKey: `${moveEvent.id}:${moveEvent.sequence}`,
+        path,
+        playerId,
+        status: "moving",
+        stepIndex: 0,
+        toPosition,
+        total,
+      };
+    }
+  }
+
+  if (diceEvent) {
+    return {
+      dice,
+      displayPosition: 0,
+      fromPosition: 0,
+      motionKey: `${diceEvent.id}:${diceEvent.sequence}`,
+      path: [0],
+      playerId: fallbackPlayerId,
+      status: "settled",
+      stepIndex: 0,
+      toPosition: 0,
+      total,
+    };
+  }
+
+  return null;
 }
 
 function latestRejectedAction(records: RejectedActionRecord[]): RejectedActionRecord | null {
@@ -604,6 +690,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [pendingActionType, setPendingActionType] = useState<string | null>(null);
   const [aiStepResult, setAiStepResult] = useState<AiStepResponse | null>(null);
   const [autoStepAi, setAutoStepAi] = useState(false);
+  const [boardMotion, setBoardMotion] = useState<BoardMotionState | null>(null);
   const [lastAutoStepKey, setLastAutoStepKey] = useState<string | null>(null);
 
   const gameQuery = useQuery({
@@ -658,6 +745,47 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   });
 
   useEffect(() => {
+    if (!boardMotion) {
+      return;
+    }
+
+    if (boardMotion.status === "moving") {
+      if (boardMotion.stepIndex >= boardMotion.path.length - 1) {
+        const settleTimer = window.setTimeout(() => {
+          setBoardMotion((current) =>
+            current?.motionKey === boardMotion.motionKey && current.status === "moving"
+              ? { ...current, status: "settled" }
+              : current,
+          );
+        }, 100);
+        return () => window.clearTimeout(settleTimer);
+      }
+
+      const moveTimer = window.setTimeout(() => {
+        setBoardMotion((current) => {
+          if (!current || current.motionKey !== boardMotion.motionKey || current.status !== "moving") {
+            return current;
+          }
+          const stepIndex = Math.min(current.stepIndex + 1, current.path.length - 1);
+          return {
+            ...current,
+            displayPosition: current.path[stepIndex] ?? current.toPosition,
+            stepIndex,
+          };
+        });
+      }, 60);
+      return () => window.clearTimeout(moveTimer);
+    }
+
+    if (boardMotion.status === "settled") {
+      const clearTimer = window.setTimeout(() => {
+        setBoardMotion((current) => (current?.motionKey === boardMotion.motionKey ? null : current));
+      }, 1400);
+      return () => window.clearTimeout(clearTimer);
+    }
+  }, [boardMotion]);
+
+  useEffect(() => {
     if (typeof EventSource === "undefined") {
       return;
     }
@@ -694,10 +822,20 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     onMutate: (action) => {
       setLocalRejectedAction(null);
       setPendingActionType(action.type);
+      setBoardMotion(
+        action.type === "ROLL_DICE"
+          ? {
+              motionKey: `${action.actor_id}:${action.expected_event_sequence}:rolling`,
+              playerId: action.actor_id,
+              status: "rolling",
+            }
+          : null,
+      );
     },
     onSuccess: (result) => {
       if (result.status === "accepted") {
         setAcceptedEvents(result.accepted_events);
+        setBoardMotion((current) => boardMotionFromAcceptedEvents(result.accepted_events, current?.playerId ?? ""));
         queryClient.setQueryData<GameStateResponse>(["game-state", gameId], {
           game_id: gameId,
           state: result.state,
@@ -717,6 +855,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         return;
       }
 
+      setBoardMotion(null);
       setLocalRejectedAction(result);
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["legal-actions", gameId] }),
@@ -729,6 +868,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
     onSettled: () => {
       setPendingActionType(null);
+    },
+    onError: () => {
+      setBoardMotion(null);
     },
   });
 
@@ -770,11 +912,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       }),
     onMutate: () => {
       setAiStepResult(null);
+      setBoardMotion(null);
     },
     onSuccess: (result) => {
       setAiStepResult(result);
       if (result.accepted_events.length > 0) {
         setAcceptedEvents(result.accepted_events);
+        setBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, result.player_id));
       }
       void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
     },
@@ -882,7 +1026,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   return (
     <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
       <div className="grid content-start gap-4">
-        <ClassicGameBoard game={game} />
+        <ClassicGameBoard game={game} motion={boardMotion ?? undefined} snapshot={stateQuery.data} />
         <PropertyManagementPanel
           controlsDisabled={directActionControlsDisabled}
           game={game}

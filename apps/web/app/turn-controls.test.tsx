@@ -540,7 +540,8 @@ describe("GamePlaySurface turn controls", () => {
     expect(await screen.findByLabelText("Ada token at GO, position 0")).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
 
-    expect(await screen.findByLabelText("Ada token at Chance, position 7")).toBeVisible();
+    expect(await screen.findByLabelText("Ada token at Chance, position 7", {}, { timeout: 3_000 })).toBeVisible();
+    expect(screen.getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("3 + 4");
     const activePlayer = screen.getByRole("region", { name: "Active player" });
     expect(within(activePlayer).getByText("Space")).toBeInTheDocument();
     expect(within(activePlayer).getByText("Chance (7)")).toBeInTheDocument();
@@ -697,6 +698,7 @@ describe("GamePlaySurface turn controls", () => {
     fireEvent.click(rollButton);
     expect(rollButton).toBeDisabled();
     expect(rollButton).toHaveTextContent("Submitting");
+    expect(screen.getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("Rolling dice");
 
     resolveAction(Response.json(acceptedRollResponse()));
     await waitFor(() => expect(rollButton).not.toHaveTextContent("Submitting"));
