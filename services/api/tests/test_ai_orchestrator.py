@@ -396,7 +396,8 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
     config_values = [command[index + 1] for index, value in enumerate(command[:-1]) if value == "-c"]
     assert "mcp_servers.robinhood-trading.enabled=false" in config_values
     assert LIGHT_REASONING_CONFIG in config_values
-    assert LIGHT_REASONING_CONFIG == 'model_reasoning_effort="light"'
+    assert LIGHT_REASONING_CONFIG == 'model_reasoning_effort="low"'
+    assert 'model_reasoning_effort="light"' not in config_values
     assert command[command.index("--output-schema") + 1] == str(schema_path)
     assert command[command.index("-C") + 1] == str(sandbox_dir)
     assert command[command.index("--output-last-message") + 1] == str(last_message_path)
@@ -608,7 +609,8 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
         assert "--json" in call["command"]
         assert "--ephemeral" in call["command"]
         assert call["command"][call["command"].index("--model") + 1] == "gpt-5.4-mini"
-        assert 'model_reasoning_effort="light"' in call["command"]
+        assert 'model_reasoning_effort="low"' in call["command"]
+        assert 'model_reasoning_effort="light"' not in call["command"]
         assert "stage 7.3 fake subprocess request" in call["stdin"]
     finally:
         await delete_game(session_factory)

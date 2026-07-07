@@ -38,7 +38,7 @@ DEFAULT_AI_SANDBOX_DIR = Path(__file__).resolve().parent / "sandbox"
 DEFAULT_AI_WORK_DIR = Path(__file__).resolve().parent / "runtime"
 DEFAULT_AI_SCHEMA_FILE = DEFAULT_AI_WORK_DIR / "agent_decision.schema.json"
 DEFAULT_AI_MODEL = "gpt-5.4-mini"
-LIGHT_REASONING_CONFIG = 'model_reasoning_effort="light"'
+LIGHT_REASONING_CONFIG = 'model_reasoning_effort="low"'
 _FIELD_JOINER = "".join
 _AUDIT_NO_REPLACEMENT_KEY = _FIELD_JOINER(["no", "_", "sub", "stitute_", "move"])
 _AUDIT_REPLACEMENT_KEY = _FIELD_JOINER(["sub", "stitute_", "move"])

@@ -2,7 +2,7 @@
 
 Set RUN_LIVE_CODEX_AI=1 to request a real Codex AI decision. The command uses
 `codex exec --json`, `--model gpt-5.4-mini`, `--output-schema`, and
-`model_reasoning_effort="light"`, then validates output locally after execution.
+`model_reasoning_effort="low"`, then validates output locally after execution.
 """
 
 from __future__ import annotations

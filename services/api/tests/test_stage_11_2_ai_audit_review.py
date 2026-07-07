@@ -331,7 +331,8 @@ async def test_stage_11_2_ai_command_uses_codex_exec_json_with_gpt_5_4_mini_ligh
     assert "-c" in command
     assert LIGHT_REASONING_CONFIG in command
     assert "model_reasoning_effort" in " ".join(command)
-    assert "light" in " ".join(command)
+    assert "low" in " ".join(command)
+    assert "light" not in " ".join(command)
 
 
 @pytest.mark.asyncio

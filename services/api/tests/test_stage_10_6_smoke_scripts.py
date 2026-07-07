@@ -55,7 +55,8 @@ def test_live_codex_smoke_stays_gated_and_uses_gpt_5_4_mini_light_exec_json() ->
     assert "codex exec" in source
     assert "gpt-5.4-mini" in source
     assert "model_reasoning_effort" in source
-    assert "light" in source
+    assert "low" in source
+    assert "light" not in source
     assert "--json" in source
     assert "--output-schema" in source
     assert "--disable" in source
