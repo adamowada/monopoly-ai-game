@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 test("creates a configured game and navigates to the board shell", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { level: 2, name: "Choose seats" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Choose seats" })).toBeVisible();
+  await expect(page.getByText("Local tabletop setup")).toHaveCount(0);
   await page.getByRole("textbox", { name: "Seed" }).fill("stage-5-e2e-seed");
   await page.getByRole("textbox", { name: "Player 1 name" }).fill("Ada");
   await page.getByRole("textbox", { name: "Player 2 name" }).fill("Grace");

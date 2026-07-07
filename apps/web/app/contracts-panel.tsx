@@ -153,9 +153,9 @@ function eventDetail(game: GameMetadata, event: AcceptedEvent): string {
     const totalText = total !== null ? `total ${total}` : "";
     return `${diceText} ${totalText}`.trim();
   }
-  if (event.event_type === "TOKEN_MOVED") {
+  if (event.event_type === "TOKEN_MOVED" || event.event_type === "PLAYER_POSITION_SET") {
     const playerId = payloadString(payload, "player_id");
-    const toPosition = payloadNumber(payload, "to_position");
+    const toPosition = payloadNumber(payload, event.event_type === "TOKEN_MOVED" ? "to_position" : "position");
     return `${playerName(game, playerId)} moved to position ${toPosition ?? "unknown"}`;
   }
   if (event.event_type === "CONTRACT_TRIGGERED_TRANSFER") {

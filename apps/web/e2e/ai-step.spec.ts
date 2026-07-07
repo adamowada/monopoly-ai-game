@@ -46,7 +46,7 @@ async function createAuctionGameWithAiBidder(page: Page) {
     accepted_events?: Array<{ event_type: string }>;
   };
   expect(rollBody.status).toBe("accepted");
-  expect(rollBody.accepted_events?.map((event) => event.event_type)).toEqual(["DICE_ROLLED", "TOKEN_MOVED"]);
+  expect(rollBody.accepted_events?.map((event) => event.event_type)).toEqual(["DICE_ROLLED", "PLAYER_POSITION_SET"]);
 
   const state = await readMockJson<{
     state: { turn: { phase: string }; players: Array<{ id: string; position: number }> };

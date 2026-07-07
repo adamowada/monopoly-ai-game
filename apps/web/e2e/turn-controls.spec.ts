@@ -47,6 +47,17 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   await expect
     .poll(() => slidingToken.evaluate((element) => window.getComputedStyle(element).transitionDuration))
     .toContain("0.38s");
+  const firstSlidingBox = await slidingToken.boundingBox();
+  expect(firstSlidingBox).toBeTruthy();
+  await expect
+    .poll(async () => {
+      const nextBox = await slidingToken.boundingBox();
+      if (!firstSlidingBox || !nextBox) {
+        return 0;
+      }
+      return Math.abs(nextBox.x - firstSlidingBox.x) + Math.abs(nextBox.y - firstSlidingBox.y);
+    })
+    .toBeGreaterThan(8);
 
   await expect(page.getByLabel("Ada token at Chance, position 7")).toBeVisible();
   await expect(page.getByRole("status", { name: "Board landing" })).toContainText("Ada landed on Chance");
@@ -54,7 +65,7 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   await page.getByRole("tab", { name: "Contracts" }).click();
   const log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("DICE_ROLLED");
-  await expect(log).toContainText("TOKEN_MOVED");
+  await expect(log).toContainText("PLAYER_POSITION_SET");
   await expect
     .poll(() => legalActionsResponses.length, { message: "accepted event should refresh legal actions" })
     .toBeGreaterThan(legalActionFetchesBeforeAction);

@@ -298,8 +298,8 @@ function acceptedRollResponse() {
         game_id: gameId,
         sequence: 2,
         actor_player_id: adaId,
-        event_type: "TOKEN_MOVED",
-        payload: { player_id: adaId, from_position: 0, to_position: 7 },
+        event_type: "PLAYER_POSITION_SET",
+        payload: { player_id: adaId, position: 7 },
         state_hash: "state-2",
         created_at: "2026-07-04T00:01:01.000Z",
       },
@@ -329,8 +329,8 @@ function acceptedBackendDiceRollResponse() {
         game_id: gameId,
         sequence: 2,
         actor_player_id: adaId,
-        event_type: "TOKEN_MOVED",
-        payload: { player_id: adaId, from_position: 0, to_position: 7 },
+        event_type: "PLAYER_POSITION_SET",
+        payload: { player_id: adaId, position: 7 },
         state_hash: "state-2",
         created_at: "2026-07-04T00:01:01.000Z",
       },
@@ -357,8 +357,8 @@ function acceptedReadingRailroadRollResponse() {
         game_id: gameId,
         sequence: 2,
         actor_player_id: adaId,
-        event_type: "TOKEN_MOVED",
-        payload: { player_id: adaId, from_position: 0, to_position: 5 },
+        event_type: "PLAYER_POSITION_SET",
+        payload: { player_id: adaId, position: 5 },
         state_hash: "state-2",
         created_at: "2026-07-04T00:01:01.000Z",
       },
@@ -387,8 +387,8 @@ function acceptedAiDiceStepResponse() {
         game_id: gameId,
         sequence: 2,
         actor_player_id: graceId,
-        event_type: "TOKEN_MOVED",
-        payload: { player_id: graceId, from_position: 0, to_position: 7 },
+        event_type: "PLAYER_POSITION_SET",
+        payload: { player_id: graceId, position: 7 },
         state_hash: "ai-state-2",
         created_at: "2026-07-04T00:01:01.000Z",
       },
@@ -598,8 +598,8 @@ function acceptedAuctionRollResponse() {
         game_id: gameId,
         sequence: 2,
         actor_player_id: adaId,
-        event_type: "TOKEN_MOVED",
-        payload: { player_id: adaId, from_position: 0, to_position: 1 },
+        event_type: "PLAYER_POSITION_SET",
+        payload: { player_id: adaId, position: 1 },
         state_hash: "state-2",
         created_at: "2026-07-04T00:01:01.000Z",
       },
@@ -1005,7 +1005,7 @@ describe("GamePlaySurface turn controls", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Contracts" }));
     const log = await screen.findByRole("region", { name: "Game log" });
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
-    expect(within(log).getByText(/TOKEN_MOVED/)).toBeInTheDocument();
+    expect(within(log).getByText(/PLAYER_POSITION_SET/)).toBeInTheDocument();
   }, 18_000);
 
   it("renders backend die_1 and die_2 dice payloads as pips and total instead of placeholders", async () => {

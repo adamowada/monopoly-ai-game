@@ -1541,7 +1541,6 @@ function phaseAfterLanding(game, actor) {
 
 function acceptRollDice(game, action) {
   const actor = activePlayer(game);
-  const fromPosition = actor?.state.position ?? 0;
   const isAuctionSeed = typeof game.seed === "string" && game.seed.startsWith("stage-5-auction");
   const toPosition = isStage105Seed(game.seed) ? stage105RollDestination(game, actor) : isAuctionSeed ? 1 : 7;
   const rolled = createAcceptedEvent(
@@ -1566,8 +1565,8 @@ function acceptRollDice(game, action) {
   game.updated_at = nowIso();
   const moved = createAcceptedEvent(
     game,
-    "TOKEN_MOVED",
-    { player_id: actor?.id ?? null, from_position: fromPosition, to_position: toPosition },
+    "PLAYER_POSITION_SET",
+    { player_id: actor?.id ?? null, position: toPosition },
     actor?.id ?? null,
   );
   const acceptedEvents = [rolled, moved];

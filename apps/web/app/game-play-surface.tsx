@@ -145,7 +145,7 @@ const cardsById = new Map<string, StaticDataCard>(
 );
 const diceRevealDelayMs = 700;
 const tokenStepDelayMs = 440;
-const tokenSettleDelayMs = 160;
+const tokenSettleDelayMs = 480;
 const motionClearDelayMs = 1200;
 const cardRevealDelayMs = 320;
 
@@ -600,20 +600,27 @@ function playerNameForMotion(players: GameMetadata["players"], playerId: string)
   return players.find((player) => player.id === playerId)?.name;
 }
 
+function playerBoardPositionForMotion(players: GameMetadata["players"], playerId: string): number {
+  return readInteger(players.find((player) => player.id === playerId)?.state.position, 0);
+}
+
 function boardMotionFromAcceptedEvents(
   events: AcceptedEvent[],
   fallbackPlayerId: string,
   players: GameMetadata["players"],
 ): BoardMotionState | null {
   const diceEvent = events.find((event) => event.event_type === "DICE_ROLLED");
-  const moveEvent = events.find((event) => event.event_type === "TOKEN_MOVED");
+  const moveEvent = events.find((event) => event.event_type === "TOKEN_MOVED" || event.event_type === "PLAYER_POSITION_SET");
   const dice = diceFromEvent(diceEvent);
   const total = eventPayloadNumber(diceEvent, "total") ?? undefined;
 
   if (moveEvent) {
-    const playerId = eventPayloadString(moveEvent, "player_id") ?? fallbackPlayerId;
-    const fromPosition = eventPayloadNumber(moveEvent, "from_position");
-    const toPosition = eventPayloadNumber(moveEvent, "to_position");
+    const playerId = eventPayloadString(moveEvent, "player_id") ?? moveEvent.actor_player_id ?? fallbackPlayerId;
+    const fromPosition = eventPayloadNumber(moveEvent, "from_position") ?? playerBoardPositionForMotion(players, playerId);
+    const toPosition =
+      moveEvent.event_type === "TOKEN_MOVED"
+        ? eventPayloadNumber(moveEvent, "to_position")
+        : eventPayloadNumber(moveEvent, "position");
     if (fromPosition !== null && toPosition !== null) {
       const path = boardPath(fromPosition, toPosition);
       return {
