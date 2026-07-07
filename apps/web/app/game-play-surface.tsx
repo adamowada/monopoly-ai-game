@@ -1467,17 +1467,11 @@ function PlayerTrayRail({
       aria-label="Player trays"
       className="rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_14px_30px_rgba(47,36,24,0.14)]"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-sm font-black uppercase text-[#2f2418]">Player trays</h2>
-          <p className="mt-1 text-xs font-semibold text-[#6f604c]">Switch seats without shrinking every player into a tiny card.</p>
-        </div>
-        <span className="w-fit rounded-sm bg-[#173c45] px-2 py-1 text-xs font-black uppercase text-[#f7d977]">
-          {game.players.length} seats
-        </span>
-      </div>
-
-      <div aria-label="Player tray tabs" className="mt-3 flex gap-1 overflow-x-auto rounded-md border border-[#2f2418]/20 bg-white/55 p-1" role="tablist">
+      <div
+        aria-label="Player tray tabs"
+        className="flex flex-wrap items-end overflow-hidden rounded-t-md border border-[#2f2418]/20 border-b-0 bg-[#d8caa8] px-1 pt-1"
+        role="tablist"
+      >
         {game.players.map((player) => {
           const isCurrent = player.id === currentPlayerId;
           const isSelected = player.id === selectedPlayer?.id;
@@ -1489,8 +1483,11 @@ function PlayerTrayRail({
               aria-controls="active-player-tray-panel"
               aria-selected={isSelected}
               className={cn(
-                "flex min-w-[10rem] items-center gap-2 rounded px-2.5 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]",
-                isSelected ? "bg-[#173c45] text-[#fff8e8] shadow-[0_2px_0_rgba(47,36,24,0.25)]" : "text-[#2f2418] hover:bg-white",
+                "min-h-12 min-w-0 basis-1/2 border border-[#2f2418]/20 border-b-0 px-2.5 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e] sm:basis-1/4 lg:flex-none lg:basis-auto lg:min-w-[8.5rem] lg:max-w-[12rem]",
+                "flex items-center gap-2 rounded-t-md",
+                isSelected
+                  ? "relative z-10 -mb-px bg-white text-[#2f2418] shadow-[inset_0_3px_0_#d7a84c]"
+                  : "bg-[#efe6cf] text-[#2f2418] hover:bg-[#fff8e8]",
               )}
               data-current-player={isCurrent ? "true" : undefined}
               id={`${player.id}-tray-tab`}
@@ -1523,7 +1520,7 @@ function PlayerTrayRail({
       {selectedPlayer ? (
         <article
           aria-label={`${selectedPlayer.name} active player tray${selectedPlayer.id === currentPlayerId ? " current turn" : ""}`}
-          className="mt-3 rounded-md border border-[#b99768]/70 bg-white/80 p-3 text-[#2f2418]"
+          className="rounded-b-md rounded-tr-md border border-[#b99768]/70 bg-white/80 p-3 text-[#2f2418]"
           data-active-player-tray=""
           data-current-player={selectedPlayer.id === currentPlayerId ? "true" : undefined}
           id="active-player-tray-panel"

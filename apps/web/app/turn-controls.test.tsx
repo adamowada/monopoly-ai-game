@@ -895,6 +895,12 @@ describe("GamePlaySurface turn controls", () => {
     expect(await screen.findByRole("region", { name: "Turn controls" })).toBeInTheDocument();
 
     const trays = await screen.findByRole("region", { name: "Player trays" });
+    expect(within(trays).queryByText("Player trays")).not.toBeInTheDocument();
+    expect(within(trays).queryByText("Switch seats without shrinking every player into a tiny card.")).not.toBeInTheDocument();
+    expect(trays).not.toHaveTextContent(/\b\d+\s+seats\b/i);
+    const trayTabs = within(trays).getByRole("tablist", { name: "Player tray tabs" });
+    expect(trayTabs).toHaveClass("flex-wrap");
+    expect(trayTabs).not.toHaveClass("overflow-x-auto");
     const adaTray = within(trays).getByRole("tabpanel", { name: "Ada active player tray current turn" });
     expect(adaTray).toHaveAttribute("data-current-player", "true");
     expect(adaTray).toHaveTextContent("$1,500");
@@ -902,7 +908,9 @@ describe("GamePlaySurface turn controls", () => {
     expect(adaTray).toHaveTextContent("Oriental Avenue");
     expect(adaTray).not.toHaveTextContent("Park Place");
 
-    fireEvent.click(within(trays).getByRole("tab", { name: /Grace/ }));
+    const graceTab = within(trays).getByRole("tab", { name: /Grace/ });
+    expect(graceTab).toHaveClass("rounded-t-md");
+    fireEvent.click(graceTab);
     const graceTray = within(trays).getByRole("tabpanel", { name: "Grace active player tray" });
     expect(graceTray).toHaveTextContent("$1,500");
     expect(graceTray).toHaveTextContent("Park Place");
