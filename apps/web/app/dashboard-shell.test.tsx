@@ -87,6 +87,7 @@ describe("DashboardShell", () => {
     expect(healthStatus).toHaveTextContent("Rules referee");
     expect(healthStatus).toHaveTextContent("Move validation ready");
     expect(healthStatus).toHaveTextContent("Local table");
+    expect(healthStatus).toHaveTextContent("12:00:00 AM UTC");
 
     expect(screen.getByRole("row", { name: /Rules referee ready Move validation/ })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /Game board ready Board and controls/ })).toBeInTheDocument();

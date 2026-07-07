@@ -93,6 +93,12 @@ describe("GameSetupPanel", () => {
     expect(screen.getByRole("spinbutton", { name: "Proposal limit per player" })).toHaveValue(4);
   });
 
+  it("uses a stable default seed when no initial seed is provided", () => {
+    render(<GameSetupPanel />);
+
+    expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("setup-local-table");
+  });
+
   it("sends player colors and negotiation cutoffs through settings before navigating", async () => {
     createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
     render(<GameSetupPanel initialSeed="seed-fixed" />);
