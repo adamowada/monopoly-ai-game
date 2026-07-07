@@ -227,6 +227,7 @@ function legalAction(
   payload: Record<string, unknown> = {},
   expectedStateHash = "state-0",
   expectedEventSequence = 0,
+  description: string | null = null,
 ) {
   return {
     actor_id: adaId,
@@ -234,7 +235,7 @@ function legalAction(
     payload,
     expected_state_hash: expectedStateHash,
     expected_event_sequence: expectedEventSequence,
-    description: null,
+    description,
     schema: {},
   };
 }
@@ -719,6 +720,25 @@ function baseFetchMock({
     if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
       return Response.json(rejectedActions);
     }
+    if (url === `${apiBaseUrl}/games/${gameId}/negotiations`) {
+      return Response.json({ negotiations: [] });
+    }
+    if (url === `${apiBaseUrl}/games/${gameId}/deals`) {
+      return Response.json({ deals: [] });
+    }
+    if (url === `${apiBaseUrl}/games/${gameId}/contracts`) {
+      return Response.json({ contracts: [] });
+    }
+    if (url === `${apiBaseUrl}/games/${gameId}/obligations`) {
+      return Response.json({ obligations: [] });
+    }
+    if (url === `${apiBaseUrl}/games/${gameId}/contracts/outcomes`) {
+      return Response.json({ outcomes: [] });
+    }
+    const aiAuditResponse = aiAuditResponses.find((response) => url === aiAuditUrl(response.path));
+    if (aiAuditResponse) {
+      return Response.json(aiAuditResponse.payload);
+    }
     if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST" && actionResponse) {
       return Response.json(actionResponse, {
         status: typeof actionResponse === "object" && actionResponse !== null && "reason_code" in actionResponse ? 409 : 200,
@@ -751,9 +771,22 @@ describe("GamePlaySurface turn controls", () => {
 
     renderSurface(fetchMock);
 
-    const session = await screen.findByRole("region", { name: "Game session" });
-    const saveButton = within(session).getByRole("button", { name: "Save game" });
-    const loadButton = within(session).getByRole("button", { name: "Load game" });
+    expect(screen.queryByRole("region", { name: "Game session" })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open game menu" }));
+    const menu = screen.getByRole("menu", { name: "Game menu" });
+
+    expect(within(menu).getByRole("menuitem", { name: "Board" })).toHaveAttribute("href", "#game-board");
+    expect(within(menu).getByRole("menuitem", { name: "Current turn" })).toHaveAttribute("href", "#current-turn");
+    expect(within(menu).getByRole("menuitem", { name: "Player trays" })).toHaveAttribute("href", "#player-trays");
+    expect(within(menu).getByRole("menuitem", { name: "Properties" })).toHaveAttribute("href", "#properties");
+    expect(within(menu).getByRole("menuitem", { name: "Deals" })).toHaveAttribute("href", "#deals");
+    expect(within(menu).getByRole("menuitem", { name: "Contracts" })).toHaveAttribute("href", "#contracts");
+    expect(within(menu).getByRole("menuitem", { name: "AI notebook" })).toHaveAttribute("href", "#ai-notebook");
+    expect(within(menu).getByRole("menuitem", { name: "Game log" })).toHaveAttribute("href", "#game-log");
+
+    const saveButton = within(menu).getByRole("menuitem", { name: "Save game" });
+    const loadButton = within(menu).getByRole("menuitem", { name: "Load game" });
     expect(saveButton).toHaveAttribute("data-button-variant", "secondary");
     expect(saveButton).toHaveClass("text-neutral-800");
     expect(saveButton).not.toHaveClass("text-white");
@@ -761,16 +794,16 @@ describe("GamePlaySurface turn controls", () => {
     expect(loadButton).toHaveClass("text-neutral-800");
     expect(loadButton).not.toHaveClass("text-white");
 
-    fireEvent.click(within(session).getByRole("button", { name: "Save game" }));
+    fireEvent.click(saveButton);
 
     expect(window.localStorage.getItem("monopoly-ai-game.saved-games")).toContain(gameId);
-    expect(session).toHaveTextContent("Saved game-turn-controls");
+    expect(menu).toHaveTextContent("Saved game-turn-controls");
 
-    fireEvent.click(within(session).getByRole("button", { name: "Load game" }));
-    fireEvent.click(await within(session).findByRole("button", { name: "Open game-turn-controls" }));
+    fireEvent.click(loadButton);
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Open game-turn-controls" }));
     expect(routerMock.push).toHaveBeenCalledWith("/games/game-turn-controls");
 
-    fireEvent.click(within(session).getByRole("button", { name: "End game" }));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "End game" }));
 
     await waitFor(() =>
       expect(
@@ -780,6 +813,28 @@ describe("GamePlaySurface turn controls", () => {
       ).toBe(true),
     );
     expect(routerMock.push).toHaveBeenCalledWith("/");
+  });
+
+  it("keeps secondary table systems behind game-view tabs during normal play", async () => {
+    renderSurface(baseFetchMock());
+
+    const views = await screen.findByRole("tablist", { name: "Table views" });
+    expect(within(views).getByRole("tab", { name: "Properties" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("region", { name: "Property management" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Negotiation inbox" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Contracts obligations panel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "AI audit" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(views).getByRole("tab", { name: "Deals" }));
+    expect(await screen.findByRole("region", { name: "Negotiation inbox" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Property management" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(views).getByRole("tab", { name: "Contracts" }));
+    expect(await screen.findByRole("region", { name: "Contracts obligations panel" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Game log" })).toBeVisible();
+
+    fireEvent.click(within(views).getByRole("tab", { name: "AI notebook" }));
+    expect(await screen.findByRole("region", { name: "AI audit" })).toBeVisible();
   });
 
   it("prioritizes active controls, current player holdings, and one dynamic turn context", async () => {
@@ -807,6 +862,16 @@ describe("GamePlaySurface turn controls", () => {
     expect(await screen.findByRole("region", { name: "Active player" })).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Turn controls" })).toBeInTheDocument();
 
+    const trays = await screen.findByRole("region", { name: "Player trays" });
+    const adaTray = within(trays).getByRole("article", { name: "Ada player tray current turn" });
+    const graceTray = within(trays).getByRole("article", { name: "Grace player tray" });
+    expect(adaTray).toHaveAttribute("data-current-player", "true");
+    expect(adaTray).toHaveTextContent("$1,500");
+    expect(adaTray).toHaveTextContent("GO (0)");
+    expect(adaTray).toHaveTextContent("Oriental Avenue");
+    expect(graceTray).toHaveTextContent("$1,500");
+    expect(graceTray).toHaveTextContent("Park Place");
+
     const holdings = await screen.findByRole("region", { name: "Current player holdings" });
     expect(holdings).toHaveTextContent("Ada holdings");
     expect(holdings).toHaveTextContent("Oriental Avenue");
@@ -820,7 +885,10 @@ describe("GamePlaySurface turn controls", () => {
   it("renders enabled action buttons only for backend-returned legal actions", async () => {
     renderSurface(
       baseFetchMock({
-        legalActions: [legalAction("ROLL_DICE"), legalAction("PAY_JAIL_FINE", { amount: 50 })],
+        legalActions: [
+          legalAction("ROLL_DICE"),
+          legalAction("PAY_JAIL_FINE", { amount: 50 }, "state-0", 0, "Pay $50 to leave jail before rolling."),
+        ],
       }),
     );
 
@@ -828,6 +896,7 @@ describe("GamePlaySurface turn controls", () => {
 
     expect(await within(controls).findByRole("button", { name: "Roll dice" })).toBeEnabled();
     expect(within(controls).getByRole("button", { name: "Pay jail fine" })).toBeEnabled();
+    expect(controls).toHaveTextContent("Pay $50 to leave jail before rolling.");
     expect(within(controls).getByRole("button", { name: "End turn" })).toBeDisabled();
     expect(within(controls).queryByRole("button", { name: "Buy property" })).not.toBeInTheDocument();
     expect(within(controls).queryByRole("button", { name: "Start auction" })).not.toBeInTheDocument();
@@ -853,6 +922,9 @@ describe("GamePlaySurface turn controls", () => {
     renderSurface(fetchMock, gameFixture(4));
 
     const controls = await screen.findByRole("region", { name: "Turn controls" });
+    const payment = await within(controls).findByRole("status", { name: "Active payment" });
+    expect(payment).toHaveTextContent("Ada owes Grace $6");
+    expect(payment).toHaveTextContent("Rent for Oriental Avenue");
     fireEvent.click(await within(controls).findByRole("button", { name: "Settle debt" }));
 
     await waitFor(() =>
@@ -901,6 +973,18 @@ describe("GamePlaySurface turn controls", () => {
       if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
         return Response.json(rejectedActionsFixture());
       }
+      if (url === `${apiBaseUrl}/games/${gameId}/contracts`) {
+        return Response.json({ contracts: [] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/obligations`) {
+        return Response.json({ obligations: [] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/contracts/outcomes`) {
+        return Response.json({ outcomes: [] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/deals`) {
+        return Response.json({ deals: [] });
+      }
       if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
         accepted = true;
         return Response.json(acceptedRollResponse());
@@ -918,7 +1002,8 @@ describe("GamePlaySurface turn controls", () => {
     const activePlayer = screen.getByRole("region", { name: "Active player" });
     expect(within(activePlayer).getByText("Space")).toBeInTheDocument();
     expect(within(activePlayer).getByText("Chance (7)")).toBeInTheDocument();
-    const log = screen.getByRole("region", { name: "Game log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Contracts" }));
+    const log = await screen.findByRole("region", { name: "Game log" });
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
     expect(within(log).getByText(/TOKEN_MOVED/)).toBeInTheDocument();
   }, 18_000);
@@ -1358,6 +1443,8 @@ describe("GamePlaySurface turn controls", () => {
     });
 
     renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("tab", { name: "AI notebook" }));
 
     for (const response of aiAuditResponses) {
       await waitFor(() => expect(aiAuditFetchCount(fetchMock, response.path)).toBe(1));

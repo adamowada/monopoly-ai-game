@@ -3,7 +3,6 @@ import Link from "next/link";
 
 import { Button } from "../../../components/ui/button";
 import { readGame } from "../../../lib/api/games";
-import { GameTableMenu } from "../../game-table-menu";
 import { GamePlaySurface } from "../../game-play-surface";
 
 export const dynamic = "force-dynamic";
@@ -40,8 +39,6 @@ export default async function GameBoardPage({ params }: GamePageProps) {
 
   return (
     <main className="min-h-screen bg-[var(--color-page)] text-neutral-950">
-      <GameTableMenu gameId={game.id} status={game.status} />
-
       <GamePlaySurface gameId={game.id} initialGame={game} />
     </main>
   );

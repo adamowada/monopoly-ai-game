@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import GameBoardPage from "./games/[gameId]/page";
@@ -33,17 +33,13 @@ function gameMetadata(): GameMetadata {
 }
 
 describe("GameBoardPage", () => {
-  it("renders setup navigation inside a compact game menu", async () => {
+  it("renders the live game surface without a redundant page heading", async () => {
     readGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
 
     render(await GameBoardPage({ params: Promise.resolve({ gameId: "game-page-test" }) }));
 
     expect(screen.queryByRole("heading", { level: 1, name: /Game table/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open game menu" }));
-
-    const menu = screen.getByRole("menu", { name: "Game menu" });
-    const setupLink = within(menu).getByRole("menuitem", { name: "Setup" });
-    expect(setupLink).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("button", { name: "Open game menu" })).not.toBeInTheDocument();
     expect(screen.getByTestId("game-play-surface")).toBeInTheDocument();
   });
 });

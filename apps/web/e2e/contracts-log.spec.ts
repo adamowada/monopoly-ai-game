@@ -19,6 +19,7 @@ async function createContractsGame(page: import("@playwright/test").Page) {
 
 test("shows contracts, obligations, settlement history, source-linked transfers, and log filters", async ({ page }) => {
   await createContractsGame(page);
+  await page.getByRole("tab", { name: "Contracts" }).click();
 
   const panel = page.getByRole("region", { name: "Contracts obligations panel" });
   await expect(panel).toBeVisible();

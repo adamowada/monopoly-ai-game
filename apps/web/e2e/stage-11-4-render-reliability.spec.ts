@@ -77,6 +77,10 @@ async function submitOneStateUpdate(page: Page): Promise<string> {
   throw new Error("No enabled state update action was available");
 }
 
+async function openTableView(page: Page, name: "Properties" | "Deals" | "Contracts" | "AI notebook") {
+  await page.getByRole("tab", { name }).click();
+}
+
 test("stage-11-4-render-reliability: board panels property management and AI audit remain readable after repeated state updates with performance signal", async ({
   page,
 }) => {
@@ -92,9 +96,9 @@ test("stage-11-4-render-reliability: board panels property management and AI aud
 
   await expect(board).toBeVisible();
   await expect(propertyManagement).toBeVisible();
-  await expect(contracts).toBeVisible();
-  await expect(negotiation).toBeVisible();
-  await expect(aiAudit).toBeVisible();
+  await expect(contracts).toBeHidden();
+  await expect(negotiation).toBeHidden();
+  await expect(aiAudit).toBeHidden();
 
   const updateCount = 24;
   const startedAt = await page.evaluate(() => performance.now());
@@ -126,8 +130,11 @@ test("stage-11-4-render-reliability: board panels property management and AI aud
   await expect(propertyManagement).toBeVisible();
   await expect(propertyManagement).toContainText("Property management");
   await expect(propertyManagement).toContainText("Bank inventory");
+  await openTableView(page, "Contracts");
   await expect(contracts).toContainText("Active contracts");
+  await openTableView(page, "Deals");
   await expect(negotiation).toContainText("Negotiation inbox");
+  await openTableView(page, "AI notebook");
   await expect(aiAudit).toBeVisible();
   await expect(aiAudit).toContainText("AI notebook");
 

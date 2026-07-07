@@ -5,6 +5,7 @@ import { BOARD_SPACES } from "@monopoly-ai-game/schemas";
 import { DECK_ART, SPACE_ART_BY_ID } from "./board-art";
 import { ClassicGameBoard } from "./game-board";
 import type { GameMetadata } from "../lib/api/games";
+import type { GameStateResponse } from "../lib/api/gameplay";
 
 const createdAt = "2026-07-04T00:00:00.000Z";
 
@@ -53,6 +54,45 @@ function gameFixture(positions: number[] = [0, 7]): GameMetadata {
         updated_at: createdAt,
       },
     ],
+  };
+}
+
+function stateFixture(): GameStateResponse {
+  return {
+    game_id: "game-board-test",
+    event_sequence: 12,
+    state_hash: "state-board-art",
+    state: {
+      game_id: "game-board-test",
+      seed: "board-test",
+      players: [
+        { id: "player-1", cash: 1500, position: 0 },
+        { id: "player-2", cash: 1500, position: 39 },
+      ],
+      property_ownership: [
+        {
+          property_id: "property_boardwalk",
+          owner_id: "player-2",
+          mortgaged: false,
+          houses: 0,
+          hotels: 1,
+          hotel: true,
+        },
+        {
+          property_id: "property_mediterranean_avenue",
+          owner_id: "player-1",
+          mortgaged: false,
+          houses: 3,
+          hotels: 0,
+          hotel: false,
+        },
+      ],
+      turn: {
+        phase: "START_TURN",
+        current_player_index: 0,
+        current_player_id: "player-1",
+      },
+    },
   };
 }
 
@@ -142,21 +182,51 @@ describe("ClassicGameBoard", () => {
     expect(screen.queryByRole("status", { name: "Winner Player 1!" })).not.toBeInTheDocument();
   });
 
-  it("renders classic street property cells with only a top color band, name, price, and hover details", () => {
+  it("renders all 40 board spaces with visible original motif art", () => {
     render(<ClassicGameBoard game={gameFixture()} />);
 
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
+
+    expect(board.querySelectorAll("[data-space-art]")).toHaveLength(40);
+    for (const space of BOARD_SPACES) {
+      const boardSpace = board.querySelector(`[data-space-index='${space.position}']`);
+      expect(boardSpace?.querySelector("[data-space-art]"), `${space.name} should render motif art`).toBeInTheDocument();
+    }
+  });
+
+  it("renders street property cells with motifs, owner markers, development markers, and hover details", () => {
+    render(<ClassicGameBoard game={gameFixture()} snapshot={stateFixture()} />);
+
+    const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
     const boardwalk = board.querySelector("[data-space-index='39']");
+    const mediterranean = board.querySelector("[data-space-index='1']");
 
     expect(boardwalk).toHaveAttribute("data-space-kind", "street-property");
     expect(boardwalk?.querySelector("[data-property-color-band]")).toBeTruthy();
-    expect(boardwalk?.querySelector("[data-space-art]")).toBeNull();
+    expect(boardwalk?.querySelector("[data-space-art]")).toBeInTheDocument();
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute(
+      "aria-label",
+      "Owner marker: Grace owns Boardwalk",
+    );
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "aria-label",
+      "Development marker: Boardwalk has a hotel",
+    );
     expect(boardwalk?.querySelector("[data-space-bottom-label]")).toHaveTextContent("$400");
     expect(board.querySelector("[data-property-hover]")).toBeNull();
     fireEvent.mouseEnter(boardwalk as Element);
     expect(board.querySelector("[data-property-hover]")).toHaveTextContent("Rent $50");
     expect(board.querySelector("[data-property-hover]")).toHaveTextContent("Mortgage value $200");
     expect(boardwalk?.querySelector("[data-space-name]")).toHaveClass("uppercase");
+
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute(
+      "aria-label",
+      "Owner marker: Ada owns Mediterranean Avenue",
+    );
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "aria-label",
+      "Development marker: Mediterranean Avenue has 3 houses",
+    );
   });
 
   it("renders non-street board cells with a top name, large logo, and required bottom instruction", () => {

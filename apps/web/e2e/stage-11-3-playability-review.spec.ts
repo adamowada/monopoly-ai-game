@@ -54,6 +54,10 @@ async function clickTurnControl(page: Page, name: string) {
   await button.click();
 }
 
+async function openTableView(page: Page, name: "Properties" | "Deals" | "Contracts" | "AI notebook") {
+  await page.getByRole("tab", { name }).click();
+}
+
 test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Roll dice Buy property Settle debt Build house Mortgage Start negotiation Propose deal Accept Enforce obligation", async ({
   page,
 }) => {
@@ -70,10 +74,10 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
 
   await expect(board).toBeVisible();
   await expect(propertyManagement).toBeVisible();
-  await expect(contracts).toBeVisible();
-  await expect(negotiation).toBeVisible();
-  await expect(aiAudit).toBeVisible();
-  await expect(log).toBeVisible();
+  await expect(contracts).toBeHidden();
+  await expect(negotiation).toBeHidden();
+  await expect(aiAudit).toBeHidden();
+  await expect(log).toBeHidden();
 
   const mediterranean = page.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
   const reading = page.getByRole("region", { name: "Property detail: Reading Railroad" });
@@ -93,11 +97,13 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
   await expect(controls.getByRole("button", { name: "Settle debt" })).toBeEnabled();
 
   await clickTurnControl(page, "Settle debt");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("RENT_PAID");
 
   await clickTurnControl(page, "End turn");
   await expectActivePlayer(page, "Ada");
 
+  await openTableView(page, "Properties");
   await expect(mediterranean.getByRole("button", { name: "Build house" })).toBeEnabled();
   await mediterranean.getByRole("button", { name: "Build house" }).click();
   await expect(mediterranean).toContainText("Houses: 1");
@@ -106,11 +112,14 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
   await expect(reading.getByRole("button", { name: "Mortgage" })).toBeEnabled();
   await reading.getByRole("button", { name: "Mortgage" }).click();
   await expect(reading).toContainText("Mortgaged");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 
   await createGame(page, "stage-10-5-contract-enforcement", twoHumanPlayers);
   await expect(board).toBeVisible();
+  await openTableView(page, "Contracts");
   await expect(contracts).toBeVisible();
+  await openTableView(page, "Deals");
   await expect(negotiation).toBeVisible();
 
   await negotiation.getByLabel("Negotiation topic").fill("Stage 11.3 UI usability pass");
@@ -126,6 +135,7 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
   await deal.getByRole("button", { name: "Accept" }).click();
   await expect(deal).toContainText("Accepted");
 
+  await openTableView(page, "Contracts");
   await expect(contracts).toContainText("Active contracts");
   await expect(contracts).toContainText("pending");
   await contracts.getByRole("button", { name: "Enforce obligation" }).click();
@@ -186,13 +196,17 @@ test("stage-11-3-property-management-playthrough: browser reaches Build house Se
   await expect(baltic.getByRole("button", { name: "Mortgage" })).toBeEnabled();
   await baltic.getByRole("button", { name: "Mortgage" }).click();
   await expect(baltic).toContainText("Mortgaged");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 
+  await openTableView(page, "Properties");
   await expect(parkPlace.getByRole("button", { name: "Unmortgage" })).toBeEnabled();
   await parkPlace.getByRole("button", { name: "Unmortgage" }).click();
   await expect(parkPlace).toContainText("Unmortgaged");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 
+  await openTableView(page, "Properties");
   await expect(mediterranean.getByRole("button", { name: "Build house" })).toBeEnabled();
   await mediterranean.getByRole("button", { name: "Build house" }).click();
   await expect(mediterranean).toContainText("Houses: 1");
@@ -204,6 +218,7 @@ test("stage-11-3-property-management-playthrough: browser reaches Build house Se
   await expect(boardwalk).toContainText("Hotels: 0");
   await expect(bankInventory).toContainText("Houses remaining 27");
   await expect(bankInventory).toContainText("Hotels remaining 13");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_IMPROVEMENTS_SET");
 });
 
@@ -256,6 +271,7 @@ test("stage-11-3-mixed-ai-playthrough: mixed human/AI players, Start auction Bid
   await expect(stepAiButton).toBeEnabled();
   await stepAiButton.click();
   await expect(auction).toContainText(/Current high bidder/);
+  await openTableView(page, "AI notebook");
   await expect(aiAudit).toContainText("AI notebook");
   await expect(aiAudit).toContainText("Decision history");
 });

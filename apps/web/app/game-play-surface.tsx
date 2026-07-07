@@ -16,13 +16,11 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Dice5,
-  FolderOpen,
   Gavel,
   HandCoins,
   KeyRound,
   Loader2,
   LogOut,
-  Save,
   ShieldAlert,
   UserRound,
 } from "lucide-react";
@@ -51,6 +49,7 @@ import { AiAuditPanel } from "./ai-audit-panel";
 import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
 import { ContractsPanel } from "./contracts-panel";
 import { ClassicGameBoard, getPlayerColor, type BoardMotion, type DrawnCardView } from "./game-board";
+import { GameTableMenu } from "./game-table-menu";
 import { NegotiationPanel } from "./negotiation-panel";
 import { PropertyManagementPanel } from "./property-management";
 
@@ -110,6 +109,15 @@ type TurnResultSummary = {
   badge: string;
   detail: string;
 };
+
+type TableView = "properties" | "deals" | "contracts" | "ai-notebook";
+
+const tableViews: Array<{ id: TableView; label: string }> = [
+  { id: "properties", label: "Properties" },
+  { id: "deals", label: "Deals" },
+  { id: "contracts", label: "Contracts" },
+  { id: "ai-notebook", label: "AI notebook" },
+];
 
 const actionModels: Record<string, ActionModel> = {
   ROLL_DICE: { label: "Roll dice", group: "turn", icon: Dice5 },
@@ -212,19 +220,42 @@ function money(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? `$${value.toLocaleString("en-US")}` : "$0";
 }
 
-function playerCash(player: GameMetadata["players"][number]): string {
-  return money(readNumber(player.state.cash));
+function snapshotPlayerRecord(
+  snapshot: GameStateResponse | undefined,
+  playerId: string,
+): Record<string, unknown> | null {
+  const players = snapshot?.state.players;
+  if (!Array.isArray(players)) {
+    return null;
+  }
+  const player = players.find((entry) => isRecord(entry) && entry.id === playerId);
+  return isRecord(player) ? player : null;
 }
 
-function playerPosition(player: GameMetadata["players"][number]): string {
-  const position = readNumber(player.state.position);
+function playerCash(player: GameMetadata["players"][number], snapshot?: GameStateResponse): string {
+  const snapshotPlayer = snapshotPlayerRecord(snapshot, player.id);
+  return money(readNumber(snapshotPlayer?.cash, readNumber(player.state.cash)));
+}
+
+function playerPosition(player: GameMetadata["players"][number], snapshot?: GameStateResponse): string {
+  const snapshotPlayer = snapshotPlayerRecord(snapshot, player.id);
+  const position = readNumber(snapshotPlayer?.position, readNumber(player.state.position));
   const space = BOARD_SPACES[position];
   return space ? `${space.name} (${position})` : String(position);
+}
+
+function playerInitial(player: GameMetadata["players"][number]): string {
+  return player.name.trim().charAt(0).toUpperCase() || String(player.seat_order + 1);
 }
 
 function turnRecord(snapshot: GameStateResponse | undefined): Record<string, unknown> | null {
   const turn = snapshot?.state.turn;
   return isRecord(turn) ? turn : null;
+}
+
+function activePaymentRecord(snapshot: GameStateResponse | undefined): Record<string, unknown> | null {
+  const payment = snapshot?.state.active_payment;
+  return isRecord(payment) ? payment : null;
 }
 
 function activePhase(game: GameMetadata, snapshot: GameStateResponse | undefined): string {
@@ -312,6 +343,16 @@ function propertyById(propertyId: string | null): StaticDataProperty | null {
 
 function propertyName(propertyId: string | null): string {
   return propertyById(propertyId)?.name ?? propertyId ?? "Unknown property";
+}
+
+function paymentReasonLabel(reason: string | null): string {
+  if (!reason) {
+    return "Payment due";
+  }
+  if (reason.startsWith("rent:")) {
+    return `Rent for ${propertyName(reason.slice("rent:".length))}`;
+  }
+  return formatTitleCase(reason);
 }
 
 async function loadGame(gameId: string, apiBaseUrl?: string): Promise<GameMetadata> {
@@ -760,6 +801,48 @@ function AiStepStatusPanel({
   );
 }
 
+function ActivePaymentPanel({
+  game,
+  snapshot,
+}: Readonly<{
+  game: GameMetadata;
+  snapshot: GameStateResponse | undefined;
+}>) {
+  const payment = activePaymentRecord(snapshot);
+  if (!payment) {
+    return null;
+  }
+
+  const debtorId = typeof payment.debtor_id === "string" ? payment.debtor_id : null;
+  const creditorId = typeof payment.creditor_id === "string" ? payment.creditor_id : null;
+  const amountOwed = readNumber(payment.amount_owed);
+  const amountPaid = readNumber(payment.amount_paid);
+  const amountDue = Math.max(0, amountOwed - amountPaid);
+  const reason = typeof payment.reason === "string" ? payment.reason : null;
+  const creditorName = creditorId ? playerName(game, creditorId) : "the bank";
+
+  return (
+    <div
+      aria-label="Active payment"
+      role="status"
+      className="mt-4 rounded-md border-2 border-[#2f2418] bg-[#fff8e8] p-3 text-[#2f2418] shadow-[0_6px_0_rgba(47,36,24,0.16)]"
+    >
+      <div className="flex items-start gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-sm bg-[#173c45] text-[#f7d977]">
+          <Banknote aria-hidden="true" className="size-5" />
+        </span>
+        <div className="min-w-0">
+          <h3 className="text-xs font-black uppercase">Payment due</h3>
+          <p className="mt-1 text-sm font-black">
+            {playerName(game, debtorId)} owes {creditorName} {money(amountDue)}
+          </p>
+          <p className="mt-1 text-xs font-semibold text-[#6f604c]">{paymentReasonLabel(reason)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ActionButton({
   action,
   disabled,
@@ -777,21 +860,28 @@ function ActionButton({
   }
   const Icon = model.icon;
   return (
-    <Button
-      onClick={() => onSubmit(action)}
-      disabled={disabled}
-      className={cn(
-        "min-h-9 justify-start px-2.5 py-1.5 text-xs",
-      )}
-      variant={model.variant === "danger" ? "danger" : "primary"}
-    >
-      {isSubmitting ? (
-        <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
-      ) : (
-        <Icon aria-hidden="true" className="size-3.5" />
-      )}
-      {isSubmitting ? "Submitting..." : model.label}
-    </Button>
+    <div className="grid max-w-full gap-1">
+      <Button
+        onClick={() => onSubmit(action)}
+        disabled={disabled}
+        className={cn(
+          "min-h-9 justify-start px-2.5 py-1.5 text-xs",
+        )}
+        variant={model.variant === "danger" ? "danger" : "primary"}
+      >
+        {isSubmitting ? (
+          <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+        ) : (
+          <Icon aria-hidden="true" className="size-3.5" />
+        )}
+        {isSubmitting ? "Submitting..." : model.label}
+      </Button>
+      {action.description ? (
+        <p className="max-w-52 text-xs font-medium leading-5 text-neutral-600" data-legal-action-description="">
+          {action.description}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -916,6 +1006,131 @@ function ActivePlayerPanel({
   );
 }
 
+function PlayerTrayRail({
+  currentPlayerId,
+  game,
+  snapshot,
+}: Readonly<{
+  currentPlayerId: string | null;
+  game: GameMetadata;
+  snapshot: GameStateResponse | undefined;
+}>) {
+  return (
+    <section
+      id="player-trays"
+      aria-label="Player trays"
+      className="rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_14px_30px_rgba(47,36,24,0.14)]"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-black uppercase text-[#2f2418]">Player trays</h2>
+        <span className="text-xs font-semibold text-[#6f604c]">{game.players.length} seats</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {game.players.map((player) => {
+          const isCurrent = player.id === currentPlayerId;
+          const color = getPlayerColor(game, player.seat_order);
+          const ownedProperties = currentPlayerProperties(snapshot, player.id);
+          return (
+            <article
+              key={player.id}
+              aria-label={`${player.name} player tray${isCurrent ? " current turn" : ""}`}
+              className={cn(
+                "min-w-0 rounded-md border bg-white/80 p-3 text-[#2f2418] shadow-sm",
+                isCurrent
+                  ? "border-[#2f2418] ring-2 ring-[#d7a84c]"
+                  : "border-[#b99768]/70",
+              )}
+              data-current-player={isCurrent ? "true" : undefined}
+              role="article"
+            >
+              <div className="flex items-start gap-3">
+                <span
+                  aria-label={`${player.name} token`}
+                  className="grid size-9 shrink-0 place-items-center rounded-[0.35rem] border-2 border-[#2f2418] text-sm font-black shadow-[0_3px_0_rgba(47,36,24,0.25)]"
+                  role="img"
+                  style={{
+                    backgroundColor: color,
+                    color: "#fff",
+                  }}
+                >
+                  {playerInitial(player)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="truncate text-sm font-black">{player.name}</h3>
+                    {isCurrent ? (
+                      <span className="shrink-0 rounded-sm bg-[#173c45] px-1.5 py-0.5 text-[10px] font-black uppercase text-[#f7d977]">
+                        Current turn
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-lg font-black leading-none text-[#173c45]">{playerCash(player, snapshot)}</p>
+                  <p className="mt-1 truncate text-xs font-semibold text-[#6f604c]">{playerPosition(player, snapshot)}</p>
+                </div>
+              </div>
+              <div className="mt-3 border-t border-[#b99768]/40 pt-2">
+                <p className="text-[10px] font-black uppercase text-[#6f604c]">
+                  {ownedProperties.length} {ownedProperties.length === 1 ? "property" : "properties"}
+                </p>
+                {ownedProperties.length > 0 ? (
+                  <ul className="mt-1 flex flex-wrap gap-1">
+                    {ownedProperties.slice(0, 4).map((property) => (
+                      <li
+                        key={property.id}
+                        className="max-w-full truncate rounded-sm border border-[#b99768]/60 bg-[#fffbea] px-1.5 py-0.5 text-[11px] font-semibold text-[#2f2418]"
+                      >
+                        {property.name}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-xs font-semibold text-[#6f604c]">No deeds yet</p>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function TableViewTabs({
+  activeView,
+  onChange,
+}: Readonly<{
+  activeView: TableView;
+  onChange: (view: TableView) => void;
+}>) {
+  return (
+    <div
+      aria-label="Table views"
+      className="flex flex-wrap gap-1 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-1"
+      role="tablist"
+    >
+      {tableViews.map((view) => (
+        <button
+          key={view.id}
+          aria-controls={`${view.id}-panel`}
+          aria-selected={activeView === view.id}
+          className={cn(
+            "rounded-sm px-3 py-2 text-xs font-black uppercase transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]",
+            activeView === view.id
+              ? "bg-[#173c45] text-[#f7d977] shadow-[0_2px_0_rgba(47,36,24,0.2)]"
+              : "text-[#2f2418] hover:bg-white/80",
+          )}
+          id={`${view.id}-tab`}
+          onClick={() => onChange(view.id)}
+          role="tab"
+          type="button"
+        >
+          {view.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function CurrentPlayerHoldingsPanel({
   player,
   snapshot,
@@ -1019,85 +1234,6 @@ function TradeContextPanel({ player }: Readonly<{ player: GameMetadata["players"
           Trade
         </span>
       </div>
-    </section>
-  );
-}
-
-function GameSessionPanel({
-  isEnding,
-  message,
-  onEndGame,
-  onLoadGame,
-  onSaveGame,
-  onToggleLoadGames,
-  savedGames,
-  showLoadGames,
-}: Readonly<{
-  isEnding: boolean;
-  message: string | null;
-  onEndGame: () => void;
-  onLoadGame: (gameId: string) => void;
-  onSaveGame: () => void;
-  onToggleLoadGames: () => void;
-  savedGames: SavedGameRecord[];
-  showLoadGames: boolean;
-}>) {
-  return (
-    <section aria-label="Game session" className="rounded-md border border-neutral-200 bg-white p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-neutral-950">Game session</h2>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-1">
-        <Button onClick={onSaveGame} className="justify-start" variant="secondary">
-          <Save aria-hidden="true" className="size-4" />
-          Save game
-        </Button>
-        <Button onClick={onToggleLoadGames} className="justify-start" variant="secondary">
-          <FolderOpen aria-hidden="true" className="size-4" />
-          Load game
-        </Button>
-        <Button
-          onClick={onEndGame}
-          disabled={isEnding}
-          className="justify-start"
-          variant="danger"
-        >
-          {isEnding ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LogOut aria-hidden="true" className="size-4" />}
-          {isEnding ? "Ending..." : "End game"}
-        </Button>
-      </div>
-
-      {message ? (
-        <p aria-live="polite" className="mt-3 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-medium text-teal-800">
-          {message}
-        </p>
-      ) : null}
-
-      {showLoadGames ? (
-        <div aria-label="Saved games" className="mt-3 grid gap-2" role="group">
-          {savedGames.length > 0 ? (
-            savedGames.map((savedGame) => (
-              <button
-                key={savedGame.id}
-                aria-label={`Open ${savedGame.label}`}
-                className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-left text-xs text-neutral-700 transition hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
-                onClick={() => onLoadGame(savedGame.id)}
-                type="button"
-              >
-                <span className="block font-semibold text-neutral-950">Open {savedGame.label}</span>
-                <span className="mt-0.5 block uppercase text-neutral-500">{formatGameStatus(savedGame.status)}</span>
-              </button>
-            ))
-          ) : (
-            <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
-              No saved games yet.
-            </p>
-          )}
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -1216,6 +1352,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const router = useRouter();
   const queryClient = useQueryClient();
   const baseUrl = backendBaseUrl(apiBaseUrl);
+  const [activeTableView, setActiveTableView] = useState<TableView>("properties");
   const [localRejectedAction, setLocalRejectedAction] = useState<ActionRejectedResponse | null>(null);
   const [acceptedEvents, setAcceptedEvents] = useState<AcceptedEvent[]>([]);
   const [pendingActionType, setPendingActionType] = useState<string | null>(null);
@@ -1665,7 +1802,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const hasAuctionContext = Boolean(activeAuction) || auctionLegalActions.length > 0;
   const turnResultSummary = lastTurnResultFromEvents(visibleEvents, game);
   const turnControlsPanel = (
-    <section aria-label="Turn controls" className="rounded-md border border-neutral-200 bg-white p-4">
+    <section id="current-turn" aria-label="Turn controls" className="rounded-md border border-neutral-200 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Turn controls</h2>
@@ -1704,6 +1841,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           <AiStepStatusPanel isThinking={aiStep.isPending} result={aiStepResult} />
         </div>
       ) : null}
+
+      <ActivePaymentPanel game={game} snapshot={stateQuery.data} />
 
       <div className="mt-4 grid gap-3">
         <ActionGroupPanel
@@ -1752,29 +1891,40 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
   return (
     <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:px-8">
+      <GameTableMenu
+        currentPlayerName={currentPlayer?.name ?? null}
+        gameId={game.id}
+        isEnding={endGameMutation.isPending}
+        message={sessionMessage}
+        onEndGame={handleEndGame}
+        onLoadGame={handleLoadGame}
+        onSaveGame={handleSaveGame}
+        onSelectTableView={setActiveTableView}
+        onToggleLoadGames={() => setShowLoadGames((current) => !current)}
+        phase={formatTurnPhase(phase)}
+        savedGames={savedGames}
+        showLoadGames={showLoadGames}
+        status={formatGameStatus(game.status)}
+      />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <ClassicGameBoard
-          drawnCard={visibleDrawnCard}
-          game={game}
-          motion={boardMotion ?? undefined}
-          onDismissDrawnCard={() => setDismissedCardEventId(visibleDrawnCard?.eventId ?? null)}
-          snapshot={stateQuery.data}
-        />
+        <div className="grid content-start gap-3">
+          <div id="game-board">
+            <ClassicGameBoard
+              drawnCard={visibleDrawnCard}
+              game={game}
+              motion={boardMotion ?? undefined}
+              onDismissDrawnCard={() => setDismissedCardEventId(visibleDrawnCard?.eventId ?? null)}
+              snapshot={stateQuery.data}
+            />
+          </div>
+        </div>
         <aside className="grid content-start gap-4">
-          <ActivePlayerPanel player={currentPlayer} phase={phase} />
           {turnControlsPanel}
-
-          <GameSessionPanel
-            isEnding={endGameMutation.isPending}
-            message={sessionMessage}
-            onEndGame={handleEndGame}
-            onLoadGame={handleLoadGame}
-            onSaveGame={handleSaveGame}
-            onToggleLoadGames={() => setShowLoadGames((current) => !current)}
-            savedGames={savedGames}
-            showLoadGames={showLoadGames}
-          />
+          <ActivePlayerPanel player={currentPlayer} phase={phase} />
         </aside>
+        <div className="xl:col-start-1">
+          <PlayerTrayRail currentPlayerId={currentPlayer?.id ?? null} game={game} snapshot={stateQuery.data} />
+        </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -1805,27 +1955,47 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
       {visibleRejection ? <RejectedActionAlert rejection={visibleRejection} /> : null}
 
-      <section aria-label="Supporting table details" className="grid gap-4">
-        <PropertyManagementPanel
-          controlsDisabled={directActionControlsDisabled}
-          game={game}
-          legalActions={legalActions}
-          onSubmit={handleSubmit}
-          pendingActionType={pendingActionType}
-          snapshot={stateQuery.data}
-        />
-        <NegotiationPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
-        <ContractsPanel
-          apiBaseUrl={baseUrl}
-          events={visibleEvents}
-          game={game}
-          gameId={gameId}
-          rejectedActions={rejectedActionsQuery.data ?? []}
-        />
-        <AiAuditPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
-        <div className="grid gap-4 lg:grid-cols-2">
-          <PlayerTable game={game} />
-          <GameDetails game={game} phase={phase} />
+      <section aria-label="Secondary table views" className="grid gap-3">
+        <TableViewTabs activeView={activeTableView} onChange={setActiveTableView} />
+        <div
+          aria-labelledby={`${activeTableView}-tab`}
+          className="grid gap-4"
+          id={`${activeTableView}-panel`}
+          role="tabpanel"
+        >
+          {activeTableView === "properties" ? (
+            <div id="properties">
+              <PropertyManagementPanel
+                controlsDisabled={directActionControlsDisabled}
+                game={game}
+                legalActions={legalActions}
+                onSubmit={handleSubmit}
+                pendingActionType={pendingActionType}
+                snapshot={stateQuery.data}
+              />
+            </div>
+          ) : null}
+          {activeTableView === "deals" ? (
+            <div id="deals">
+              <NegotiationPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
+            </div>
+          ) : null}
+          {activeTableView === "contracts" ? (
+            <div id="contracts">
+              <ContractsPanel
+                apiBaseUrl={baseUrl}
+                events={visibleEvents}
+                game={game}
+                gameId={gameId}
+                rejectedActions={rejectedActionsQuery.data ?? []}
+              />
+            </div>
+          ) : null}
+          {activeTableView === "ai-notebook" ? (
+            <div id="ai-notebook">
+              <AiAuditPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
+            </div>
+          ) : null}
         </div>
       </section>
     </div>

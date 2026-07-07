@@ -22,6 +22,7 @@ test("user can inspect AI audit records for profiles, decisions, memory, retriev
   page,
 }) => {
   await createAiAuditGame(page);
+  await page.getByRole("tab", { name: "AI notebook" }).click();
 
   const panel = page.getByRole("region", { name: "AI audit" });
   await expect(panel).toBeVisible();

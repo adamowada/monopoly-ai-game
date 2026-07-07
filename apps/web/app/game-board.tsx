@@ -308,6 +308,13 @@ function ownerName(game: GameMetadata, ownerId: string | null): string {
   return game.players.find((player) => player.id === ownerId)?.name ?? ownerId;
 }
 
+function ownerPlayer(game: GameMetadata, ownerId: string | null): GamePlayer | null {
+  if (!ownerId) {
+    return null;
+  }
+  return game.players.find((player) => player.id === ownerId) ?? null;
+}
+
 function propertyGroupName(property: StaticDataProperty): string {
   return groupById.get(property.group)?.name ?? property.group;
 }
@@ -655,6 +662,79 @@ function RotateBoardButton({ onRotate }: Readonly<{ onRotate: () => void }>) {
   );
 }
 
+function BoardOwnerMarker({
+  game,
+  ownership,
+  property,
+}: Readonly<{
+  game: GameMetadata;
+  ownership: PropertyOwnershipView;
+  property: StaticDataProperty;
+}>) {
+  const owner = ownerPlayer(game, ownership.owner_id);
+  if (!owner) {
+    return null;
+  }
+
+  const color = getPlayerColor(game, owner.seat_order);
+
+  return (
+    <span
+      aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
+      className="absolute right-0.5 top-0.5 z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[8px] font-black shadow-sm"
+      data-owner-marker=""
+      role="img"
+      style={{
+        backgroundColor: color,
+        color: readableTextColor(color),
+      }}
+      title={`${owner.name} owns ${property.name}`}
+    >
+      {tokenText(owner.name, owner.seat_order)}
+    </span>
+  );
+}
+
+function DevelopmentMarker({
+  ownership,
+  property,
+}: Readonly<{
+  ownership: PropertyOwnershipView;
+  property: StaticDataProperty;
+}>) {
+  if (property.kind !== "street") {
+    return null;
+  }
+
+  const hasHotel = ownership.hotel || ownership.hotels > 0;
+  const houses = Math.max(0, ownership.houses);
+  if (!hasHotel && houses === 0) {
+    return null;
+  }
+
+  const label = hasHotel
+    ? `Development marker: ${property.name} has a hotel`
+    : `Development marker: ${property.name} has ${houses} ${houses === 1 ? "house" : "houses"}`;
+
+  return (
+    <span
+      aria-label={label}
+      className="absolute bottom-0.5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm"
+      data-development-marker=""
+      role="img"
+      title={label.replace("Development marker: ", "")}
+    >
+      {hasHotel ? (
+        <span className="text-[8px] font-black leading-none text-[#7f1d1d]">H</span>
+      ) : (
+        Array.from({ length: Math.min(houses, 4) }, (_, index) => (
+          <span key={index} aria-hidden="true" className="size-1.5 rounded-[2px] border border-[#2f2418]/40 bg-[#2f8f46]" />
+        ))
+      )}
+    </span>
+  );
+}
+
 function TokenStack({
   game,
   motion,
@@ -707,6 +787,7 @@ function StreetPropertyCell({
   bandColor,
   game,
   motion,
+  ownership,
   players,
   property,
   space,
@@ -714,17 +795,22 @@ function StreetPropertyCell({
   bandColor: string;
   game: GameMetadata;
   motion?: BoardMotion;
+  ownership: PropertyOwnershipView;
   players: GamePlayer[];
   property: StaticDataProperty;
   space: StaticDataBoardSpace;
 }>) {
+  const art = SPACE_ART_BY_ID[space.id];
   return (
     <>
+      <BoardOwnerMarker game={game} ownership={ownership} property={property} />
+      <DevelopmentMarker ownership={ownership} property={property} />
       <span aria-hidden="true" className="h-3 w-full shrink-0" data-property-color-band="" style={{ backgroundColor: bandColor }} />
       <div className="flex min-h-0 flex-1 flex-col justify-between gap-0.5 px-1 pb-1 pt-1">
         <p className="break-words text-[8px] font-black leading-[0.9] text-[#1f2a1f] uppercase" data-space-name="">
           {space.name}
         </p>
+        <SpaceMotif art={art} className="mx-auto h-[30%] min-h-4 w-full max-w-10 shrink" />
         <TokenStack game={game} motion={motion} players={players} space={space} />
         <p className="text-[9px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
           {money(property.price)}
@@ -739,19 +825,24 @@ function OtherSpaceCell({
   game,
   isCorner,
   motion,
+  ownership,
   players,
+  property,
   space,
 }: Readonly<{
   bottom: string | null;
   game: GameMetadata;
   isCorner: boolean;
   motion?: BoardMotion;
+  ownership: PropertyOwnershipView | null;
   players: GamePlayer[];
+  property: StaticDataProperty | null;
   space: StaticDataBoardSpace;
 }>) {
   const art = SPACE_ART_BY_ID[space.id];
   return (
     <div className="flex min-h-0 flex-1 flex-col justify-between gap-0.5 px-1 py-1">
+      {property && ownership ? <BoardOwnerMarker game={game} ownership={ownership} property={property} /> : null}
       <p className={`${isCorner ? "text-[10px]" : "text-[8px]"} break-words font-black leading-[0.9] text-[#1f2a1f] uppercase`} data-space-name="">
         {space.name}
       </p>
@@ -779,6 +870,7 @@ type ClassicGameBoardProps = {
 export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, snapshot }: ClassicGameBoardProps) {
   const [boardRotation, setBoardRotation] = useState(0);
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
+  const propertyOwnerships = ownershipByProperty(snapshot);
   const playersByPosition = new Map<number, GamePlayer[]>();
   for (const player of game.players) {
     const position = playerPosition(player, snapshot, motion);
@@ -817,6 +909,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
           {BOARD_SPACES.map((space) => {
             const coordinates = boardCoordinates(space.position);
             const property = propertyForSpace(space);
+            const ownership = property ? (propertyOwnerships.get(property.id) ?? defaultOwnership(property.id)) : null;
             const bandColor = streetPropertyBandColor(property);
             const players = playersByPosition.get(space.position) ?? [];
             const isCorner = space.position % 10 === 0;
@@ -868,9 +961,26 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
               >
                 <OrientedSpaceContent rotation={contentRotation}>
                   {property?.kind === "street" && bandColor ? (
-                    <StreetPropertyCell bandColor={bandColor} game={game} motion={motion} players={players} property={property} space={space} />
+                    <StreetPropertyCell
+                      bandColor={bandColor}
+                      game={game}
+                      motion={motion}
+                      ownership={ownership ?? defaultOwnership(property.id)}
+                      players={players}
+                      property={property}
+                      space={space}
+                    />
                   ) : (
-                    <OtherSpaceCell bottom={label} game={game} isCorner={isCorner} motion={motion} players={players} space={space} />
+                    <OtherSpaceCell
+                      bottom={label}
+                      game={game}
+                      isCorner={isCorner}
+                      motion={motion}
+                      ownership={ownership}
+                      players={players}
+                      property={property}
+                      space={space}
+                    />
                   )}
                 </OrientedSpaceContent>
               </div>

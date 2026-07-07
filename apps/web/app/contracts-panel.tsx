@@ -588,7 +588,7 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
   }
 
   return (
-    <section aria-label="Game log" className="rounded-md border border-neutral-200 bg-white p-4">
+    <section id="game-log" aria-label="Game log" className="rounded-md border border-neutral-200 bg-white p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Full game log</h2>
