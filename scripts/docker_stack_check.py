@@ -130,6 +130,10 @@ def check_dockerfiles() -> None:
     ]:
         require(marker in api_dockerfile, f"services/api/Dockerfile missing Codex marker: {marker}")
     require("uv sync" in api_dockerfile, "services/api/Dockerfile must install with uv")
+    require(
+        "alembic -c alembic.ini upgrade head" in api_dockerfile,
+        "services/api/Dockerfile must run database migrations before serving",
+    )
     require("app.main:app" in api_dockerfile, "services/api/Dockerfile must start the FastAPI app")
 
     web_dockerfile = read_text("apps/web/Dockerfile")

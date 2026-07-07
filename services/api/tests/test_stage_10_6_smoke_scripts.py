@@ -10,6 +10,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCT_SMOKE_PATH = REPO_ROOT / "scripts" / "product_smoke.py"
 LIVE_SMOKE_PATH = REPO_ROOT / "services" / "api" / "scripts" / "live_codex_ai_smoke.py"
+API_DOCKERFILE_PATH = REPO_ROOT / "services" / "api" / "Dockerfile"
 
 
 def test_product_smoke_script_declares_required_tier_labels() -> None:
@@ -35,6 +36,16 @@ def test_root_smoke_scripts_preserve_scaffold_checks_and_add_product_smoke() -> 
     assert "scripts/product_smoke.py" in scripts["test:smoke"]
     assert "RUN_LIVE_CODEX_AI" in scripts["test:smoke:live"]
     assert "live_codex_ai_smoke.py" in scripts["test:smoke:live"]
+
+
+def test_api_container_runs_migrations_before_uvicorn() -> None:
+    source = API_DOCKERFILE_PATH.read_text(encoding="utf-8")
+
+    migration = "alembic -c alembic.ini upgrade head"
+    server = "uvicorn app.main:app"
+    assert migration in source
+    assert server in source
+    assert source.index(migration) < source.index(server)
 
 
 def test_live_codex_smoke_stays_gated_and_uses_xhigh_exec_json() -> None:
