@@ -111,7 +111,15 @@ describe("GameSetupPanel", () => {
     expect(within(seat1).getByRole("textbox", { name: "Player 1 name" })).toHaveValue("Player 1");
     expect(within(seat1).getByRole("combobox", { name: "Player 1 type" })).toHaveValue("human");
     expect(within(seat1).getByRole("textbox", { name: "Player 1 color hex" })).toHaveValue("#0f766e");
+    expect(within(seat1).getByRole("button", { name: "Player 1 token icon Car" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(within(seat2).getByRole("textbox", { name: "Player 2 name" })).toHaveValue("Player 2");
+    expect(within(seat2).getByRole("button", { name: "Player 2 token icon Top hat" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     expect(screen.getByRole("spinbutton", { name: "Max negotiation rounds" })).toHaveValue(3);
     expect(screen.getByRole("spinbutton", { name: "Proposal limit per player" })).toHaveValue(4);
@@ -161,6 +169,7 @@ describe("GameSetupPanel", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Player 2 color hex" }), {
       target: { value: "#7c3aed" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Player 2 token icon Train" }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "Max negotiation rounds" }), {
       target: { value: "4" },
     });
@@ -181,6 +190,10 @@ describe("GameSetupPanel", () => {
           player_colors: [
             { seat_order: 0, color: "#0f766e" },
             { seat_order: 1, color: "#7c3aed" },
+          ],
+          player_icons: [
+            { seat_order: 0, icon: "🚗" },
+            { seat_order: 1, icon: "🚂" },
           ],
           negotiation_cutoffs: {
             max_rounds: 4,

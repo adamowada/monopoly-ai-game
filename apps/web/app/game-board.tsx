@@ -7,6 +7,7 @@ import { RotateCw, X } from "lucide-react";
 import type { GameMetadata, GamePlayer } from "../lib/api/games";
 import type { GameStateResponse } from "../lib/api/gameplay";
 import { DECK_ART, DeckArtPreview, SPACE_ART_BY_ID, SpaceMotif } from "./board-art";
+import { getPlayerIcon } from "./player-icons";
 
 type BoardCoordinates = {
   row: number;
@@ -188,11 +189,6 @@ function playerPosition(player: GamePlayer, snapshot: GameStateResponse | undefi
     return normalizedPosition(motion.displayPosition);
   }
   return snapshotPlayerPosition(snapshot, player.id) ?? normalizedPosition(player.state.position);
-}
-
-function tokenText(name: string, seatOrder: number): string {
-  const firstLetter = name.trim().charAt(0);
-  return firstLetter ? firstLetter.toUpperCase() : String(seatOrder + 1);
 }
 
 type TokenShape = (typeof tokenShapes)[number];
@@ -783,12 +779,14 @@ function BoardOwnerMarker({
   }
 
   const color = getPlayerColor(game, owner.seat_order);
+  const icon = getPlayerIcon(game, owner.seat_order);
 
   return (
     <span
       aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
-      className="absolute right-0.5 top-0.5 z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[8px] font-black shadow-sm"
+      className="absolute right-0.5 top-0.5 z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm"
       data-owner-marker=""
+      data-token-icon={icon}
       role="img"
       style={{
         backgroundColor: color,
@@ -796,7 +794,9 @@ function BoardOwnerMarker({
       }}
       title={`${owner.name} owns ${property.name}`}
     >
-      {tokenText(owner.name, owner.seat_order)}
+      <span aria-hidden="true" className="leading-none" data-player-token-icon="">
+        {icon}
+      </span>
     </span>
   );
 }
@@ -856,6 +856,7 @@ function TokenStack({
     <div className="flex min-h-4 flex-wrap items-center justify-center gap-0.5" aria-label={`Tokens on ${space.name}`}>
       {players.map((player) => {
         const color = getPlayerColor(game, player.seat_order);
+        const icon = getPlayerIcon(game, player.seat_order);
         const shape = tokenShapeForSeat(player.seat_order);
         const isMovingToken = motion?.status === "moving" && motion.playerId === player.id;
         const isLandingToken = motion?.status === "settled" && motion.playerId === player.id;
@@ -870,6 +871,7 @@ function TokenStack({
             data-token-moving={isMovingToken ? "true" : undefined}
             data-player-id={player.id}
             data-player-token=""
+            data-token-icon={icon}
             data-token-shape={shape}
             data-space-index={space.position}
             style={{
@@ -880,8 +882,12 @@ function TokenStack({
           >
             {isMovingToken || isLandingToken ? <span aria-hidden="true" className="board-token-trail" data-token-trail="" /> : null}
             <TokenSilhouette color={color} shape={shape} />
-            <span className="relative z-10 drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]">
-              {tokenText(player.name, player.seat_order)}
+            <span
+              aria-hidden="true"
+              className="relative z-10 text-[12px] leading-none drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]"
+              data-player-token-icon=""
+            >
+              {icon}
             </span>
             <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-[#1f2a1f] px-1.5 py-0.5 text-[9px] font-bold text-white opacity-0 shadow-sm transition-opacity group-hover/token:opacity-100 group-focus/token:opacity-100" data-player-token-label="">
               {player.name}
@@ -924,6 +930,7 @@ function MotionTokenOverlay({
     return null;
   }
   const color = getPlayerColor(game, player.seat_order);
+  const icon = getPlayerIcon(game, player.seat_order);
   const shape = tokenShapeForSeat(player.seat_order);
 
   return (
@@ -936,6 +943,7 @@ function MotionTokenOverlay({
       data-token-motion-overlay="true"
       data-token-moving="true"
       data-token-slide="true"
+      data-token-icon={icon}
       data-token-shape={shape}
       style={tokenOverlayStyle(position, color)}
       tabIndex={0}
@@ -943,8 +951,12 @@ function MotionTokenOverlay({
     >
       <span aria-hidden="true" className="board-token-trail" data-token-trail="" />
       <TokenSilhouette color={color} shape={shape} />
-      <span className="relative z-10 drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]">
-        {tokenText(player.name, player.seat_order)}
+      <span
+        aria-hidden="true"
+        className="relative z-10 text-[14px] leading-none drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]"
+        data-player-token-icon=""
+      >
+        {icon}
       </span>
       <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-[#1f2a1f] px-1.5 py-0.5 text-[9px] font-bold text-white opacity-0 shadow-sm transition-opacity group-hover/token:opacity-100 group-focus/token:opacity-100" data-player-token-label="">
         {player.name}

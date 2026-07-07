@@ -13,6 +13,7 @@ const propertyData = classicData.properties;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
+const playerIconOptions = new Set(["🚗", "🎩", "🚂", "🚢", "💎", "🔑"]);
 const supportedDealTermKinds = new Set([
   "cash_transfer",
   "property_transfer",
@@ -67,6 +68,10 @@ function isActiveNegotiationStatus(status) {
 
 function isHexColor(value) {
   return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
+function isPlayerIcon(value) {
+  return typeof value === "string" && playerIconOptions.has(value);
 }
 
 function readBody(request) {
@@ -160,6 +165,37 @@ function validateCreateGamePayload(payload) {
   }
 
   const cutoffs = settings.negotiation_cutoffs;
+  const playerIcons = settings.player_icons;
+  if (playerIcons !== undefined) {
+    if (!Array.isArray(playerIcons) || playerIcons.length !== players?.length) {
+      errors.push(validationError("settings.player_icons must include one icon per player", "settings.player_icons"));
+    } else {
+      const seenSeats = new Set();
+      const seenIcons = new Set();
+      for (const [index, entry] of playerIcons.entries()) {
+        if (!isObject(entry)) {
+          errors.push(validationError("player icon entries must be objects", `settings.player_icons.${index}`));
+          continue;
+        }
+        if (entry.seat_order !== index) {
+          errors.push(validationError("player icon seat order must match player order", `settings.player_icons.${index}.seat_order`));
+        }
+        if (!isPlayerIcon(entry.icon)) {
+          errors.push(validationError("player icons must use the setup emoji choices", `settings.player_icons.${index}.icon`));
+        } else {
+          seenIcons.add(entry.icon);
+        }
+        seenSeats.add(entry.seat_order);
+      }
+      if (seenSeats.size !== playerIcons.length) {
+        errors.push(validationError("player icon seat orders must be unique", "settings.player_icons"));
+      }
+      if (seenIcons.size !== playerIcons.length) {
+        errors.push(validationError("player icons must be unique", "settings.player_icons"));
+      }
+    }
+  }
+
   if (!isObject(cutoffs)) {
     errors.push(validationError("settings.negotiation_cutoffs is required", "settings.negotiation_cutoffs"));
   } else {

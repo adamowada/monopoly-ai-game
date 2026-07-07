@@ -75,6 +75,10 @@ describe("game API helpers", () => {
               { seat_order: 0, color: "#0f766e" },
               { seat_order: 1, color: "#7c3aed" },
             ],
+            player_icons: [
+              { seat_order: 0, icon: "🚗" },
+              { seat_order: 1, icon: "🎩" },
+            ],
             negotiation_cutoffs: {
               max_rounds: 4,
               max_proposals_per_player: 3,
@@ -94,6 +98,10 @@ describe("game API helpers", () => {
             player_colors: [
               { seat_order: 0, color: "#0f766e" },
               { seat_order: 1, color: "#7c3aed" },
+            ],
+            player_icons: [
+              { seat_order: 0, icon: "🚗" },
+              { seat_order: 1, icon: "🎩" },
             ],
             negotiation_cutoffs: {
               max_rounds: 4,
@@ -121,6 +129,10 @@ describe("game API helpers", () => {
           { seat_order: 0, color: "#0f766e" },
           { seat_order: 1, color: "#7c3aed" },
         ],
+        player_icons: [
+          { seat_order: 0, icon: "🚗" },
+          { seat_order: 1, icon: "🎩" },
+        ],
         negotiation_cutoffs: {
           max_rounds: 4,
           max_proposals_per_player: 3,
@@ -134,6 +146,10 @@ describe("game API helpers", () => {
         player_colors: [
           { seat_order: 0, color: "#0f766e" },
           { seat_order: 1, color: "#7c3aed" },
+        ],
+        player_icons: [
+          { seat_order: 0, icon: "🚗" },
+          { seat_order: 1, icon: "🎩" },
         ],
         negotiation_cutoffs: {
           max_rounds: 4,

@@ -755,6 +755,11 @@ describe("Stage 10.4 frontend component coverage", () => {
             { seat_order: 1, color: "#2563eb" },
             { seat_order: 2, color: "#c2410c" },
           ],
+          player_icons: [
+            { seat_order: 0, icon: "🚗" },
+            { seat_order: 1, icon: "🎩" },
+            { seat_order: 2, icon: "🚂" },
+          ],
           negotiation_cutoffs: {
             max_rounds: 5,
             max_proposals_per_player: 6,

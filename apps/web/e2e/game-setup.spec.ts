@@ -10,6 +10,7 @@ test("creates a configured game and navigates to the board shell", async ({ page
   await page.getByRole("textbox", { name: "Player 2 name" }).fill("Grace");
   await page.getByRole("combobox", { name: "Player 2 type" }).selectOption("ai");
   await page.getByRole("textbox", { name: "Player 2 color hex" }).fill("#7c3aed");
+  await page.getByRole("button", { name: "Player 2 token icon Train" }).click();
   await page.getByRole("spinbutton", { name: "Max negotiation rounds" }).fill("4");
   await page.getByRole("spinbutton", { name: "Proposal limit per player" }).fill("3");
 
@@ -23,6 +24,8 @@ test("creates a configured game and navigates to the board shell", async ({ page
   await expect(trays).toContainText("Ada");
   await expect(trays).toContainText("Grace");
   await expect(trays).toContainText("$1,500");
+  await expect(page.getByLabel("Grace token at GO, position 0")).toHaveAttribute("data-token-icon", "🚂");
+  await expect(trays.getByRole("img", { name: "Grace token" })).toHaveAttribute("data-token-icon", "🚂");
   await expect(page.getByText("stage-5-e2e-seed")).toHaveCount(0);
 });
 

@@ -7,6 +7,7 @@ import { Bot, Loader2, Plus, RefreshCw, Trash2, UserRound } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { createGame, type CreateGamePlayer } from "../lib/api/games";
 import { cn } from "../lib/ui";
+import { PLAYER_ICON_OPTIONS, defaultPlayerIcon, isPlayerIconOption } from "./player-icons";
 
 type PlayerKind = CreateGamePlayer["kind"];
 
@@ -15,6 +16,7 @@ type SetupPlayer = {
   name: string;
   kind: PlayerKind;
   color: string;
+  icon: string;
 };
 
 const playerColors = ["#0f766e", "#2563eb", "#7c3aed", "#dc2626", "#ca8a04"];
@@ -65,6 +67,7 @@ function defaultPlayer(index: number): SetupPlayer {
     name: `Player ${index + 1}`,
     kind: "human",
     color: playerColors[index] ?? "#525252",
+    icon: defaultPlayerIcon(index),
   };
 }
 
@@ -127,6 +130,12 @@ function validateSetup(players: SetupPlayer[], maxRounds: string, proposalLimit:
   }
   if (new Set(players.map((player) => normalizeColor(player.color))).size !== players.length) {
     messages.push("Player colors must be unique");
+  }
+  if (players.some((player) => !isPlayerIconOption(player.icon))) {
+    messages.push("Player token icons must use the setup choices");
+  }
+  if (new Set(players.map((player) => player.icon)).size !== players.length) {
+    messages.push("Player token icons must be unique");
   }
   if (maxRoundsValue === null || maxRoundsValue < 1) {
     messages.push("Max negotiation rounds must be at least 1");
@@ -214,6 +223,10 @@ export function GameSetupPanel() {
           seat_order: seatOrder,
           color: normalizeColor(player.color),
         })),
+        player_icons: players.map((player, seatOrder) => ({
+          seat_order: seatOrder,
+          icon: player.icon,
+        })),
         negotiation_cutoffs: {
           max_rounds: maxRoundsValue,
           max_proposals_per_player: proposalLimitValue,
@@ -260,10 +273,10 @@ export function GameSetupPanel() {
                     <div className="flex items-start gap-3">
                       <span
                         aria-hidden="true"
-                        className="grid size-11 shrink-0 place-items-center rounded-[0.35rem] border-2 border-[#2f2418] text-sm font-black text-white shadow-[0_3px_0_rgba(47,36,24,0.25)]"
+                        className="grid size-11 shrink-0 place-items-center rounded-[0.35rem] border-2 border-[#2f2418] text-xl font-black text-white shadow-[0_3px_0_rgba(47,36,24,0.25)]"
                         style={{ backgroundColor: colorInputValue(player.color) }}
                       >
-                        {playerNumber}
+                        {player.icon}
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-black uppercase text-[#6f604c]">Seat {playerNumber}</p>
@@ -295,6 +308,40 @@ export function GameSetupPanel() {
                         className="w-full rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
                       />
                     </label>
+
+                    <fieldset className="grid gap-1">
+                      <legend className="text-sm font-bold text-[#2f2418]">Token icon</legend>
+                      <div className="flex flex-wrap gap-1.5">
+                        {PLAYER_ICON_OPTIONS.map((option) => {
+                          const selected = player.icon === option.icon;
+                          const unavailable = players.some(
+                            (otherPlayer, otherIndex) => otherIndex !== index && otherPlayer.icon === option.icon,
+                          );
+                          return (
+                            <button
+                              key={option.icon}
+                              aria-label={`Player ${playerNumber} token icon ${option.label}`}
+                              aria-pressed={selected}
+                              className={cn(
+                                "grid size-9 place-items-center rounded-md border-2 text-lg shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]",
+                                selected
+                                  ? "border-[#173c45] bg-[#173c45] shadow-[0_3px_0_rgba(47,36,24,0.24)]"
+                                  : "border-[#b99768] bg-white hover:bg-[#fffbea]",
+                                unavailable && "cursor-not-allowed opacity-45 hover:bg-white",
+                              )}
+                              disabled={isSubmitting || unavailable}
+                              onClick={() => updatePlayer(index, { icon: option.icon })}
+                              title={option.label}
+                              type="button"
+                            >
+                              <span aria-hidden="true" className="leading-none">
+                                {option.icon}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
 
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                       <label className="grid gap-1 text-sm font-bold text-[#2f2418]">

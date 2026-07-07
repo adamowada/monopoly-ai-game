@@ -27,6 +27,10 @@ function gameFixture(positions: number[] = [0, 7]): GameMetadata {
         { seat_order: 0, color: "#0f766e" },
         { seat_order: 1, color: "#7c3aed" },
       ],
+      player_icons: [
+        { seat_order: 0, icon: "🚗" },
+        { seat_order: 1, icon: "🎩" },
+      ],
     },
     created_at: createdAt,
     updated_at: createdAt,
@@ -72,6 +76,7 @@ function stackedTokenGameFixture(): GameMetadata {
     settings: {
       ...base.settings,
       player_colors: colors.map((color, seat_order) => ({ color, seat_order })),
+      player_icons: ["🚗", "🎩", "🚂", "🚢", "💎"].map((icon, seat_order) => ({ icon, seat_order })),
     },
     players: names.map((name, index) => ({
       id: `player-${index + 1}`,
@@ -300,8 +305,13 @@ describe("ClassicGameBoard", () => {
 
     expect(screen.getByLabelText("Ada token at GO, position 0")).toHaveAttribute("data-player-token");
     expect(screen.getByLabelText("Ada token at GO, position 0")).toHaveAttribute("data-token-shape", "shield");
+    expect(screen.getByLabelText("Ada token at GO, position 0")).toHaveAttribute("data-token-icon", "🚗");
+    expect(
+      screen.getByLabelText("Ada token at GO, position 0").querySelector("[data-player-token-icon]"),
+    ).toHaveTextContent("🚗");
     expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-player-token");
     expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-token-shape", "diamond");
+    expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-token-icon", "🎩");
     expect(screen.getByLabelText("Ada token at GO, position 0")).toHaveAttribute("title", "Ada");
     expect(
       screen.getByLabelText("Ada token at GO, position 0").querySelector("[data-player-token-label]"),
@@ -319,11 +329,14 @@ describe("ClassicGameBoard", () => {
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
     const tokens = within(board).getAllByLabelText(/token at GO, position 0/);
     const shapes = tokens.map((token) => token.getAttribute("data-token-shape"));
+    const icons = tokens.map((token) => token.getAttribute("data-token-icon"));
 
     expect(tokens).toHaveLength(5);
     expect(new Set(shapes)).toEqual(new Set(["shield", "diamond", "tag", "hex", "crest"]));
+    expect(new Set(icons)).toEqual(new Set(["🚗", "🎩", "🚂", "🚢", "💎"]));
     for (const token of tokens) {
       expect(token.querySelector("[data-token-silhouette]")).toBeInTheDocument();
+      expect(token.querySelector("[data-player-token-icon]")).toBeInTheDocument();
     }
   });
 

@@ -51,6 +51,7 @@ import { ContractsPanel } from "./contracts-panel";
 import { ClassicGameBoard, getPlayerColor, type BoardMotion, type DrawnCardView } from "./game-board";
 import { GameTableMenu } from "./game-table-menu";
 import { NegotiationPanel } from "./negotiation-panel";
+import { getPlayerIcon } from "./player-icons";
 import { PropertyManagementPanel } from "./property-management";
 
 type GamePlaySurfaceProps = {
@@ -242,10 +243,6 @@ function playerPosition(player: GameMetadata["players"][number], snapshot?: Game
   const position = readNumber(snapshotPlayer?.position, readNumber(player.state.position));
   const space = BOARD_SPACES[position];
   return space ? `${space.name} (${position})` : String(position);
-}
-
-function playerInitial(player: GameMetadata["players"][number]): string {
-  return player.name.trim().charAt(0).toUpperCase() || String(player.seat_order + 1);
 }
 
 function turnRecord(snapshot: GameStateResponse | undefined): Record<string, unknown> | null {
@@ -1056,6 +1053,7 @@ function PlayerTrayRail({
         {game.players.map((player) => {
           const isCurrent = player.id === currentPlayerId;
           const color = getPlayerColor(game, player.seat_order);
+          const icon = getPlayerIcon(game, player.seat_order);
           const ownedProperties = currentPlayerProperties(snapshot, player.id);
           return (
             <article
@@ -1073,14 +1071,17 @@ function PlayerTrayRail({
               <div className="flex items-start gap-3">
                 <span
                   aria-label={`${player.name} token`}
-                  className="grid size-9 shrink-0 place-items-center rounded-[0.35rem] border-2 border-[#2f2418] text-sm font-black shadow-[0_3px_0_rgba(47,36,24,0.25)]"
+                  className="grid size-9 shrink-0 place-items-center rounded-[0.35rem] border-2 border-[#2f2418] text-lg font-black shadow-[0_3px_0_rgba(47,36,24,0.25)]"
+                  data-token-icon={icon}
                   role="img"
                   style={{
                     backgroundColor: color,
                     color: "#fff",
                   }}
                 >
-                  {playerInitial(player)}
+                  <span aria-hidden="true" className="leading-none" data-player-token-icon="">
+                    {icon}
+                  </span>
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">
