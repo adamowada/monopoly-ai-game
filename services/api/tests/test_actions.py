@@ -10,6 +10,7 @@ from app.rules.actions import (
     GameAction,
     LegalAction,
     apply_action,
+    execute_action,
     list_legal_actions,
     validate_action,
 )
@@ -228,14 +229,14 @@ def test_roll_dice_description_is_player_facing_not_rng_jargon() -> None:
     assert roll_action.description == "Roll dice for the current turn."
 
 
-def test_initial_state_exposes_roll_and_bankruptcy_but_not_end_turn_or_purchase() -> None:
+def test_initial_state_exposes_roll_but_not_voluntary_bankruptcy_end_turn_or_purchase() -> None:
     state = _initial_state()
 
     legal_types = _types(list_legal_actions(state, "player-1"))
 
     assert "END_TURN" not in legal_types, "mandatory roll window must not expose END_TURN"
     assert "ROLL_DICE" in legal_types
-    assert "DECLARE_BANKRUPTCY" in legal_types
+    assert "DECLARE_BANKRUPTCY" not in legal_types
     assert "BUY_PROPERTY" not in legal_types
     assert "START_AUCTION" not in legal_types
 
@@ -388,6 +389,7 @@ def test_active_auction_exposes_bid_and_pass_and_validates_bid_amounts() -> None
     legal_actions = list_legal_actions(state, "player-1")
 
     assert {"BID_AUCTION", "PASS_AUCTION"}.issubset(_types(legal_actions))
+    assert "DECLARE_BANKRUPTCY" not in _types(legal_actions)
     bid_action = _legal(legal_actions, "BID_AUCTION")
     assert bid_action.payload["property_id"] == "property_mediterranean_avenue"
     assert bid_action.payload["amount"] == 1
@@ -408,19 +410,60 @@ def test_active_auction_exposes_bid_and_pass_and_validates_bid_amounts() -> None
         _action(bid_state, "player-2", "BID_AUCTION", {"amount": "26"}),
         "malformed_action",
     )
+    assert list_legal_actions(bid_state, "player-1") == ()
+    assert {"BID_AUCTION", "PASS_AUCTION"} == _types(list_legal_actions(bid_state, "player-2"))
 
 
-def test_jail_state_exposes_pay_roll_card_use_and_bankruptcy() -> None:
+def test_jail_state_exposes_pay_roll_and_card_use_without_voluntary_bankruptcy() -> None:
     state = _set_jail(_initial_state(), "player-1", True)
     state = _set_jail_cards(state, "player-1", ("card_community_get_out_of_jail",))
 
     legal_actions = list_legal_actions(state, "player-1")
 
-    assert {"ROLL_DICE", "PAY_JAIL_FINE", "USE_GET_OUT_OF_JAIL_CARD", "DECLARE_BANKRUPTCY"}.issubset(
+    assert {"ROLL_DICE", "PAY_JAIL_FINE", "USE_GET_OUT_OF_JAIL_CARD"}.issubset(
         _types(legal_actions)
     )
+    assert "DECLARE_BANKRUPTCY" not in _types(legal_actions)
     card_action = _legal(legal_actions, "USE_GET_OUT_OF_JAIL_CARD")
     assert card_action.payload["card_id"] == "card_community_get_out_of_jail"
+
+
+def test_start_turn_does_not_expose_voluntary_bankruptcy_without_debt() -> None:
+    legal_actions = list_legal_actions(_initial_state(), "player-1")
+
+    assert "ROLL_DICE" in _types(legal_actions)
+    assert "DECLARE_BANKRUPTCY" not in _types(legal_actions)
+
+
+def test_execute_bankruptcy_captures_bankruptcy_events_once() -> None:
+    state = _own(_initial_state(), "property_mediterranean_avenue", "player-1")
+    result = execute_action(
+        state,
+        _action(state, "player-1", "DECLARE_BANKRUPTCY", {"creditor_id": None}),
+        "bankruptcy-once",
+    )
+
+    event_types = [event.type for event in result.events]
+    assert event_types.count("PLAYER_CASH_DELTA") == 1
+    assert event_types.count("PROPERTY_OWNER_SET") == 1
+    assert event_types.count("PLAYER_BANKRUPTCY_SET") == 1
+    assert _player(result.state, "player-1").cash == 0
+    assert _property(result.state, "property_mediterranean_avenue").owner_id is None
+
+
+def test_bankruptcy_during_active_auction_clears_auction_before_game_over() -> None:
+    state = _start_auction(_initial_state(count=2), "property_mediterranean_avenue")
+
+    result = execute_action(
+        state,
+        _action(state, "player-1", "DECLARE_BANKRUPTCY", {"creditor_id": None}),
+        "auction-bankruptcy",
+    )
+
+    assert result.state.active_auction is None
+    assert result.state.turn.phase == TurnPhase.GAME_OVER
+    assert [event.type for event in result.events].count("ACTIVE_AUCTION_SET") == 1
+    assert result.events[-1].type == "TURN_STATE_SET"
 
 
 def test_management_state_exposes_buy_mortgage_unmortgage_and_sell_when_legal() -> None:

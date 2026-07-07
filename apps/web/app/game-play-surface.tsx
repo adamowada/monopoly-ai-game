@@ -27,7 +27,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/ui/button";
 import {
@@ -1009,6 +1009,7 @@ function GameLogChatPanel({
   game: GameMetadata;
 }>) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const logEndRef = useRef<HTMLLIElement | null>(null);
   const [enabledCategories, setEnabledCategories] = useState<ReadonlySet<GameLogCategory>>(
     () => new Set(gameLogCategories.map((category) => category.id)),
   );
@@ -1020,6 +1021,12 @@ function GameLogChatPanel({
         .slice(-120),
     [enabledCategories, events, game],
   );
+  const latestEntryKey =
+    entries.length > 0 ? `${entries.at(-1)?.sequence}:${entries.at(-1)?.eventId}` : "empty";
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView?.({ block: "end" });
+  }, [latestEntryKey]);
 
   function toggleCategory(category: GameLogCategory) {
     setEnabledCategories((current) => {
@@ -1071,7 +1078,11 @@ function GameLogChatPanel({
         </div>
       </div>
 
-      <ol className="flex max-h-[min(58vh,38rem)] min-h-[22rem] flex-col gap-2 overflow-y-auto rounded-md border border-[#2f2418]/20 bg-white/65 p-3">
+      <ol
+        aria-live="polite"
+        className="flex max-h-[min(58vh,38rem)] min-h-[22rem] flex-col gap-2 overflow-y-auto rounded-md border border-[#2f2418]/20 bg-white/65 p-3"
+        data-game-log-scroll-region=""
+      >
         {entries.length > 0 ? (
           entries.map((entry) => {
             const player = entry.playerId ? game.players.find((candidate) => candidate.id === entry.playerId) : null;
@@ -1106,6 +1117,7 @@ function GameLogChatPanel({
             No matching log events yet.
           </li>
         )}
+        <li ref={logEndRef} aria-hidden="true" className="h-px shrink-0" role="presentation" />
       </ol>
     </section>
   );
@@ -1931,6 +1943,18 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
   });
 
+  const playersById = useMemo(() => new Map(game.players.map((player) => [player.id, player])), [game.players]);
+  const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
+  const latestDrawnCard = useMemo(
+    () => latestDrawnCardFromEvents(visibleEvents, playersById),
+    [playersById, visibleEvents],
+  );
+  const latestRoll = useMemo(
+    () => latestRollFromEvents(visibleEvents, playersById),
+    [playersById, visibleEvents],
+  );
+  const latestDrawnCardEventId = latestDrawnCard?.eventId ?? null;
+
   const endGameMutation = useMutation({
     mutationFn: () => endGame({ gameId, baseUrl }),
     onSuccess: (snapshot) => {
@@ -2062,7 +2086,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     onMutate: (action) => {
       setLocalRejectedAction(null);
       setAiStepResult(null);
-      setDismissedCardEventId(revealedCardEventId);
+      setDismissedCardEventId(latestDrawnCardEventId ?? revealedCardEventId);
       setRevealedCardEventId(null);
       setPendingActionType(action.type);
       setQueuedBoardMotion(null);
@@ -2159,7 +2183,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       }),
     onMutate: () => {
       setAiStepResult(null);
-      setDismissedCardEventId(revealedCardEventId);
+      setDismissedCardEventId(latestDrawnCardEventId ?? revealedCardEventId);
       setRevealedCardEventId(null);
       setQueuedBoardMotion(null);
       setBoardMotion(null);
@@ -2183,7 +2207,6 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       ]),
     [auctionLegalActionsQueries, legalActions],
   );
-  const playersById = useMemo(() => new Map(game.players.map((player) => [player.id, player])), [game.players]);
   const actionsByGroup = useMemo(() => {
     const grouped: Record<ActionGroup, LegalAction[]> = {
       turn: [],
@@ -2201,19 +2224,28 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     return grouped;
   }, [legalActions]);
   const endTurnAction = legalActions.find((action) => action.type === "END_TURN") ?? null;
-  const bankruptcyAction = legalActions.find((action) => action.type === "DECLARE_BANKRUPTCY") ?? null;
+  const gameAiBlocked = game.status === "AI_BLOCKED";
+  const gameEnded = game.status.toLowerCase() === "ended";
+  const listedBankruptcyAction = legalActions.find((action) => action.type === "DECLARE_BANKRUPTCY") ?? null;
+  const voluntaryBankruptcyAction: LegalAction | null =
+    !listedBankruptcyAction &&
+    stateQuery.data &&
+    currentPlayer?.controller_type === "human" &&
+    !gameEnded &&
+    !gameAiBlocked
+      ? {
+          actor_id: currentPlayer.id,
+          type: "DECLARE_BANKRUPTCY",
+          payload: { creditor_id: null },
+          expected_state_hash: stateQuery.data.state_hash,
+          expected_event_sequence: stateQuery.data.event_sequence,
+          description: "Give up and leave the game.",
+          schema: {},
+        }
+      : null;
+  const bankruptcyAction = listedBankruptcyAction ?? voluntaryBankruptcyAction;
   const latestAuditRejection = latestRejectedAction(rejectedActionsQuery.data ?? []);
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
-  const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
-  const latestDrawnCard = useMemo(
-    () => latestDrawnCardFromEvents(visibleEvents, playersById),
-    [playersById, visibleEvents],
-  );
-  const latestRoll = useMemo(
-    () => latestRollFromEvents(visibleEvents, playersById),
-    [playersById, visibleEvents],
-  );
-  const latestDrawnCardEventId = latestDrawnCard?.eventId ?? null;
   useEffect(() => {
     if (!latestDrawnCardEventId || latestDrawnCardEventId === dismissedCardEventId || latestDrawnCardEventId === revealedCardEventId) {
       return;
@@ -2233,15 +2265,22 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       ? latestDrawnCard
       : null;
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading;
-  const gameAiBlocked = game.status === "AI_BLOCKED";
-  const gameEnded = game.status.toLowerCase() === "ended";
   const controlsDisabled = gameEnded || gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending;
-  const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
-  const directActionControlsDisabled = controlsDisabled || Boolean(activeAiPlayer);
+  const turnAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
+  const auctionAiStepPlayer =
+    game.players.find(
+      (player) =>
+        player.controller_type === "ai" &&
+        auctionLegalActions.some((action) => action.actor_id === player.id && isAuctionAction(action)),
+    ) ?? null;
+  const activeAiPlayer = activeAuction ? auctionAiStepPlayer : turnAiPlayer;
+  const manualAiStepMode: AiStepMode = auctionAiStepPlayer ? "auction_ai_bidder" : "manual";
+  const autoAiStepMode: AiStepMode = auctionAiStepPlayer ? "auction_ai_bidder" : "auto";
+  const directActionControlsDisabled = controlsDisabled || Boolean(turnAiPlayer);
   const aiStepStateBlocked = gameEnded || gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
   const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
-  const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
+  const autoStepKey = activeAiPlayer && stateQuery.data ? `${autoAiStepMode}:${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
   const auctionActionsLoading =
     Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading);
   const auctionControlsDisabled = controlsDisabled || auctionActionsLoading;
@@ -2252,7 +2291,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
   function isAuctionActionDisabled(action: LegalAction): boolean {
     if (action.type === "START_AUCTION") {
-      return Boolean(activeAiPlayer) || isAiControlledActor(action);
+      return Boolean(turnAiPlayer) || isAiControlledActor(action);
     }
     return isAiControlledActor(action);
   }
@@ -2264,7 +2303,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     if (isAuctionAction(action) && action.type !== "START_AUCTION") {
       return true;
     }
-    return !activeAiPlayer;
+    return !turnAiPlayer;
   }
 
   function handleSubmit(action: LegalAction) {
@@ -2312,10 +2351,11 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       return;
     }
     setLastAutoStepKey(autoStepKey);
-    handleAiStep("auto");
+    handleAiStep(autoAiStepMode);
   }, [
     activeAiPlayer,
     aiStep.isPending,
+    autoAiStepMode,
     autoStepAi,
     autoStepKey,
     gameQuery.isFetching,
@@ -2388,10 +2428,10 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         </div>
       ) : null}
 
-      {activeAiPlayer ? (
+      {activeAiPlayer && !gameAiBlocked ? (
         <div className="mt-4 grid gap-3 rounded-md border border-purple-200 bg-purple-50 p-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => handleAiStep("manual")} disabled={manualAiStepDisabled} variant="ai">
+            <Button onClick={() => handleAiStep(manualAiStepMode)} disabled={manualAiStepDisabled} variant="ai">
               {aiStep.isPending ? (
                 <Loader2 aria-hidden="true" className="size-4 animate-spin" />
               ) : (
@@ -2414,7 +2454,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         </div>
       ) : null}
 
-      {!activeAiPlayer && aiStepResult ? (
+      {(!activeAiPlayer || gameAiBlocked) && aiStepResult ? (
         <div className="mt-4">
           <AiStepStatusPanel isThinking={aiStep.isPending} result={aiStepResult} />
         </div>
@@ -2514,7 +2554,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
               controlsDisabled={auctionControlsDisabled}
               events={visibleEvents}
               game={game}
-              activeAiPlayerId={activeAiPlayer?.id ?? null}
+              activeAiPlayerId={turnAiPlayer?.id ?? null}
               aiStepDisabled={aiStepStateBlocked}
               aiStepPending={aiStep.isPending}
               isActionDisabled={isAuctionActionDisabled}

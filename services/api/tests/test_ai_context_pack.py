@@ -209,7 +209,7 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
     assert pack["legal_actions"] == [
         action.model_dump(mode="json") for action in list_legal_actions(state, str(AI_PLAYER_ID))
     ]
-    assert pack["required_output_schema"]["title"] == "AIDecisionOutput"
+    assert "required_output_schema" not in pack
     assert pack["instruction_contract"]["backend_is_rules_authority"] is True
     assert pack["instruction_contract"]["no_emergency_action_path"] is True
 

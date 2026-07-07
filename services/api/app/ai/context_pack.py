@@ -15,7 +15,6 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.ai.decision_schema import AI_OUTPUT_SCHEMA
 from app.ai.memory import (
     MEMORY_COMPACTION_REASON_ON_DEMAND,
     MEMORY_COMPACTION_THRESHOLD,
@@ -113,7 +112,6 @@ def build_ai_context_pack(
             "snippets": _rule_snippets(rule_snippets, legal_actions=legal_actions, state=state),
         },
         "personality_profile": _profile_summary(ai_profile),
-        "required_output_schema": _json_safe(AI_OUTPUT_SCHEMA),
         "instruction_contract": _instruction_contract(),
     }
     return _json_safe(pack)
@@ -401,6 +399,9 @@ def _context_retrieval_query_text(
         value = _nonempty_string(context.get(key))
         if value is not None:
             return value
+
+    if decision_type == "action_decision":
+        return ""
 
     legal_action_types = sorted(
         {

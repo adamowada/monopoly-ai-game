@@ -17,6 +17,7 @@ from app.rules.debt import (
 )
 from app.rules.event_capture import capture_rule_events, record_rule_event
 from app.rules.events import (
+    ActiveAuctionSetPayload,
     ActivePaymentSetPayload,
     CardDrawnPayload,
     DiceRolledPayload,
@@ -311,12 +312,6 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
                 description=f"Pass on the auction for {_property_data(auction.property_id).name}.",
             )
 
-        add(
-            "DECLARE_BANKRUPTCY",
-            {"creditor_id": None},
-            schema=_bankruptcy_schema(state, actor_id),
-            description="Declare bankruptcy and liquidate assets.",
-        )
         return tuple(actions)
 
     if actor_id == state.turn.current_player_id:
@@ -372,12 +367,6 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
 
     _add_management_actions(state, player, add)
 
-    add(
-        "DECLARE_BANKRUPTCY",
-        {"creditor_id": None},
-        schema=_bankruptcy_schema(state, actor_id),
-        description="Declare bankruptcy and liquidate assets.",
-    )
     return tuple(actions)
 
 
@@ -845,6 +834,19 @@ def _set_turn_phase(state: GameState, phase: TurnPhase, event_id_prefix: str) ->
     return apply_event(state, event)
 
 
+def _clear_active_auction(state: GameState, event_id_prefix: str) -> GameState:
+    if state.active_auction is None:
+        return state
+    event = GameEvent(
+        event_id=f"{event_id_prefix}-{state.event_sequence + 1}",
+        sequence=state.event_sequence + 1,
+        type="ACTIVE_AUCTION_SET",
+        payload=ActiveAuctionSetPayload(active=False),
+    )
+    record_rule_event(event)
+    return apply_event(state, event)
+
+
 def _complete_resolved_timing_window(state: GameState, event_id_prefix: str) -> GameState:
     try:
         current_phase = TurnPhase(state.turn.phase)
@@ -938,6 +940,7 @@ def _group_improvement_levels(state: GameState, group: PropertyGroup) -> dict[st
 
 
 def _complete_bankruptcy_action(state: GameState, event_id_prefix: str) -> GameState:
+    state = _clear_active_auction(state, event_id_prefix)
     state = _set_turn_phase(state, TurnPhase.BANKRUPTCY_RESOLUTION, event_id_prefix)
     if is_game_over(state):
         return _set_turn_phase(state, TurnPhase.GAME_OVER, event_id_prefix)
@@ -1389,7 +1392,8 @@ def _mechanic_accepts(
     mechanic: Callable[[GameState, str, str, str], GameState],
 ) -> bool:
     try:
-        mechanic(state, actor_id, property_id, _probe_prefix(state, action_type, property_id))
+        with capture_rule_events():
+            mechanic(state, actor_id, property_id, _probe_prefix(state, action_type, property_id))
     except IllegalRuleActionError:
         return False
     return True
@@ -1397,7 +1401,8 @@ def _mechanic_accepts(
 
 def _mechanic_accepts_bankruptcy(state: GameState, actor_id: str, creditor_id: str | None) -> bool:
     try:
-        declare_bankruptcy(state, actor_id, creditor_id, _probe_prefix(state, "DECLARE_BANKRUPTCY", actor_id))
+        with capture_rule_events():
+            declare_bankruptcy(state, actor_id, creditor_id, _probe_prefix(state, "DECLARE_BANKRUPTCY", actor_id))
     except IllegalRuleActionError:
         return False
     return True

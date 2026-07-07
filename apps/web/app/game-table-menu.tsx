@@ -92,7 +92,7 @@ export function GameTableMenu({
   const bankruptcyPlayerName = currentPlayerName ?? "Current player";
 
   return (
-    <div className="fixed right-4 top-4 z-[80] xl:hidden">
+    <div className="fixed right-4 top-4 z-[80]">
       <button
         aria-expanded={open}
         aria-label={open ? "Close game menu" : "Open game menu"}

@@ -213,10 +213,9 @@ async def test_legal_actions_require_actor_and_return_current_actions(
         assert body["actor_player_id"] == actor_id
         assert body["state_hash"]
         assert body["event_sequence"] == 0
-        assert {action["type"] for action in body["legal_actions"]} >= {
-            "ROLL_DICE",
-            "DECLARE_BANKRUPTCY",
-        }
+        action_types = {action["type"] for action in body["legal_actions"]}
+        assert "ROLL_DICE" in action_types
+        assert "DECLARE_BANKRUPTCY" not in action_types
     finally:
         await delete_game(session_factory, str(game_id))
 
@@ -291,11 +290,14 @@ async def test_final_bankruptcy_action_ends_two_player_game(
             f"/games/{game_id}/legal-actions",
             params={"actor_player_id": bankrupt_player_id},
         )
-        bankruptcy_action = next(
-            action
-            for action in legal_response.json()["legal_actions"]
-            if action["type"] == "DECLARE_BANKRUPTCY"
-        )
+        legal_body = legal_response.json()
+        bankruptcy_action = {
+            "actor_id": bankrupt_player_id,
+            "type": "DECLARE_BANKRUPTCY",
+            "payload": {"creditor_id": None},
+            "expected_state_hash": legal_body["state_hash"],
+            "expected_event_sequence": legal_body["event_sequence"],
+        }
 
         action_response = await client.post(
             f"/games/{game_id}/actions",
@@ -354,11 +356,14 @@ async def test_non_final_bankruptcy_rotates_to_next_active_player(
             f"/games/{game_id}/legal-actions",
             params={"actor_player_id": bankrupt_player_id},
         )
-        bankruptcy_action = next(
-            action
-            for action in legal_response.json()["legal_actions"]
-            if action["type"] == "DECLARE_BANKRUPTCY"
-        )
+        legal_body = legal_response.json()
+        bankruptcy_action = {
+            "actor_id": bankrupt_player_id,
+            "type": "DECLARE_BANKRUPTCY",
+            "payload": {"creditor_id": None},
+            "expected_state_hash": legal_body["state_hash"],
+            "expected_event_sequence": legal_body["event_sequence"],
+        }
 
         action_response = await client.post(
             f"/games/{game_id}/actions",
@@ -392,10 +397,9 @@ async def test_non_final_bankruptcy_rotates_to_next_active_player(
         assert metadata["players"][0]["status"] == "bankrupt"
 
         assert next_actions_response.status_code == 200
-        assert {action["type"] for action in next_actions_response.json()["legal_actions"]} >= {
-            "ROLL_DICE",
-            "DECLARE_BANKRUPTCY",
-        }
+        next_action_types = {action["type"] for action in next_actions_response.json()["legal_actions"]}
+        assert "ROLL_DICE" in next_action_types
+        assert "DECLARE_BANKRUPTCY" not in next_action_types
     finally:
         await delete_game(session_factory, str(game_id))
 

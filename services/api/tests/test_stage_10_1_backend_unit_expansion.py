@@ -70,6 +70,7 @@ CORE_RULE_MODULES = (
     "actions",
     "atomic",
     "debt",
+    "deterministic",
     "event_capture",
     "events",
     "financial_instruments",
@@ -486,10 +487,10 @@ def test_stage_10_1_legal_actions_include_expected_timing_guards_for_core_phases
     )
 
     phase_actions = {
-        TurnPhase.START_TURN: (start_state, {"ROLL_DICE", "DECLARE_BANKRUPTCY"}),
+        TurnPhase.START_TURN: (start_state, {"ROLL_DICE"}),
         TurnPhase.PURCHASE_OR_AUCTION: (
             purchase_state,
-            {"BUY_PROPERTY", "START_AUCTION", "DECLARE_BANKRUPTCY"},
+            {"BUY_PROPERTY", "START_AUCTION"},
         ),
         TurnPhase.PAYMENT_RESOLUTION: (
             payment_state,

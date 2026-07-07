@@ -22,6 +22,7 @@ const graceId = "player-2";
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 type EventSourceListener = (event: Event) => void;
+let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -579,6 +580,28 @@ function mixedAuctionHumanTurnStateFixture(eventSequence = 8) {
   };
 }
 
+function auctionHighBidderAiTurnStateFixture(eventSequence = 9) {
+  const auctionState = mixedAuctionHumanTurnStateFixture(eventSequence);
+  return {
+    ...auctionState,
+    state: {
+      ...auctionState.state,
+      active_auction: {
+        property_id: "property_mediterranean_avenue",
+        high_bidder_id: adaId,
+        high_bid_amount: 26,
+        passed_player_ids: [],
+      },
+      turn: {
+        phase: "AUCTION",
+        current_player_index: 0,
+        current_player_id: adaId,
+      },
+    },
+    state_hash: `auction-high-bidder-ai-state-${eventSequence}`,
+  };
+}
+
 function acceptedAuctionRollResponse() {
   return {
     ...acceptedRollResponse(),
@@ -753,6 +776,15 @@ function baseFetchMock({
 
 afterEach(() => {
   vi.useRealTimers();
+  if (originalScrollIntoView) {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: originalScrollIntoView,
+    });
+  } else {
+    delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  }
+  originalScrollIntoView = undefined;
   FakeEventSource.instances = [];
   window.localStorage.clear();
   routerMock.push.mockReset();
@@ -906,12 +938,11 @@ describe("GamePlaySurface turn controls", () => {
   });
 
   it("keeps voluntary bankruptcy in the game menu behind confirmation", async () => {
-    const bankruptcyAction = legalAction("DECLARE_BANKRUPTCY", { creditor_id: graceId });
     const fetchMock = baseFetchMock({
-      legalActions: [legalAction("ROLL_DICE"), bankruptcyAction],
+      legalActions: [legalAction("ROLL_DICE")],
       actionResponse: {
         ...acceptedRollResponse(),
-        submitted_action: bankruptcyAction,
+        submitted_action: legalAction("DECLARE_BANKRUPTCY", { creditor_id: null }),
       },
     });
 
@@ -953,7 +984,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(JSON.parse(String(submittedCall?.[1]?.body))).toMatchObject({
       actor_id: adaId,
       type: "DECLARE_BANKRUPTCY",
-      payload: { creditor_id: graceId },
+      payload: { creditor_id: null },
     });
   });
 
@@ -1059,6 +1090,29 @@ describe("GamePlaySurface turn controls", () => {
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
     expect(within(log).getByText(/PLAYER_POSITION_SET/)).toBeInTheDocument();
   }, 18_000);
+
+  it("pins the game log to the latest entry like a chat room", async () => {
+    originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    renderSurface(
+      baseFetchMock({
+        game: metadataFallbackAiGame(),
+        events: eventsFixture(acceptedRollResponse().accepted_events),
+      }),
+      metadataFallbackAiGame(),
+    );
+
+    const log = await screen.findByRole("region", { name: "Game log" });
+    expect(log.querySelector("[data-game-log-scroll-region]")).toBeInTheDocument();
+    expect(await within(log).findByText(/rolled 3 \+ 4 = 7/)).toBeInTheDocument();
+    expect(await within(log).findByText(/moved to Chance/)).toBeInTheDocument();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "end" }));
+  });
 
   it("renders backend die_1 and die_2 dice payloads as pips and total instead of placeholders", async () => {
     let accepted = false;
@@ -2256,6 +2310,76 @@ describe("GamePlaySurface turn controls", () => {
       ).toBe(true),
     );
     expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done");
+  });
+
+  it("auto-steps the AI bidder with auction legal actions instead of the high bidder", async () => {
+    const game = metadataFallbackAiGame();
+    const auctionState = auctionHighBidderAiTurnStateFixture();
+    const graceBid = aiLegalAction(
+      "BID_AUCTION",
+      { property_id: "property_mediterranean_avenue", amount: 27 },
+      auctionState.state_hash,
+      auctionState.event_sequence,
+    );
+    const gracePass = aiLegalAction(
+      "PASS_AUCTION",
+      { property_id: "property_mediterranean_avenue" },
+      auctionState.state_hash,
+      auctionState.event_sequence,
+    );
+
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(game);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(auctionState);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [],
+          state_hash: auctionState.state_hash,
+          event_sequence: auctionState.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [graceBid, gracePass],
+          state_hash: auctionState.state_hash,
+          event_sequence: auctionState.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock, game);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Auto-step AI" }));
+
+    await waitFor(() => {
+      const aiStepCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+      );
+      expect(aiStepCalls).toHaveLength(1);
+      expect(JSON.parse(String(aiStepCalls[0]?.[1]?.body))).toMatchObject({
+        player_id: graceId,
+        request_context: { mode: "auction_ai_bidder" },
+      });
+    });
   });
 
   it("shows UI indication when AI is thinking, rejected, blocked, or done", async () => {
