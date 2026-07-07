@@ -295,11 +295,8 @@ function ManagementActionButton({
     <Button
       onClick={() => onSubmit(action)}
       disabled={disabled}
-      className={cn(
-        "min-h-9 justify-start px-2.5 py-1.5 text-xs",
-        label === "Mortgage" && "bg-neutral-800 hover:bg-neutral-900",
-        label === "Sell house" && "bg-amber-700 hover:bg-amber-800",
-      )}
+      className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+      variant={label === "Mortgage" ? "dark" : label === "Sell house" ? "warning" : "primary"}
     >
       {isPending ? (
         <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />

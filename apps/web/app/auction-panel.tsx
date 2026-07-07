@@ -198,11 +198,8 @@ function AuctionActionButton({
     <Button
       onClick={() => onSubmit(action)}
       disabled={disabled}
-      className={cn(
-        "min-h-9 justify-start px-2.5 py-1.5 text-xs",
-        label === "Pass" && "bg-neutral-800 hover:bg-neutral-900",
-        label === "Bid" && "bg-amber-700 hover:bg-amber-800 focus-visible:outline-amber-700",
-      )}
+      className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+      variant={label === "Pass" ? "dark" : label === "Bid" ? "warning" : "primary"}
     >
       {isSubmitting ? (
         <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
@@ -227,7 +224,8 @@ function AuctionAiStepButton({
     <Button
       onClick={onStep}
       disabled={disabled}
-      className="min-h-9 justify-start bg-purple-700 px-2.5 py-1.5 text-xs hover:bg-purple-800 focus-visible:outline-purple-700"
+      className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+      variant="ai"
     >
       {isPending ? (
         <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />

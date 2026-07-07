@@ -828,7 +828,8 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               <Button
                 onClick={requestOpenAiNegotiationStep}
                 disabled={busy || !canAskAiOpenNegotiation}
-                className="w-fit bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                className="w-fit"
+                variant="secondary"
               >
                 {requestAiNegotiationStep.isPending ? (
                   <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -978,7 +979,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                             }
                           }}
                           disabled={busy || !canAskAiOffer}
-                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                          variant="secondary"
                         >
                           <BadgeDollarSign aria-hidden="true" className="size-4" />
                           Ask AI offer
@@ -986,7 +987,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         <Button
                           onClick={() => requestThreadAiNegotiationStep("counteroffer")}
                           disabled={busy || !canAskAiDealResponse}
-                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                          variant="secondary"
                         >
                           <RefreshCw aria-hidden="true" className="size-4" />
                           Ask AI counteroffer
@@ -994,7 +995,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         <Button
                           onClick={() => requestThreadAiNegotiationStep("accept_reject")}
                           disabled={busy || !canAskAiDealResponse}
-                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                          variant="secondary"
                         >
                           <CheckCircle2 aria-hidden="true" className="size-4" />
                           Ask AI accept/reject
@@ -1145,7 +1146,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                               <Button
                                 onClick={() => startCounteroffer(deal)}
                                 disabled={busy}
-                                className="bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100"
+                                variant="secondary"
                               >
                                 <RefreshCw aria-hidden="true" className="size-4" />
                                 Counteroffer
@@ -1169,7 +1170,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                               <Button
                                 onClick={() => rejectDealMutation.mutate(deal.id)}
                                 disabled={busy}
-                                className="bg-rose-700 hover:bg-rose-800 focus-visible:outline-rose-700"
+                                variant="danger"
                               >
                                 {rejectDealMutation.isPending ? (
                                   <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -1190,7 +1191,8 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                   <Button
                     onClick={() => expireNegotiationMutation.mutate(selectedNegotiation.id)}
                     disabled={busy}
-                    className="w-fit bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100"
+                    className="w-fit"
+                    variant="secondary"
                   >
                     {expireNegotiationMutation.isPending ? (
                       <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -1333,7 +1335,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
             <Button
               onClick={addSampleTerms}
               disabled={!selectedNegotiation || !isNegotiationOpen}
-              className="bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100"
+              variant="secondary"
             >
               <FileText aria-hidden="true" className="size-4" />
               Add sample complex instruments

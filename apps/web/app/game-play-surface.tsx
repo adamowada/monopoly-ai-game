@@ -1,6 +1,13 @@
 "use client";
 
-import { BOARD_SPACES, CHANCE_DECK, COMMUNITY_CHEST_DECK, type StaticDataCard } from "@monopoly-ai-game/schemas";
+import {
+  BOARD_SPACES,
+  CHANCE_DECK,
+  COMMUNITY_CHEST_DECK,
+  PROPERTIES_BY_ID,
+  type StaticDataCard,
+  type StaticDataProperty,
+} from "@monopoly-ai-game/schemas";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -88,6 +95,20 @@ type SavedGameRecord = {
   status: string;
   updatedAt: string;
   savedAt: string;
+};
+
+type CurrentPlayerProperty = {
+  id: string;
+  name: string;
+  price: number;
+  mortgaged: boolean;
+  houses: number;
+  hotel: boolean;
+};
+
+type TurnResultSummary = {
+  badge: string;
+  detail: string;
 };
 
 const actionModels: Record<string, ActionModel> = {
@@ -179,8 +200,20 @@ function readNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function readInteger(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isInteger(value) ? value : fallback;
+}
+
+function readBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function money(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? `$${value.toLocaleString("en-US")}` : "$0";
+}
+
 function playerCash(player: GameMetadata["players"][number]): string {
-  return `$${readNumber(player.state.cash).toLocaleString("en-US")}`;
+  return money(readNumber(player.state.cash));
 }
 
 function playerPosition(player: GameMetadata["players"][number]): string {
@@ -263,6 +296,24 @@ function activePlayer(game: GameMetadata, snapshot: GameStateResponse | undefine
   return game.players.find((player) => player.seat_order === playerIndex) ?? game.players[0] ?? null;
 }
 
+function playerName(game: GameMetadata, playerId: string | null | undefined): string {
+  if (!playerId) {
+    return "Unknown";
+  }
+  return game.players.find((player) => player.id === playerId)?.name ?? playerId;
+}
+
+function propertyById(propertyId: string | null): StaticDataProperty | null {
+  if (!propertyId) {
+    return null;
+  }
+  return (PROPERTIES_BY_ID as Readonly<Record<string, StaticDataProperty | undefined>>)[propertyId] ?? null;
+}
+
+function propertyName(propertyId: string | null): string {
+  return propertyById(propertyId)?.name ?? propertyId ?? "Unknown property";
+}
+
 async function loadGame(gameId: string, apiBaseUrl?: string): Promise<GameMetadata> {
   const snapshot = await readGame({ gameId, baseUrl: apiBaseUrl });
   if (snapshot.state === "error") {
@@ -299,6 +350,141 @@ function eventPayloadNumber(event: AcceptedEvent | undefined, key: string): numb
 function eventPayloadString(event: AcceptedEvent | undefined, key: string): string | null {
   const value = eventPayloadRecord(event)[key];
   return typeof value === "string" && value ? value : null;
+}
+
+function eventPayloadBoolean(event: AcceptedEvent | undefined, key: string): boolean | null {
+  const value = eventPayloadRecord(event)[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function cashTransferSummary(game: GameMetadata, events: AcceptedEvent[], event: AcceptedEvent): string {
+  const playerId = eventPayloadString(event, "player_id") ?? event.actor_player_id;
+  const amount = eventPayloadNumber(event, "amount");
+  if (!playerId || amount === null) {
+    return "Cash changed hands.";
+  }
+
+  const pairedEvent = [...events]
+    .filter((candidate) => candidate.id !== event.id && candidate.event_type === "PLAYER_CASH_DELTA")
+    .sort((left, right) => Math.abs(left.sequence - event.sequence) - Math.abs(right.sequence - event.sequence))
+    .find((candidate) => eventPayloadNumber(candidate, "amount") === -amount);
+  const pairedPlayerId = pairedEvent ? (eventPayloadString(pairedEvent, "player_id") ?? pairedEvent.actor_player_id) : null;
+
+  if (pairedPlayerId && amount > 0) {
+    return `${playerName(game, pairedPlayerId)} paid ${playerName(game, playerId)} ${money(amount)}.`;
+  }
+  if (pairedPlayerId && amount < 0) {
+    return `${playerName(game, playerId)} paid ${playerName(game, pairedPlayerId)} ${money(Math.abs(amount))}.`;
+  }
+  return amount > 0
+    ? `${playerName(game, playerId)} received ${money(amount)}.`
+    : `${playerName(game, playerId)} paid ${money(Math.abs(amount))}.`;
+}
+
+function latestSignificantEvent(events: AcceptedEvent[]): AcceptedEvent | null {
+  const passiveEvents = new Set([
+    "DECK_STATE_SET",
+    "BANK_INVENTORY_SET",
+    "TURN_STATE_SET",
+    "ACTIVE_AUCTION_SET",
+    "ACTIVE_NEGOTIATION_SET",
+    "ACTIVE_ATOMIC_RESOLUTION_SET",
+  ]);
+  return [...events].reverse().find((event) => !passiveEvents.has(event.event_type)) ?? events.at(-1) ?? null;
+}
+
+function lastTurnResultFromEvents(events: AcceptedEvent[], game: GameMetadata): TurnResultSummary {
+  const event = latestSignificantEvent(events);
+  if (!event) {
+    return {
+      badge: "Waiting",
+      detail: "No completed turn result yet.",
+    };
+  }
+
+  if (event.event_type === "PROPERTY_OWNER_SET") {
+    const ownerId = eventPayloadString(event, "owner_id");
+    const propertyId = eventPayloadString(event, "property_id");
+    return {
+      badge: "Property",
+      detail: ownerId
+        ? `${playerName(game, ownerId)} owns ${propertyName(propertyId)}.`
+        : `${propertyName(propertyId)} returned to the bank.`,
+    };
+  }
+
+  if (event.event_type === "AUCTION_RESULT") {
+    const winnerId = eventPayloadString(event, "winner_id");
+    const propertyId = eventPayloadString(event, "property_id");
+    const winningBid = eventPayloadNumber(event, "winning_bid");
+    const bidText = winningBid === null ? "an unknown amount" : money(winningBid);
+    return {
+      badge: "Auction",
+      detail: `${playerName(game, winnerId)} won ${propertyName(propertyId)} for ${bidText}.`,
+    };
+  }
+
+  if (event.event_type === "CARD_DRAWN") {
+    const card = cardsById.get(eventPayloadString(event, "card_id") ?? "");
+    const deck = deckLabel(eventPayloadString(event, "deck") ?? card?.deck ?? null);
+    const actor = playerName(game, event.actor_player_id);
+    return {
+      badge: deck,
+      detail: `${actor} drew ${card?.title ?? "a card"}.`,
+    };
+  }
+
+  if (event.event_type === "PLAYER_CASH_DELTA") {
+    return {
+      badge: "Cash",
+      detail: cashTransferSummary(game, events, event),
+    };
+  }
+
+  if (event.event_type === "TOKEN_MOVED" || event.event_type === "PLAYER_POSITION_SET") {
+    const playerId = eventPayloadString(event, "player_id") ?? event.actor_player_id;
+    const position = eventPayloadNumber(event, event.event_type === "TOKEN_MOVED" ? "to_position" : "position");
+    const space = position === null ? null : BOARD_SPACES[position];
+    return {
+      badge: "Move",
+      detail: `${playerName(game, playerId)} moved to ${space?.name ?? "an unknown space"}.`,
+    };
+  }
+
+  if (event.event_type === "PROPERTY_MORTGAGE_SET") {
+    const propertyId = eventPayloadString(event, "property_id");
+    const mortgaged = eventPayloadBoolean(event, "mortgaged");
+    return {
+      badge: "Mortgage",
+      detail: `${propertyName(propertyId)} is now ${mortgaged ? "mortgaged" : "unmortgaged"}.`,
+    };
+  }
+
+  if (event.event_type === "PROPERTY_IMPROVEMENTS_SET") {
+    const propertyId = eventPayloadString(event, "property_id");
+    const houses = eventPayloadNumber(event, "houses") ?? 0;
+    const hotel = eventPayloadBoolean(event, "hotel") ?? false;
+    return {
+      badge: "Build",
+      detail: hotel ? `${propertyName(propertyId)} now has a hotel.` : `${propertyName(propertyId)} now has ${houses} houses.`,
+    };
+  }
+
+  if (event.event_type === "ACTIVE_PAYMENT_SET" && eventPayloadBoolean(event, "active")) {
+    const debtorId = eventPayloadString(event, "debtor_id");
+    const creditorId = eventPayloadString(event, "creditor_id");
+    const amountOwed = eventPayloadNumber(event, "amount_owed");
+    const reason = eventPayloadString(event, "reason");
+    return {
+      badge: "Payment",
+      detail: `${playerName(game, debtorId)} owes ${creditorId ? playerName(game, creditorId) : "the bank"} ${money(amountOwed)}${reason ? ` for ${reason}` : ""}.`,
+    };
+  }
+
+  return {
+    badge: formatTitleCase(event.event_type),
+    detail: eventPayloadString(event, "summary") ?? `${formatTitleCase(event.event_type)} was recorded.`,
+  };
 }
 
 function deckLabel(deck: string | null): string {
@@ -407,6 +593,58 @@ function latestRejectedAction(records: RejectedActionRecord[]): RejectedActionRe
     return null;
   }
   return [...records].sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0] ?? null;
+}
+
+function currentPlayerProperties(
+  snapshot: GameStateResponse | undefined,
+  playerId: string | null | undefined,
+): CurrentPlayerProperty[] {
+  if (!playerId) {
+    return [];
+  }
+  const ownership = snapshot?.state.property_ownership;
+  if (!Array.isArray(ownership)) {
+    return [];
+  }
+
+  return ownership.flatMap((entry) => {
+    if (!isRecord(entry) || entry.owner_id !== playerId) {
+      return [];
+    }
+    const propertyId = typeof entry.property_id === "string" ? entry.property_id : null;
+    const property = propertyById(propertyId);
+    if (!property) {
+      return [];
+    }
+    return [
+      {
+        id: property.id,
+        name: property.name,
+        price: property.price,
+        mortgaged: readBoolean(entry.mortgaged),
+        houses: Math.max(0, readInteger(entry.houses)),
+        hotel: readBoolean(entry.hotel) || readInteger(entry.hotels) > 0,
+      },
+    ];
+  });
+}
+
+function playerRelatedCommitmentEvents(events: AcceptedEvent[], playerId: string | null | undefined): AcceptedEvent[] {
+  if (!playerId) {
+    return [];
+  }
+  return [...events]
+    .reverse()
+    .filter((event) => {
+      if (event.actor_player_id === playerId) {
+        return /(CONTRACT|OBLIGATION|DEAL|NEGOTIATION)/.test(event.event_type);
+      }
+      const payload = eventPayloadRecord(event);
+      return Object.entries(payload).some(
+        ([key, value]) => key.endsWith("player_id") && value === playerId && /(CONTRACT|OBLIGATION|DEAL|NEGOTIATION|PAYMENT)/.test(event.event_type),
+      );
+    })
+    .slice(0, 3);
 }
 
 function uniqueLegalActions(actions: LegalAction[]): LegalAction[] {
@@ -540,8 +778,8 @@ function ActionButton({
       disabled={disabled}
       className={cn(
         "min-h-9 justify-start px-2.5 py-1.5 text-xs",
-        model.variant === "danger" && "bg-rose-700 hover:bg-rose-800 focus-visible:outline-rose-700",
       )}
+      variant={model.variant === "danger" ? "danger" : "primary"}
     >
       {isSubmitting ? (
         <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
@@ -612,7 +850,8 @@ function EndTurnControl({
   return (
     <Button
       disabled
-      className="min-h-9 justify-start bg-white px-2.5 py-1.5 text-xs text-neutral-500 ring-1 ring-inset ring-neutral-200"
+      className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+      variant="secondary"
     >
       <CheckCircle2 aria-hidden="true" className="size-3.5" />
       End turn
@@ -673,6 +912,113 @@ function ActivePlayerPanel({
   );
 }
 
+function CurrentPlayerHoldingsPanel({
+  player,
+  snapshot,
+  events,
+}: Readonly<{
+  player: GameMetadata["players"][number] | null;
+  snapshot: GameStateResponse | undefined;
+  events: AcceptedEvent[];
+}>) {
+  const properties = currentPlayerProperties(snapshot, player?.id);
+  const commitmentEvents = playerRelatedCommitmentEvents(events, player?.id);
+
+  return (
+    <section aria-label="Current player holdings" className="rounded-md border border-neutral-200 bg-white p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-neutral-950">
+            {player ? `${player.name} holdings` : "Current player holdings"}
+          </h2>
+          <p className="mt-1 text-xs text-neutral-600">Owned property, contracts, obligations, and active commitments for the current turn.</p>
+        </div>
+        <span className="inline-flex w-fit items-center rounded-full bg-teal-50 px-2 py-1 text-xs font-medium text-teal-700 ring-1 ring-inset ring-teal-200">
+          {properties.length} properties
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(220px,0.85fr)]">
+        <div>
+          <h3 className="text-xs font-semibold uppercase text-neutral-500">Owned properties</h3>
+          {properties.length > 0 ? (
+            <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+              {properties.map((property) => (
+                <li key={property.id} className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-semibold text-neutral-950">{property.name}</p>
+                    <span className="text-xs font-medium text-neutral-600">{money(property.price)}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-neutral-600">
+                    {property.mortgaged ? "Mortgaged" : "Active"}
+                    {property.hotel ? " / Hotel" : property.houses > 0 ? ` / ${property.houses} houses` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
+              No properties owned yet.
+            </p>
+          )}
+        </div>
+
+        <div>
+          <h3 className="text-xs font-semibold uppercase text-neutral-500">Contracts & obligations</h3>
+          {commitmentEvents.length > 0 ? (
+            <ul className="mt-2 grid gap-2">
+              {commitmentEvents.map((event) => (
+                <li key={event.id} className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
+                  <span className="block font-semibold text-neutral-950">{formatTitleCase(event.event_type)}</span>
+                  <span className="mt-1 block">{eventPayloadString(event, "summary") ?? `Recorded sequence ${event.sequence}.`}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
+              No current contracts or obligations for {player?.name ?? "this player"}.
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LastTurnResultPanel({ summary }: Readonly<{ summary: TurnResultSummary }>) {
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-neutral-950">Last turn result</h2>
+          <p className="mt-1 text-sm text-neutral-700">{summary.detail}</p>
+        </div>
+        <span className="inline-flex w-fit shrink-0 items-center rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-700">
+          {summary.badge}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function TradeContextPanel({ player }: Readonly<{ player: GameMetadata["players"][number] | null }>) {
+  return (
+    <section className="rounded-md border border-neutral-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-neutral-950">Trade request</h2>
+          <p className="mt-1 text-sm text-neutral-700">
+            {player ? `${player.name} has an open negotiation window.` : "The table has an open negotiation window."}
+          </p>
+        </div>
+        <span className="inline-flex w-fit shrink-0 items-center rounded-full bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-200">
+          Trade
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function GameSessionPanel({
   isEnding,
   message,
@@ -701,18 +1047,19 @@ function GameSessionPanel({
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-1">
-        <Button onClick={onSaveGame} className="justify-start bg-white text-neutral-800 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100">
+        <Button onClick={onSaveGame} className="justify-start" variant="secondary">
           <Save aria-hidden="true" className="size-4" />
           Save game
         </Button>
-        <Button onClick={onToggleLoadGames} className="justify-start bg-white text-neutral-800 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100">
+        <Button onClick={onToggleLoadGames} className="justify-start" variant="secondary">
           <FolderOpen aria-hidden="true" className="size-4" />
           Load game
         </Button>
         <Button
           onClick={onEndGame}
           disabled={isEnding}
-          className="justify-start bg-rose-700 hover:bg-rose-800 focus-visible:outline-rose-700"
+          className="justify-start"
+          variant="danger"
         >
           {isEnding ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LogOut aria-hidden="true" className="size-4" />}
           {isEnding ? "Ending..." : "End game"}
@@ -1311,9 +1658,97 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     submitAction.isPending,
   ]);
 
+  const hasAuctionContext = Boolean(activeAuction) || auctionLegalActions.length > 0;
+  const turnResultSummary = lastTurnResultFromEvents(visibleEvents, game);
+  const turnControlsPanel = (
+    <section aria-label="Turn controls" className="rounded-md border border-neutral-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-neutral-950">Turn controls</h2>
+          <p className="mt-1 text-xs text-neutral-600">Available moves update from the local rules referee.</p>
+        </div>
+      </div>
+
+      {legalActionsQuery.isError ? (
+        <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          Available moves unavailable.
+        </div>
+      ) : null}
+
+      {activeAiPlayer ? (
+        <div className="mt-4 grid gap-3 rounded-md border border-purple-200 bg-purple-50 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button onClick={() => handleAiStep("manual")} disabled={manualAiStepDisabled} variant="ai">
+              {aiStep.isPending ? (
+                <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+              ) : (
+                <Bot aria-hidden="true" className="size-4" />
+              )}
+              Step AI
+            </Button>
+            <label className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-900">
+              <input
+                type="checkbox"
+                checked={autoStepAi}
+                disabled={gameAiBlocked}
+                onChange={(event) => setAutoStepAi(event.target.checked)}
+                className="size-4 accent-purple-700"
+              />
+              Auto-step AI
+            </label>
+          </div>
+          <AiStepStatusPanel isThinking={aiStep.isPending} result={aiStepResult} />
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3">
+        <ActionGroupPanel
+          title={groupTitles.turn}
+          actions={actionsByGroup.turn}
+          disabled={directActionControlsDisabled}
+          pendingActionType={pendingActionType}
+          onSubmit={handleSubmit}
+        />
+        <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+          <h3 className="text-xs font-semibold uppercase text-neutral-500">End turn</h3>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <EndTurnControl
+              endTurnAction={endTurnAction}
+              disabled={directActionControlsDisabled}
+              pendingActionType={pendingActionType}
+              onSubmit={handleSubmit}
+            />
+            {!endTurnAction ? <span className="self-center text-xs text-neutral-500">Unavailable</span> : null}
+          </div>
+        </div>
+        <ActionGroupPanel
+          title={groupTitles.purchase}
+          actions={actionsByGroup.purchase}
+          disabled={directActionControlsDisabled}
+          pendingActionType={pendingActionType}
+          onSubmit={handleSubmit}
+        />
+        <ActionGroupPanel
+          title={groupTitles.payment}
+          actions={actionsByGroup.payment}
+          disabled={directActionControlsDisabled}
+          pendingActionType={pendingActionType}
+          onSubmit={handleSubmit}
+        />
+        <ActionGroupPanel
+          title={groupTitles.jail}
+          actions={actionsByGroup.jail}
+          disabled={directActionControlsDisabled}
+          pendingActionType={pendingActionType}
+          onSubmit={handleSubmit}
+        />
+      </div>
+    </section>
+  );
+
   return (
-    <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
-      <div className="grid content-start gap-4">
+    <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:px-8">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         <ClassicGameBoard
           drawnCard={visibleDrawnCard}
           game={game}
@@ -1321,6 +1756,52 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           onDismissDrawnCard={() => setDismissedCardEventId(visibleDrawnCard?.eventId ?? null)}
           snapshot={stateQuery.data}
         />
+        <aside className="grid content-start gap-4">
+          <ActivePlayerPanel player={currentPlayer} phase={phase} />
+          {turnControlsPanel}
+
+          <GameSessionPanel
+            isEnding={endGameMutation.isPending}
+            message={sessionMessage}
+            onEndGame={handleEndGame}
+            onLoadGame={handleLoadGame}
+            onSaveGame={handleSaveGame}
+            onToggleLoadGames={() => setShowLoadGames((current) => !current)}
+            savedGames={savedGames}
+            showLoadGames={showLoadGames}
+          />
+        </aside>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <CurrentPlayerHoldingsPanel events={visibleEvents} player={currentPlayer} snapshot={stateQuery.data} />
+        <section aria-label="Turn context" className="grid content-start gap-4">
+          {hasAuctionContext ? (
+            <AuctionPanel
+              controlsDisabled={auctionControlsDisabled}
+              events={visibleEvents}
+              game={game}
+              activeAiPlayerId={activeAiPlayer?.id ?? null}
+              aiStepDisabled={aiStepStateBlocked}
+              aiStepPending={aiStep.isPending}
+              isActionDisabled={isAuctionActionDisabled}
+              legalActions={auctionLegalActions}
+              onStepAiBidder={(playerId) => handleAiStep("auction_ai_bidder", playerId)}
+              onSubmit={handleSubmit}
+              pendingActionType={pendingActionType}
+              snapshot={stateQuery.data}
+            />
+          ) : phase === "NEGOTIATION_WINDOW" ? (
+            <TradeContextPanel player={currentPlayer} />
+          ) : (
+            <LastTurnResultPanel summary={turnResultSummary} />
+          )}
+        </section>
+      </div>
+
+      {visibleRejection ? <RejectedActionAlert rejection={visibleRejection} /> : null}
+
+      <section aria-label="Supporting table details" className="grid gap-4">
         <PropertyManagementPanel
           controlsDisabled={directActionControlsDisabled}
           game={game}
@@ -1330,124 +1811,6 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           snapshot={stateQuery.data}
         />
         <NegotiationPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
-        <AiAuditPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
-      </div>
-
-      <aside className="grid content-start gap-4">
-        <ActivePlayerPanel player={currentPlayer} phase={phase} />
-
-        <GameSessionPanel
-          isEnding={endGameMutation.isPending}
-          message={sessionMessage}
-          onEndGame={handleEndGame}
-          onLoadGame={handleLoadGame}
-          onSaveGame={handleSaveGame}
-          onToggleLoadGames={() => setShowLoadGames((current) => !current)}
-          savedGames={savedGames}
-          showLoadGames={showLoadGames}
-        />
-
-        <AuctionPanel
-          controlsDisabled={auctionControlsDisabled}
-          events={visibleEvents}
-          game={game}
-          activeAiPlayerId={activeAiPlayer?.id ?? null}
-          aiStepDisabled={aiStepStateBlocked}
-          aiStepPending={aiStep.isPending}
-          isActionDisabled={isAuctionActionDisabled}
-          legalActions={auctionLegalActions}
-          onStepAiBidder={(playerId) => handleAiStep("auction_ai_bidder", playerId)}
-          onSubmit={handleSubmit}
-          pendingActionType={pendingActionType}
-          snapshot={stateQuery.data}
-        />
-
-        <section aria-label="Turn controls" className="rounded-md border border-neutral-200 bg-white p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-neutral-950">Turn controls</h2>
-              <p className="mt-1 text-xs text-neutral-600">Available moves update from the local rules referee.</p>
-            </div>
-          </div>
-
-          {legalActionsQuery.isError ? (
-            <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              Available moves unavailable.
-            </div>
-          ) : null}
-
-          {activeAiPlayer ? (
-            <div className="mt-4 grid gap-3 rounded-md border border-purple-200 bg-purple-50 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button onClick={() => handleAiStep("manual")} disabled={manualAiStepDisabled}>
-                  {aiStep.isPending ? (
-                    <Loader2 aria-hidden="true" className="size-4 animate-spin" />
-                  ) : (
-                    <Bot aria-hidden="true" className="size-4" />
-                  )}
-                  Step AI
-                </Button>
-                <label className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-900">
-                  <input
-                    type="checkbox"
-                    checked={autoStepAi}
-                    disabled={gameAiBlocked}
-                    onChange={(event) => setAutoStepAi(event.target.checked)}
-                    className="size-4 accent-purple-700"
-                  />
-                  Auto-step AI
-                </label>
-              </div>
-              <AiStepStatusPanel isThinking={aiStep.isPending} result={aiStepResult} />
-            </div>
-          ) : null}
-
-          <div className="mt-4 grid gap-3">
-            <ActionGroupPanel
-              title={groupTitles.turn}
-              actions={actionsByGroup.turn}
-              disabled={directActionControlsDisabled}
-              pendingActionType={pendingActionType}
-              onSubmit={handleSubmit}
-            />
-            <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
-              <h3 className="text-xs font-semibold uppercase text-neutral-500">End turn</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <EndTurnControl
-                  endTurnAction={endTurnAction}
-                  disabled={directActionControlsDisabled}
-                  pendingActionType={pendingActionType}
-                  onSubmit={handleSubmit}
-                />
-                {!endTurnAction ? <span className="self-center text-xs text-neutral-500">Unavailable</span> : null}
-              </div>
-            </div>
-            <ActionGroupPanel
-              title={groupTitles.purchase}
-              actions={actionsByGroup.purchase}
-              disabled={directActionControlsDisabled}
-              pendingActionType={pendingActionType}
-              onSubmit={handleSubmit}
-            />
-            <ActionGroupPanel
-              title={groupTitles.payment}
-              actions={actionsByGroup.payment}
-              disabled={directActionControlsDisabled}
-              pendingActionType={pendingActionType}
-              onSubmit={handleSubmit}
-            />
-            <ActionGroupPanel
-              title={groupTitles.jail}
-              actions={actionsByGroup.jail}
-              disabled={directActionControlsDisabled}
-              pendingActionType={pendingActionType}
-              onSubmit={handleSubmit}
-            />
-          </div>
-        </section>
-
-        {visibleRejection ? <RejectedActionAlert rejection={visibleRejection} /> : null}
-
         <ContractsPanel
           apiBaseUrl={baseUrl}
           events={visibleEvents}
@@ -1455,9 +1818,12 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           gameId={gameId}
           rejectedActions={rejectedActionsQuery.data ?? []}
         />
-        <PlayerTable game={game} />
-        <GameDetails game={game} phase={phase} />
-      </aside>
+        <AiAuditPanel apiBaseUrl={baseUrl} game={game} gameId={gameId} />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <PlayerTable game={game} />
+          <GameDetails game={game} phase={phase} />
+        </div>
+      </section>
     </div>
   );
 }

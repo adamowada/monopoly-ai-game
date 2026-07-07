@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { Button } from "../../../components/ui/button";
 import { readGame } from "../../../lib/api/games";
+import { GameTableMenu } from "../../game-table-menu";
 import { GamePlaySurface } from "../../game-play-surface";
 
 export const dynamic = "force-dynamic";
@@ -39,23 +40,7 @@ export default async function GameBoardPage({ params }: GamePageProps) {
 
   return (
     <main className="min-h-screen bg-[var(--color-page)] text-neutral-950">
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div>
-            <p className="text-xs font-semibold uppercase text-teal-700">Monopoly 2.0 local table</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-normal">Game table {game.id}</h1>
-            <p className="mt-2 text-sm text-neutral-600">
-              Play turns, auctions, property management, negotiations, contracts, obligations, and AI seats from one illustrated board.
-            </p>
-          </div>
-          <Button asChild className="w-fit bg-teal-50 text-teal-950 ring-1 ring-inset ring-teal-700/30 hover:bg-teal-100">
-            <Link href="/">
-              <ArrowLeft aria-hidden="true" className="size-4" />
-              Setup
-            </Link>
-          </Button>
-        </div>
-      </header>
+      <GameTableMenu gameId={game.id} status={game.status} />
 
       <GamePlaySurface gameId={game.id} initialGame={game} />
     </main>

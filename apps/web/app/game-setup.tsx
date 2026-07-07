@@ -342,7 +342,7 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
                             aria-label={`Remove Player ${playerNumber}`}
                             onClick={() => removePlayer(index)}
                             disabled={!canRemovePlayer || isSubmitting}
-                            className="bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100 disabled:bg-neutral-100"
+                            variant="secondary"
                           >
                             <Trash2 aria-hidden="true" className="size-4" />
                             Remove
@@ -369,7 +369,8 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
                   aria-label="Generate seed"
                   onClick={() => setSeed(generateSeed())}
                   disabled={isSubmitting}
-                  className="shrink-0 bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100"
+                  className="shrink-0"
+                  variant="secondary"
                 >
                   <RefreshCw aria-hidden="true" className="size-4" />
                 </Button>

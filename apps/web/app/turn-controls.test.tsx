@@ -126,6 +126,34 @@ function stateFixture(position = 0, eventSequence = 0) {
   };
 }
 
+function holdingsStateFixture() {
+  const state = stateFixture(0, 4);
+  return {
+    ...state,
+    state: {
+      ...state.state,
+      property_ownership: [
+        {
+          property_id: "property_oriental_avenue",
+          owner_id: adaId,
+          mortgaged: false,
+          houses: 0,
+          hotels: 0,
+          hotel: false,
+        },
+        {
+          property_id: "property_park_place",
+          owner_id: graceId,
+          mortgaged: false,
+          houses: 0,
+          hotels: 0,
+          hotel: false,
+        },
+      ],
+    },
+  };
+}
+
 function aiStateFixture(eventSequence = 0) {
   return {
     game_id: gameId,
@@ -538,6 +566,15 @@ describe("GamePlaySurface turn controls", () => {
     renderSurface(fetchMock);
 
     const session = await screen.findByRole("region", { name: "Game session" });
+    const saveButton = within(session).getByRole("button", { name: "Save game" });
+    const loadButton = within(session).getByRole("button", { name: "Load game" });
+    expect(saveButton).toHaveAttribute("data-button-variant", "secondary");
+    expect(saveButton).toHaveClass("text-neutral-800");
+    expect(saveButton).not.toHaveClass("text-white");
+    expect(loadButton).toHaveAttribute("data-button-variant", "secondary");
+    expect(loadButton).toHaveClass("text-neutral-800");
+    expect(loadButton).not.toHaveClass("text-white");
+
     fireEvent.click(within(session).getByRole("button", { name: "Save game" }));
 
     expect(window.localStorage.getItem("monopoly-ai-game.saved-games")).toContain(gameId);
@@ -557,6 +594,41 @@ describe("GamePlaySurface turn controls", () => {
       ).toBe(true),
     );
     expect(routerMock.push).toHaveBeenCalledWith("/");
+  });
+
+  it("prioritizes active controls, current player holdings, and one dynamic turn context", async () => {
+    const fetchMock = baseFetchMock({
+      state: holdingsStateFixture(),
+      events: eventsFixture([
+        {
+          id: "event-4",
+          game_id: gameId,
+          sequence: 4,
+          actor_player_id: adaId,
+          event_type: "PROPERTY_OWNER_SET",
+          payload: {
+            owner_id: adaId,
+            property_id: "property_oriental_avenue",
+          },
+          state_hash: "state-4",
+          created_at: "2026-07-04T00:04:00.000Z",
+        },
+      ]),
+    });
+
+    renderSurface(fetchMock);
+
+    expect(await screen.findByRole("region", { name: "Active player" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Turn controls" })).toBeInTheDocument();
+
+    const holdings = await screen.findByRole("region", { name: "Current player holdings" });
+    expect(holdings).toHaveTextContent("Ada holdings");
+    expect(holdings).toHaveTextContent("Oriental Avenue");
+    expect(holdings).not.toHaveTextContent("Park Place");
+
+    const context = await screen.findByRole("region", { name: "Turn context" });
+    expect(context).toHaveTextContent("Last turn result");
+    expect(context).toHaveTextContent("Ada owns Oriental Avenue");
   });
 
   it("renders enabled action buttons only for backend-returned legal actions", async () => {
