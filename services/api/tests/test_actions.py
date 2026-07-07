@@ -220,6 +220,14 @@ def test_legal_actions_are_serializable_and_include_state_guards() -> None:
     assert all(isinstance(action.schema, Mapping) for action in legal_actions)
 
 
+def test_roll_dice_description_is_player_facing_not_rng_jargon() -> None:
+    state = _initial_state()
+
+    roll_action = next(action for action in list_legal_actions(state, "player-1") if action.type == "ROLL_DICE")
+
+    assert roll_action.description == "Roll dice for the current turn."
+
+
 def test_initial_state_exposes_roll_and_bankruptcy_but_not_end_turn_or_purchase() -> None:
     state = _initial_state()
 

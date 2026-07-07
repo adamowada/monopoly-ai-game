@@ -319,7 +319,7 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
         return tuple(actions)
 
     if actor_id == state.turn.current_player_id:
-        add("ROLL_DICE", description="Roll deterministic dice for the current turn.")
+        add("ROLL_DICE", description="Roll dice for the current turn.")
         add("END_TURN", description="End the current player's turn.")
 
         if player.in_jail:
