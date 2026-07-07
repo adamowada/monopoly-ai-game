@@ -299,10 +299,18 @@ class EventPersistence:
         return EventAppendManyResult(events=tuple(records), state=current_state)
 
     async def list_accepted_events(self, game_id: UUID | str) -> list[AcceptedEventRecord]:
+        return await self.list_accepted_events_after(game_id, sequence=0)
+
+    async def list_accepted_events_after(
+        self,
+        game_id: UUID | str,
+        *,
+        sequence: int,
+    ) -> list[AcceptedEventRecord]:
         normalized_game_id = _coerce_uuid(game_id)
         async with self._session_factory() as session:
             await _load_initial_state(session, normalized_game_id)
-            rows = await _load_event_rows_after(session, normalized_game_id, sequence=0)
+            rows = await _load_event_rows_after(session, normalized_game_id, sequence=sequence)
             return [_accepted_event_record_from_row(row) for row in rows]
 
     async def replay_from_event_zero(self, game_id: UUID | str) -> GameState:

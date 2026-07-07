@@ -11,7 +11,6 @@ import {
   Dice5,
   Gavel,
   HandCoins,
-  Hourglass,
   KeyRound,
   Loader2,
   LogOut,
@@ -675,12 +674,10 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       void queryClient.invalidateQueries({ queryKey: ["deals", gameId] });
     };
 
-    source.addEventListener("message", invalidate);
     source.addEventListener("game_event", invalidate);
     source.onerror = () => undefined;
 
     return () => {
-      source.removeEventListener("message", invalidate);
       source.removeEventListener("game_event", invalidate);
       source.close();
     };
@@ -813,7 +810,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const latestAuditRejection = latestRejectedAction(rejectedActionsQuery.data ?? []);
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
-  const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading || legalActionsQuery.isFetching;
+  const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading;
   const gameAiBlocked = game.status === "AI_BLOCKED";
   const controlsDisabled = gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending;
   const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
@@ -823,7 +820,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
   const auctionActionsLoading =
-    Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading || query.isFetching);
+    Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading);
   const auctionControlsDisabled = controlsDisabled || auctionActionsLoading;
 
   function isAiControlledActor(action: LegalAction): boolean {
@@ -922,12 +919,6 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
               <h2 className="text-sm font-semibold text-neutral-950">Turn controls</h2>
               <p className="mt-1 text-xs text-neutral-600">Available moves update from the local rules referee.</p>
             </div>
-            {legalActionsLoading ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
-                <Hourglass aria-hidden="true" className="size-3" />
-                Loading moves
-              </span>
-            ) : null}
           </div>
 
           {legalActionsQuery.isError ? (

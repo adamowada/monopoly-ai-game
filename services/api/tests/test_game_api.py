@@ -443,6 +443,47 @@ async def test_sse_stream_returns_existing_accepted_events(
         await delete_game(session_factory, str(game_id))
 
 
+@pytest.mark.asyncio
+async def test_sse_stream_does_not_replay_events_after_last_event_id(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    actor_id = created["players"][0]["id"]
+    try:
+        legal_actions = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": actor_id},
+        )
+        accepted = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-sse-last-event-id"},
+            json=next(
+                action
+                for action in legal_actions.json()["legal_actions"]
+                if action["type"] == "ROLL_DICE"
+            ),
+        )
+        last_sequence = str(accepted.json()["event_sequence"])
+
+        async with client.stream(
+            "GET",
+            f"/games/{game_id}/events/stream",
+            headers={"Last-Event-ID": last_sequence},
+        ) as response:
+            body = await response.aread()
+
+        text = body.decode("utf-8")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert "event: game_event" not in text
+        assert "DICE_ROLLED" not in text
+        assert ": no-events" in text
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
 def test_openapi_includes_stage_4_4_endpoints(api_app: FastAPI) -> None:
     paths = api_app.openapi()["paths"]
     expected = {

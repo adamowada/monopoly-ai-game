@@ -14,7 +14,7 @@ async function createGame(page: import("@playwright/test").Page, seed: string) {
   await expect(page.getByRole("region", { name: "Classic Monopoly-style board" })).toBeVisible();
 }
 
-test("shows legal turn controls, rolls from the returned action, logs accepted events, and refetches after SSE", async ({ page }) => {
+test("shows legal turn controls, rolls from the returned action, logs accepted events, and refreshes on accepted events", async ({ page }) => {
   const legalActionsResponses: string[] = [];
   page.on("response", (response) => {
     if (response.url().includes("/legal-actions")) {
@@ -30,10 +30,9 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   await expect(controls.getByRole("button", { name: "Roll dice" })).toBeEnabled();
   await expect(controls.getByRole("button", { name: "End turn" })).toBeDisabled();
   await expect(controls.getByRole("button", { name: "Buy property" })).toHaveCount(0);
+  await expect(controls.getByText("Loading moves")).toHaveCount(0);
 
-  await expect
-    .poll(() => legalActionsResponses.length, { message: "SSE invalidation should refetch legal actions" })
-    .toBeGreaterThanOrEqual(2);
+  const legalActionFetchesBeforeAction = legalActionsResponses.length;
 
   const actionRequest = page.waitForRequest((request) => request.url().includes("/actions") && request.method() === "POST");
   await controls.getByRole("button", { name: "Roll dice" }).click();
@@ -46,6 +45,9 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   const log = page.getByRole("region", { name: "Game log" });
   await expect(log).toContainText("DICE_ROLLED");
   await expect(log).toContainText("TOKEN_MOVED");
+  await expect
+    .poll(() => legalActionsResponses.length, { message: "accepted event should refresh legal actions" })
+    .toBeGreaterThan(legalActionFetchesBeforeAction);
 });
 
 test("shows Rejected action for a mock stale action without moving the active token", async ({ page }) => {

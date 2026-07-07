@@ -13,6 +13,41 @@ const adaId = "player-1";
 const graceId = "player-2";
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
+type EventSourceListener = (event: Event) => void;
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+
+  readonly url: string;
+  private readonly listeners = new Map<string, EventSourceListener[]>();
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: EventSourceListener) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+
+  removeEventListener(type: string, listener: EventSourceListener) {
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter((entry) => entry !== listener),
+    );
+  }
+
+  close() {
+    this.listeners.clear();
+  }
+
+  dispatch(type: string) {
+    const event = new Event(type);
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
 
 function gameFixture(position = 0): GameMetadata {
   return {
@@ -444,6 +479,7 @@ function baseFetchMock({
 }
 
 afterEach(() => {
+  FakeEventSource.instances = [];
   vi.unstubAllGlobals();
 });
 
@@ -563,6 +599,36 @@ describe("GamePlaySurface turn controls", () => {
     expect(within(auction).getByRole("button", { name: "Start auction" })).toBeEnabled();
   });
 
+  it("ignores SSE keepalive messages and refreshes only on accepted game events", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const fetchMock = baseFetchMock({
+      legalActions: [legalAction("ROLL_DICE")],
+    });
+
+    renderSurface(fetchMock);
+
+    const controls = await screen.findByRole("region", { name: "Turn controls" });
+    expect(await within(controls).findByRole("button", { name: "Roll dice" })).toBeEnabled();
+    expect(within(controls).queryByText("Loading moves")).not.toBeInTheDocument();
+
+    const legalActionFetchCount = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/legal-actions")).length;
+    const initialLegalActionFetches = legalActionFetchCount();
+    expect(initialLegalActionFetches).toBeGreaterThanOrEqual(1);
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    FakeEventSource.instances[0]?.dispatch("message");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(legalActionFetchCount()).toBe(initialLegalActionFetches);
+    expect(within(controls).getByRole("button", { name: "Roll dice" })).toBeEnabled();
+    expect(within(controls).queryByText("Loading moves")).not.toBeInTheDocument();
+
+    FakeEventSource.instances[0]?.dispatch("game_event");
+
+    await waitFor(() => expect(legalActionFetchCount()).toBeGreaterThan(initialLegalActionFetches));
+  });
+
   it("shows a Rejected action alert and leaves prior visible board state intact after rejection", async () => {
     renderSurface(
       baseFetchMock({
@@ -617,7 +683,7 @@ describe("GamePlaySurface turn controls", () => {
 
     const controls = await screen.findByRole("region", { name: "Turn controls" });
     expect(within(controls).getByRole("button", { name: "End turn" })).toBeDisabled();
-    expect(within(controls).getByText("Loading moves")).toBeInTheDocument();
+    expect(within(controls).queryByText("Loading moves")).not.toBeInTheDocument();
 
     resolveLegalActions({
       game_id: gameId,

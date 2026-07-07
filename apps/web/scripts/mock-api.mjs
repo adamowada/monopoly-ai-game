@@ -3376,18 +3376,16 @@ const server = createServer(async (request, response) => {
     });
     response.write(": connected\n\n");
     game.stream_clients.add(response);
-    for (const event of game.events) {
+    const lastEventSequence = Number.parseInt(String(request.headers["last-event-id"] ?? "0"), 10);
+    const eventsAfterLastId = game.events.filter(
+      (event) => (event.sequence ?? 0) > (Number.isFinite(lastEventSequence) ? lastEventSequence : 0),
+    );
+    if (eventsAfterLastId.length === 0) {
+      response.write(": no-events\n\n");
+    }
+    for (const event of eventsAfterLastId) {
       writeSse(response, event);
     }
-    setTimeout(() => {
-      if (game.stream_clients.has(response) && !response.destroyed) {
-        writeSse(response, {
-          sequence: game.event_sequence,
-          event_type: "STREAM_CONNECTED",
-          payload: { game_id: game.id },
-        });
-      }
-    }, 100);
     request.on("close", () => {
       game.stream_clients.delete(response);
     });

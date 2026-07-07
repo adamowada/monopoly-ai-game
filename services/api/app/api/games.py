@@ -3352,12 +3352,19 @@ async def _game_status_in_session(session: AsyncSession, game_id: UUID) -> str |
     },
 )
 async def stream_events(game_id: UUID, request: Request) -> StreamingResponse:
+    last_sequence = _last_event_id_sequence(request)
     try:
-        records = await EventPersistence(_session_factory(request)).list_accepted_events(game_id)
+        records = await EventPersistence(_session_factory(request)).list_accepted_events_after(
+            game_id,
+            sequence=last_sequence,
+        )
     except GameNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
 
     async def event_stream() -> AsyncIterator[str]:
+        if not records:
+            yield ": no-events\n\n"
+            return
         for record in records:
             data = json.dumps(_event_response(record).model_dump(mode="json"), separators=(",", ":"))
             yield f"id: {record.sequence}\nevent: game_event\ndata: {data}\n\n"
@@ -3367,6 +3374,16 @@ async def stream_events(game_id: UUID, request: Request) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"cache-control": "no-store"},
     )
+
+
+def _last_event_id_sequence(request: Request) -> int:
+    raw_last_event_id = request.headers.get("last-event-id")
+    if raw_last_event_id is None:
+        return 0
+    try:
+        return max(0, int(raw_last_event_id))
+    except ValueError:
+        return 0
 
 
 async def _load_game_metadata(

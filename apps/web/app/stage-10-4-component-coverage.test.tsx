@@ -809,7 +809,7 @@ describe("Stage 10.4 frontend component coverage", () => {
     renderWithQueryClient(<GamePlaySurface apiBaseUrl={apiBaseUrl} gameId={gameId} initialGame={gameFixture()} />, fetchMock);
 
     const TurnControls = await screen.findByRole("region", { name: "Turn controls" });
-    expect(within(TurnControls).getByText("Loading moves")).toBeInTheDocument();
+    expect(within(TurnControls).queryByText("Loading moves")).not.toBeInTheDocument();
     expect(within(TurnControls).getByRole("button", { name: "End turn" })).toBeDisabled();
 
     legalActionsDeferred.resolve({
