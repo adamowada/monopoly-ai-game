@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BOARD_SPACES } from "@monopoly-ai-game/schemas";
 
 import { DECK_ART, SPACE_ART_BY_ID } from "./board-art";
@@ -54,6 +54,33 @@ function gameFixture(positions: number[] = [0, 7]): GameMetadata {
         updated_at: createdAt,
       },
     ],
+  };
+}
+
+function stackedTokenGameFixture(): GameMetadata {
+  const base = gameFixture([0, 0]);
+  const names = ["Ada", "Grace", "Linus", "Marie", "Nia"];
+  const colors = ["#0f766e", "#7c3aed", "#2563eb", "#dc2626", "#ca8a04"];
+  return {
+    ...base,
+    settings: {
+      ...base.settings,
+      player_colors: colors.map((color, seat_order) => ({ color, seat_order })),
+    },
+    players: names.map((name, index) => ({
+      id: `player-${index + 1}`,
+      game_id: "game-board-test",
+      seat_order: index,
+      name,
+      controller_type: index % 2 === 0 ? "human" : "ai",
+      status: "active",
+      state: {
+        cash: 1500,
+        position: 0,
+      },
+      created_at: createdAt,
+      updated_at: createdAt,
+    })),
   };
 }
 
@@ -261,7 +288,9 @@ describe("ClassicGameBoard", () => {
     const { rerender } = render(<ClassicGameBoard game={gameFixture([0, 7])} />);
 
     expect(screen.getByLabelText("Ada token at GO, position 0")).toHaveAttribute("data-player-token");
+    expect(screen.getByLabelText("Ada token at GO, position 0")).toHaveAttribute("data-token-shape", "shield");
     expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-player-token");
+    expect(screen.getByLabelText("Grace token at Chance, position 7")).toHaveAttribute("data-token-shape", "diamond");
     expect(screen.getByLabelText("Ada token at GO, position 0")).toHaveAttribute("title", "Ada");
     expect(
       screen.getByLabelText("Ada token at GO, position 0").querySelector("[data-player-token-label]"),
@@ -271,6 +300,20 @@ describe("ClassicGameBoard", () => {
 
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Ada token at Illinois Avenue, position 24")).toHaveAttribute("data-player-token");
+  });
+
+  it("uses distinct game-piece silhouettes when multiple players share one space", () => {
+    render(<ClassicGameBoard game={stackedTokenGameFixture()} />);
+
+    const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
+    const tokens = within(board).getAllByLabelText(/token at GO, position 0/);
+    const shapes = tokens.map((token) => token.getAttribute("data-token-shape"));
+
+    expect(tokens).toHaveLength(5);
+    expect(new Set(shapes)).toEqual(new Set(["shield", "diamond", "tag", "hex", "crest"]));
+    for (const token of tokens) {
+      expect(token.querySelector("[data-token-silhouette]")).toBeInTheDocument();
+    }
   });
 
   it("can show dice motion and a travelling token position while an accepted roll resolves", () => {
@@ -356,7 +399,8 @@ describe("ClassicGameBoard", () => {
     expect(landedToken.querySelector("[data-token-trail]")).toBeInTheDocument();
   });
 
-  it("presents drawn cards with a board-centered reveal treatment", () => {
+  it("presents drawn cards with deck art and keyboard dismissal", () => {
+    const onDismiss = vi.fn();
     render(
       <ClassicGameBoard
         drawnCard={{
@@ -367,12 +411,19 @@ describe("ClassicGameBoard", () => {
           title: "Move to GO",
         }}
         game={gameFixture([7, 0])}
+        onDismissDrawnCard={onDismiss}
       />,
     );
 
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
     const modal = within(board).getByRole("dialog", { name: "Chance card" });
     expect(modal).toHaveAttribute("data-card-reveal");
+    expect(modal).toHaveAttribute("data-card-deck", "chance");
+    expect(within(modal).getByRole("img", { name: "Chance card art" })).toBeInTheDocument();
     expect(modal).toHaveTextContent("Move to GO");
+    expect(modal).not.toHaveTextContent("card-event-1");
+
+    fireEvent.keyDown(modal, { key: "Escape" });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });

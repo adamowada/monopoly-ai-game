@@ -60,6 +60,7 @@ export type DrawnCardView = {
 const boardGridSize = 13;
 const fallbackPlayerColor = "#525866";
 const boardSurfaceColor = "#eaf3d7";
+const tokenShapes = ["shield", "diamond", "tag", "hex", "crest"] as const;
 const groupColorById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group.color]));
 const groupById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group]));
 const propertyById = new Map<string, StaticDataProperty>(
@@ -181,6 +182,35 @@ function playerPosition(player: GamePlayer, snapshot: GameStateResponse | undefi
 function tokenText(name: string, seatOrder: number): string {
   const firstLetter = name.trim().charAt(0);
   return firstLetter ? firstLetter.toUpperCase() : String(seatOrder + 1);
+}
+
+type TokenShape = (typeof tokenShapes)[number];
+
+function tokenShapeForSeat(seatOrder: number): TokenShape {
+  return tokenShapes[seatOrder % tokenShapes.length] ?? "shield";
+}
+
+function TokenSilhouette({
+  color,
+  shape,
+}: Readonly<{
+  color: string;
+  shape: TokenShape;
+}>) {
+  const paths: Record<TokenShape, string> = {
+    shield: "M12 2 L21 6 V13 C21 18 17.5 21 12 23 C6.5 21 3 18 3 13 V6 Z",
+    diamond: "M12 2 L22 12 L12 22 L2 12 Z",
+    tag: "M5 4 H17 L22 9 V20 H5 Z",
+    hex: "M7 3 H17 L23 12 L17 21 H7 L1 12 Z",
+    crest: "M12 2 C16 5 20 4 22 8 C20 16 17 20 12 23 C7 20 4 16 2 8 C4 4 8 5 12 2 Z",
+  };
+
+  return (
+    <svg aria-hidden="true" className="absolute inset-0 size-full" data-token-silhouette="" viewBox="0 0 24 24">
+      <path d={paths[shape]} fill={color} stroke="#fffbea" strokeLinejoin="round" strokeWidth="2" />
+      <path d={paths[shape]} fill="none" opacity="0.45" stroke="#2f2418" strokeLinejoin="round" strokeWidth="1" />
+    </svg>
+  );
 }
 
 function readableTextColor(hexColor: string): string {
@@ -529,6 +559,9 @@ function DrawnCardModal({
   if (!card) {
     return null;
   }
+  const deckKey = card.deckLabel.toLowerCase().includes("community") ? "community_chest" : "chance";
+  const deck = DECK_ART[deckKey];
+  const [main, background, accent] = deck.palette;
 
   return (
     <div className="absolute inset-0 z-[55] grid place-items-center bg-[#1f2a1f]/35 p-4" data-card-modal="">
@@ -536,11 +569,18 @@ function DrawnCardModal({
         aria-label={`${card.deckLabel} card`}
         aria-modal="true"
         className="drawn-card-reveal w-full max-w-sm rounded-md border-2 border-[#1f2a1f] bg-[#fffbea] p-4 text-left text-[#1f2a1f] shadow-[0_22px_60px_rgba(31,42,31,0.38)]"
+        data-card-deck={deckKey}
         data-card-reveal=""
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            onDismiss?.();
+          }
+        }}
         role="dialog"
+        tabIndex={-1}
       >
         <div className="flex items-start justify-between gap-3 border-b border-[#1f2a1f]/25 pb-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-[11px] font-black uppercase text-[#456038]">{card.deckLabel}</p>
             <h3 className="mt-1 text-xl font-black uppercase leading-tight">{card.title}</h3>
           </div>
@@ -552,6 +592,33 @@ function DrawnCardModal({
           >
             <X aria-hidden="true" className="size-4" />
           </button>
+        </div>
+        <div
+          aria-label={`${card.deckLabel} card art`}
+          className="mt-3 grid min-h-28 place-items-center rounded border-2 px-4 py-3"
+          data-card-art=""
+          role="img"
+          style={{
+            backgroundColor: background,
+            borderColor: main,
+            color: main,
+          }}
+        >
+          <svg aria-hidden="true" className="h-16 w-24" viewBox="0 0 96 64">
+            {deckKey === "chance" ? (
+              <>
+                <path d="M47 10 C36 10 29 17 29 26 H42 C42 23 44 21 48 21 C52 21 55 23 55 27 C55 31 52 33 48 35 C43 38 41 42 42 49 H54 C53 45 55 43 59 40 C65 36 69 32 69 25 C69 16 61 10 47 10 Z" fill={main} />
+                <circle cx="48" cy="56" r="5" fill={accent} />
+              </>
+            ) : (
+              <>
+                <path d="M18 25 H78 V54 H18 Z" fill={main} />
+                <path d="M24 18 H72 L78 25 H18 Z" fill={accent} />
+                <path d="M48 18 V54" stroke={background} strokeWidth="5" />
+                <circle cx="48" cy="39" r="6" fill={background} />
+              </>
+            )}
+          </svg>
         </div>
         <p className="mt-3 text-sm font-semibold leading-6">{card.description}</p>
         {card.playerName ? (
@@ -750,29 +817,33 @@ function TokenStack({
     <div className="flex min-h-4 flex-wrap items-center justify-center gap-0.5" aria-label={`Tokens on ${space.name}`}>
       {players.map((player) => {
         const color = getPlayerColor(game, player.seat_order);
+        const shape = tokenShapeForSeat(player.seat_order);
         const isMovingToken = motion?.status === "moving" && motion.playerId === player.id;
         const isLandingToken = motion?.status === "settled" && motion.playerId === player.id;
         return (
           <span
             key={player.id}
             aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
-            className={`board-token group/token relative inline-flex size-4 items-center justify-center rounded-full border border-white text-[9px] font-black shadow-sm ring-2 ring-[#2f2418]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e] ${
+            className={`board-token group/token relative inline-grid size-5 place-items-center text-[9px] font-black shadow-sm ring-2 ring-[#2f2418]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e] ${
               isMovingToken ? "board-token-moving z-20" : ""
             } ${isLandingToken ? "board-token-landing z-20" : ""}`}
             data-token-landing={isLandingToken ? "true" : undefined}
             data-token-moving={isMovingToken ? "true" : undefined}
             data-player-id={player.id}
             data-player-token=""
+            data-token-shape={shape}
             data-space-index={space.position}
             style={{
-              backgroundColor: color,
               color: readableTextColor(color),
             }}
             tabIndex={0}
             title={player.name}
           >
             {isMovingToken || isLandingToken ? <span aria-hidden="true" className="board-token-trail" data-token-trail="" /> : null}
-            {tokenText(player.name, player.seat_order)}
+            <TokenSilhouette color={color} shape={shape} />
+            <span className="relative z-10 drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]">
+              {tokenText(player.name, player.seat_order)}
+            </span>
             <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-[#1f2a1f] px-1.5 py-0.5 text-[9px] font-bold text-white opacity-0 shadow-sm transition-opacity group-hover/token:opacity-100 group-focus/token:opacity-100" data-player-token-label="">
               {player.name}
             </span>

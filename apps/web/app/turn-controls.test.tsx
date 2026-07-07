@@ -1151,6 +1151,8 @@ describe("GamePlaySurface turn controls", () => {
     expect(modal).toHaveTextContent("Move to GO");
     expect(modal).toHaveTextContent("Move to GO and apply the normal pass-GO payout.");
     expect(modal).toHaveTextContent("Ada");
+    expect(modal).toHaveAttribute("data-card-deck", "chance");
+    expect(within(modal).getByRole("img", { name: "Chance card art" })).toBeVisible();
 
     fireEvent.click(within(modal).getByRole("button", { name: "Dismiss card" }));
     await waitFor(() => expect(within(board).queryByRole("dialog", { name: "Chance card" })).not.toBeInTheDocument());

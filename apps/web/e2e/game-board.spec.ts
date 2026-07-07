@@ -31,6 +31,8 @@ test("renders a 40-space board and updates token position after mocked state mov
   await expect(page.locator('[data-board-space][data-space-index="0"]')).toContainText("GO");
   await expect(page.locator('[data-board-space][data-space-index="39"]')).toContainText("Boardwalk");
   await expect(page.getByLabel("Ada token at GO, position 0")).toBeVisible();
+  await expect(page.getByLabel("Ada token at GO, position 0")).toHaveAttribute("data-token-shape", "shield");
+  await expect(page.getByLabel("Grace token at GO, position 0")).toHaveAttribute("data-token-shape", "diamond");
 
   const response = await page.request.post(
     `${mockApiBaseUrl}/__test/games/${encodeURIComponent(currentGameId(page.url()))}/players/0/position`,

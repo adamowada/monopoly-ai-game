@@ -62,15 +62,30 @@ Status: fail
 
 ## Runtime Verification
 
-- Current status: pending after implementation. This report must remain `Status: fail` until the latest code is built and verified after the ART_PLAN changes.
+- Current status: partial verification pass, full art-plan status still incomplete. This report must remain `Status: fail` until all ART_PLAN acceptance items are implemented, built, and visually verified.
+- Passing targeted component checks:
+  - `pnpm --filter @monopoly-ai-game/web exec vitest run app/game-board.test.tsx app/turn-controls.test.tsx`
+  - `pnpm --filter @monopoly-ai-game/web exec vitest run app/dashboard-shell.test.tsx app/game-setup.test.tsx app/turn-controls.test.tsx app/game-board.test.tsx app/game-page.test.tsx`
+- Passing targeted E2E checks:
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/app-shell.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-setup.spec.ts e2e/game-table-layout.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts e2e/game-table-layout.spec.ts e2e/ai-audit.spec.ts e2e/contracts-log.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/stage-11-3-playability-review.spec.ts e2e/stage-11-4-render-reliability.spec.ts --project=chrome`
+- Passing screenshot sanity check:
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/art-screenshot-sanity.spec.ts --project=chrome`
+  - This writes non-full-page desktop and mobile viewport screenshots to the Playwright per-test output directory and decodes their PNG data to verify expected dimensions and nonblank color variation.
+- Passing typecheck:
+  - `pnpm --filter @monopoly-ai-game/web run typecheck`
 - Required build command: `pnpm --filter @monopoly-ai-game/web run build`.
-- Required unit/component checks: targeted Vitest tests for board art, drawer behavior, player trays, and turn controls, followed by the broader web unit suite when shared components change.
-- Required E2E checks: Playwright desktop, tablet, and mobile coverage for board-first layout, hamburger drawer behavior, primary action visibility, and visual overlap/text fit.
-- Required screenshot evidence: fresh Playwright screenshots for desktop, tablet, and mobile game routes after the production or verification server is started.
+- Required remaining unit/component checks: broader web unit suite after the remaining deed/deal/contract/AI notebook changes.
+- Required remaining E2E checks: full web E2E suite after stale raw-ID/default-visible expectations are inverted for the next art passes.
+- Required remaining screenshot evidence: tablet viewport, contract-heavy state, AI-thinking state, rejected-action state, game-over state, and final production/build verification screenshots.
 - Required cleanup: stop any web/API servers started during verification and confirm their ports are no longer listening.
 
 ## Residual Risks
 
 - Implementation has not yet been completed against the rewritten `ART_PLAN.md`.
-- Runtime verification has not yet been rerun after the current art-direction changes.
-- The report is intentionally failing until current-state evidence proves the redesigned game surface meets the acceptance checklist.
+- Property management, negotiation, contracts, game log, and AI notebook still need deeper game-artifact treatment and raw technical-detail demotion.
+- Board token silhouettes and drawn-card art now have tests, but need final screenshot review for overlap/text fit under long names and five-player stacks.
+- The report is intentionally failing until current-state evidence proves the redesigned game surface meets the full acceptance checklist.
