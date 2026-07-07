@@ -45,3 +45,162 @@ textarea {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+
+.dice-motion-panel {
+  animation: dice-panel-pop 220ms ease-out both;
+}
+
+.dice-motion-panel[data-dice-motion="rolling"] .dice-motion-ring {
+  animation: dice-ring-pulse 620ms ease-out infinite;
+}
+
+.dice-motion-ring {
+  position: absolute;
+  inset: 0.35rem;
+  border: 2px solid rgba(15, 118, 110, 0.28);
+  border-radius: 0.5rem;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dice-motion-face[data-dice-tumble="true"] {
+  animation: dice-tumble 520ms cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  animation-delay: var(--dice-delay, 0ms);
+  box-shadow: 0 0.45rem 0.8rem rgba(31, 42, 31, 0.2);
+}
+
+.board-token-moving {
+  animation: token-hop 240ms ease-in-out infinite;
+  box-shadow: 0 0.35rem 0.8rem rgba(31, 42, 31, 0.28);
+}
+
+.board-token-landing {
+  animation: token-land 620ms cubic-bezier(0.2, 0.9, 0.24, 1.18) both;
+  box-shadow: 0 0.35rem 0.9rem rgba(31, 42, 31, 0.32);
+}
+
+.board-token-trail {
+  position: absolute;
+  inset: -0.15rem;
+  z-index: -1;
+  border: 2px solid rgba(15, 118, 110, 0.45);
+  border-radius: 999px;
+  animation: token-trail 520ms ease-out infinite;
+  pointer-events: none;
+}
+
+.board-token-landing .board-token-trail {
+  animation: token-trail 620ms ease-out 1;
+}
+
+.drawn-card-reveal {
+  animation: card-reveal 260ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+[data-card-modal] {
+  animation: card-scrim 180ms ease-out both;
+}
+
+@keyframes dice-panel-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -45%) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes dice-ring-pulse {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.84);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes dice-tumble {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  32% {
+    transform: translateY(-0.35rem) rotate(72deg);
+  }
+  68% {
+    transform: translateY(0.06rem) rotate(142deg);
+  }
+}
+
+@keyframes token-hop {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  45% {
+    transform: translateY(-0.28rem) scale(1.08);
+  }
+}
+
+@keyframes token-land {
+  0% {
+    transform: translateY(-0.45rem) scale(1.18);
+  }
+  42% {
+    transform: translateY(0.08rem) scale(1.18);
+  }
+  72% {
+    transform: translateY(-0.08rem) scale(1.08);
+  }
+  100% {
+    transform: translateY(0) scale(1.08);
+  }
+}
+
+@keyframes token-trail {
+  0% {
+    opacity: 0.65;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.1);
+  }
+}
+
+@keyframes card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(0.6rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes card-scrim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dice-motion-panel,
+  .dice-motion-face,
+  .board-token-moving,
+  .board-token-landing,
+  .board-token-trail,
+  .drawn-card-reveal,
+  [data-card-modal] {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

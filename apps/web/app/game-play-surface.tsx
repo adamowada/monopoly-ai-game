@@ -114,6 +114,11 @@ const savedGamesStorageKey = "monopoly-ai-game.saved-games";
 const cardsById = new Map<string, StaticDataCard>(
   [...CHANCE_DECK, ...COMMUNITY_CHEST_DECK].map((card) => [card.id, card]),
 );
+const diceRevealDelayMs = 700;
+const tokenStepDelayMs = 170;
+const tokenSettleDelayMs = 160;
+const motionClearDelayMs = 1200;
+const cardRevealDelayMs = 320;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -866,7 +871,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [aiStepResult, setAiStepResult] = useState<AiStepResponse | null>(null);
   const [autoStepAi, setAutoStepAi] = useState(false);
   const [boardMotion, setBoardMotion] = useState<BoardMotionState | null>(null);
+  const [queuedBoardMotion, setQueuedBoardMotion] = useState<BoardMotionState | null>(null);
   const [dismissedCardEventId, setDismissedCardEventId] = useState<string | null>(null);
+  const [revealedCardEventId, setRevealedCardEventId] = useState<string | null>(null);
   const [lastAutoStepKey, setLastAutoStepKey] = useState<string | null>(null);
   const [savedGames, setSavedGames] = useState<SavedGameRecord[]>(() => readSavedGames());
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
@@ -939,9 +946,44 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
   });
 
+  function playBoardMotion(nextMotion: BoardMotionState | null) {
+    setQueuedBoardMotion(null);
+    if (!nextMotion) {
+      setBoardMotion(null);
+      return;
+    }
+
+    if (nextMotion.dice && nextMotion.dice.length > 0) {
+      setQueuedBoardMotion(nextMotion);
+      setBoardMotion({
+        dice: nextMotion.dice,
+        displayPosition: nextMotion.fromPosition,
+        fromPosition: nextMotion.fromPosition,
+        motionKey: `${nextMotion.motionKey}:dice-reveal`,
+        playerId: nextMotion.playerId,
+        status: "rolling",
+        toPosition: nextMotion.toPosition,
+        total: nextMotion.total,
+      });
+      return;
+    }
+
+    setBoardMotion(nextMotion);
+  }
+
   useEffect(() => {
     if (!boardMotion) {
       return;
+    }
+
+    if (boardMotion.status === "rolling" && queuedBoardMotion) {
+      const revealTimer = window.setTimeout(() => {
+        setBoardMotion((current) =>
+          current?.motionKey === boardMotion.motionKey && current.status === "rolling" ? queuedBoardMotion : current,
+        );
+        setQueuedBoardMotion((current) => (current?.motionKey === queuedBoardMotion.motionKey ? null : current));
+      }, diceRevealDelayMs);
+      return () => window.clearTimeout(revealTimer);
     }
 
     if (boardMotion.status === "moving") {
@@ -952,7 +994,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
               ? { ...current, status: "settled" }
               : current,
           );
-        }, 100);
+        }, tokenSettleDelayMs);
         return () => window.clearTimeout(settleTimer);
       }
 
@@ -968,17 +1010,17 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
             stepIndex,
           };
         });
-      }, 60);
+      }, tokenStepDelayMs);
       return () => window.clearTimeout(moveTimer);
     }
 
     if (boardMotion.status === "settled") {
       const clearTimer = window.setTimeout(() => {
         setBoardMotion((current) => (current?.motionKey === boardMotion.motionKey ? null : current));
-      }, 1400);
+      }, motionClearDelayMs);
       return () => window.clearTimeout(clearTimer);
     }
-  }, [boardMotion]);
+  }, [boardMotion, queuedBoardMotion]);
 
   useEffect(() => {
     if (typeof EventSource === "undefined") {
@@ -1017,6 +1059,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     onMutate: (action) => {
       setLocalRejectedAction(null);
       setPendingActionType(action.type);
+      setQueuedBoardMotion(null);
       setBoardMotion(
         action.type === "ROLL_DICE"
           ? {
@@ -1027,10 +1070,10 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           : null,
       );
     },
-    onSuccess: (result) => {
+    onSuccess: (result, action) => {
       if (result.status === "accepted") {
         setAcceptedEvents(result.accepted_events);
-        setBoardMotion((current) => boardMotionFromAcceptedEvents(result.accepted_events, current?.playerId ?? ""));
+        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, action.actor_id));
         queryClient.setQueryData<GameStateResponse>(["game-state", gameId], {
           game_id: gameId,
           state: result.state,
@@ -1050,6 +1093,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         return;
       }
 
+      setQueuedBoardMotion(null);
       setBoardMotion(null);
       setLocalRejectedAction(result);
       void Promise.all([
@@ -1065,6 +1109,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       setPendingActionType(null);
     },
     onError: () => {
+      setQueuedBoardMotion(null);
       setBoardMotion(null);
     },
   });
@@ -1107,13 +1152,14 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       }),
     onMutate: () => {
       setAiStepResult(null);
+      setQueuedBoardMotion(null);
       setBoardMotion(null);
     },
     onSuccess: (result) => {
       setAiStepResult(result);
       if (result.accepted_events.length > 0) {
         setAcceptedEvents(result.accepted_events);
-        setBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, result.player_id));
+        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, result.player_id));
       }
       void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
     },
@@ -1153,7 +1199,25 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     () => latestDrawnCardFromEvents(visibleEvents, playersById),
     [playersById, visibleEvents],
   );
-  const visibleDrawnCard = latestDrawnCard?.eventId === dismissedCardEventId ? null : latestDrawnCard;
+  const latestDrawnCardEventId = latestDrawnCard?.eventId ?? null;
+  useEffect(() => {
+    if (!latestDrawnCardEventId || latestDrawnCardEventId === dismissedCardEventId || latestDrawnCardEventId === revealedCardEventId) {
+      return;
+    }
+    if (boardMotion?.status === "rolling" || boardMotion?.status === "moving") {
+      return;
+    }
+
+    const revealTimer = window.setTimeout(
+      () => setRevealedCardEventId(latestDrawnCardEventId),
+      boardMotion?.status === "settled" ? cardRevealDelayMs : 0,
+    );
+    return () => window.clearTimeout(revealTimer);
+  }, [boardMotion?.motionKey, boardMotion?.status, dismissedCardEventId, latestDrawnCardEventId, revealedCardEventId]);
+  const visibleDrawnCard =
+    latestDrawnCard && latestDrawnCard.eventId !== dismissedCardEventId && latestDrawnCard.eventId === revealedCardEventId
+      ? latestDrawnCard
+      : null;
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading;
   const gameAiBlocked = game.status === "AI_BLOCKED";
   const gameEnded = game.status.toLowerCase() === "ended";

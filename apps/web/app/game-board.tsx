@@ -33,6 +33,9 @@ export type BoardMotion =
   | {
       status: "rolling";
       playerId: string | null;
+      displayPosition?: number;
+      fromPosition?: number;
+      toPosition?: number;
       dice?: number[];
       total?: number;
     }
@@ -146,7 +149,10 @@ function snapshotPlayerPosition(snapshot: GameStateResponse | undefined, playerI
 }
 
 function playerPosition(player: GamePlayer, snapshot: GameStateResponse | undefined, motion: BoardMotion | undefined): number {
-  if (motion?.status === "moving" && motion.playerId === player.id) {
+  if (motion?.status === "rolling" && motion.playerId === player.id && typeof motion.displayPosition === "number") {
+    return normalizedPosition(motion.displayPosition);
+  }
+  if ((motion?.status === "moving" || motion?.status === "settled") && motion.playerId === player.id) {
     return normalizedPosition(motion.displayPosition);
   }
   return snapshotPlayerPosition(snapshot, player.id) ?? normalizedPosition(player.state.position);
@@ -357,13 +363,16 @@ function CenterBoardArt() {
   );
 }
 
-function DiceFace({ value, rolling }: Readonly<{ value: number | "?"; rolling: boolean }>) {
+function DiceFace({ index, rolling, value }: Readonly<{ index: number; rolling: boolean; value: number | "?" }>) {
+  const style = rolling ? ({ "--dice-delay": `${index * 90}ms` } as CSSProperties) : undefined;
+
   return (
     <span
       aria-hidden="true"
-      className={`grid size-9 place-items-center rounded-md border-2 border-[#1f2a1f] bg-white text-base font-black text-[#1f2a1f] shadow-sm ${
-        rolling ? "animate-bounce" : ""
-      }`}
+      className="dice-motion-face grid size-9 place-items-center rounded-md border-2 border-[#1f2a1f] bg-white text-base font-black text-[#1f2a1f] shadow-sm"
+      data-dice-face=""
+      data-dice-tumble={rolling ? "true" : undefined}
+      style={style}
     >
       {value}
     </span>
@@ -378,22 +387,29 @@ function DiceMotionStatus({ motion }: Readonly<{ motion?: BoardMotion }>) {
   const dice: Array<number | "?"> = motion.dice && motion.dice.length > 0 ? motion.dice : ["?", "?"];
   const diceLabel = motion.dice && motion.dice.length > 0 ? motion.dice.join(" + ") : "Rolling dice";
   const totalLabel = typeof motion.total === "number" ? ` = ${motion.total}` : "";
+  const primaryLabel = motion.dice && motion.dice.length > 0 ? `${diceLabel}${totalLabel}` : "Rolling dice";
   const movementLabel =
-    motion.status === "moving" ? `Moving ${motion.fromPosition} to ${motion.toPosition}` : rolling ? "Rolling dice" : "Roll complete";
+    motion.status === "moving"
+      ? `Moving ${motion.fromPosition} to ${motion.toPosition}`
+      : rolling
+        ? "Dice in motion"
+        : "Landed";
 
   return (
     <div
       aria-label="Dice roll animation"
       aria-live="polite"
-      className="absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]"
+      className="dice-motion-panel absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]"
+      data-dice-motion={motion.status}
       role="status"
     >
-      <div className="flex justify-center gap-1.5">
+      <span aria-hidden="true" className="dice-motion-ring" />
+      <div className="relative flex justify-center gap-1.5">
         {dice.map((value, index) => (
-          <DiceFace key={`${value}-${index}`} rolling={rolling} value={value} />
+          <DiceFace key={`${value}-${index}`} index={index} rolling={rolling} value={value} />
         ))}
       </div>
-      <p className="mt-1 text-[10px] font-black uppercase">{rolling ? "Rolling dice" : `${diceLabel}${totalLabel}`}</p>
+      <p className="relative mt-1 text-[10px] font-black uppercase">{primaryLabel}</p>
       <p className="text-[9px] font-semibold uppercase text-[#456038]">{movementLabel}</p>
     </div>
   );
@@ -415,7 +431,8 @@ function DrawnCardModal({
       <article
         aria-label={`${card.deckLabel} card`}
         aria-modal="true"
-        className="w-full max-w-sm rounded-md border-2 border-[#1f2a1f] bg-[#fffbea] p-4 text-left text-[#1f2a1f] shadow-[0_22px_60px_rgba(31,42,31,0.38)]"
+        className="drawn-card-reveal w-full max-w-sm rounded-md border-2 border-[#1f2a1f] bg-[#fffbea] p-4 text-left text-[#1f2a1f] shadow-[0_22px_60px_rgba(31,42,31,0.38)]"
+        data-card-reveal=""
         role="dialog"
       >
         <div className="flex items-start justify-between gap-3 border-b border-[#1f2a1f]/25 pb-3">
@@ -543,10 +560,12 @@ function RotateBoardButton({ onRotate }: Readonly<{ onRotate: () => void }>) {
 
 function TokenStack({
   game,
+  motion,
   players,
   space,
 }: Readonly<{
   game: GameMetadata;
+  motion?: BoardMotion;
   players: GamePlayer[];
   space: StaticDataBoardSpace;
 }>) {
@@ -554,11 +573,17 @@ function TokenStack({
     <div className="flex min-h-4 flex-wrap items-center justify-center gap-0.5" aria-label={`Tokens on ${space.name}`}>
       {players.map((player) => {
         const color = getPlayerColor(game, player.seat_order);
+        const isMovingToken = motion?.status === "moving" && motion.playerId === player.id;
+        const isLandingToken = motion?.status === "settled" && motion.playerId === player.id;
         return (
           <span
             key={player.id}
             aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
-            className="group/token relative inline-flex size-4 items-center justify-center rounded-full border border-white text-[9px] font-black shadow-sm ring-2 ring-[#2f2418]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e]"
+            className={`board-token group/token relative inline-flex size-4 items-center justify-center rounded-full border border-white text-[9px] font-black shadow-sm ring-2 ring-[#2f2418]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e] ${
+              isMovingToken ? "board-token-moving z-20" : ""
+            } ${isLandingToken ? "board-token-landing z-20" : ""}`}
+            data-token-landing={isLandingToken ? "true" : undefined}
+            data-token-moving={isMovingToken ? "true" : undefined}
             data-player-id={player.id}
             data-player-token=""
             data-space-index={space.position}
@@ -569,6 +594,7 @@ function TokenStack({
             tabIndex={0}
             title={player.name}
           >
+            {isMovingToken || isLandingToken ? <span aria-hidden="true" className="board-token-trail" data-token-trail="" /> : null}
             {tokenText(player.name, player.seat_order)}
             <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-[#1f2a1f] px-1.5 py-0.5 text-[9px] font-bold text-white opacity-0 shadow-sm transition-opacity group-hover/token:opacity-100 group-focus/token:opacity-100" data-player-token-label="">
               {player.name}
@@ -583,12 +609,14 @@ function TokenStack({
 function StreetPropertyCell({
   bandColor,
   game,
+  motion,
   players,
   property,
   space,
 }: Readonly<{
   bandColor: string;
   game: GameMetadata;
+  motion?: BoardMotion;
   players: GamePlayer[];
   property: StaticDataProperty;
   space: StaticDataBoardSpace;
@@ -600,7 +628,7 @@ function StreetPropertyCell({
         <p className="break-words text-[8px] font-black leading-[0.9] text-[#1f2a1f] uppercase" data-space-name="">
           {space.name}
         </p>
-        <TokenStack game={game} players={players} space={space} />
+        <TokenStack game={game} motion={motion} players={players} space={space} />
         <p className="text-[9px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
           {money(property.price)}
         </p>
@@ -613,12 +641,14 @@ function OtherSpaceCell({
   bottom,
   game,
   isCorner,
+  motion,
   players,
   space,
 }: Readonly<{
   bottom: string | null;
   game: GameMetadata;
   isCorner: boolean;
+  motion?: BoardMotion;
   players: GamePlayer[];
   space: StaticDataBoardSpace;
 }>) {
@@ -629,7 +659,7 @@ function OtherSpaceCell({
         {space.name}
       </p>
       <SpaceMotif art={art} className="mx-auto h-[42%] min-h-6 w-full max-w-14 shrink" />
-      <TokenStack game={game} players={players} space={space} />
+      <TokenStack game={game} motion={motion} players={players} space={space} />
       {bottom ? (
         <p className="text-[8px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
           {bottom}
@@ -667,6 +697,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
     <section
       aria-label="Classic Monopoly-style board"
       className="relative rounded-md border border-[#2f2418]/35 bg-[#eaf3d7] p-2 shadow-[0_18px_40px_rgba(47,36,24,0.18)]"
+      data-board-motion={motion?.status ?? "idle"}
     >
       <RotateBoardButton onRotate={() => setBoardRotation((rotation) => (rotation + 90) % 360)} />
       <div
@@ -739,9 +770,9 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
               >
                 <OrientedSpaceContent rotation={contentRotation}>
                   {property?.kind === "street" && bandColor ? (
-                    <StreetPropertyCell bandColor={bandColor} game={game} players={players} property={property} space={space} />
+                    <StreetPropertyCell bandColor={bandColor} game={game} motion={motion} players={players} property={property} space={space} />
                   ) : (
-                    <OtherSpaceCell bottom={label} game={game} isCorner={isCorner} players={players} space={space} />
+                    <OtherSpaceCell bottom={label} game={game} isCorner={isCorner} motion={motion} players={players} space={space} />
                   )}
                 </OrientedSpaceContent>
               </div>

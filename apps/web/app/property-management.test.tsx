@@ -9,6 +9,14 @@ import { PropertyManagementPanel } from "./property-management";
 import type { GameStateResponse, LegalAction } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
 
+const routerMock = vi.hoisted(() => ({
+  push: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => routerMock,
+}));
+
 const createdAt = "2026-07-04T00:00:00.000Z";
 const apiBaseUrl = "http://api.test";
 const gameId = "game-property-management";
@@ -323,6 +331,7 @@ function baseFetchMock({
 }
 
 afterEach(() => {
+  routerMock.push.mockReset();
   vi.unstubAllGlobals();
 });
 

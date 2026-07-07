@@ -190,8 +190,11 @@ describe("ClassicGameBoard", () => {
     );
 
     const diceStatus = screen.getByRole("status", { name: "Dice roll animation" });
+    expect(diceStatus).toHaveAttribute("data-dice-motion", "moving");
     expect(diceStatus).toHaveTextContent("3 + 4");
-    expect(screen.getByLabelText("Ada token at GO, position 0")).toBeInTheDocument();
+    const movingToken = screen.getByLabelText("Ada token at GO, position 0");
+    expect(movingToken).toHaveAttribute("data-token-moving", "true");
+    expect(movingToken.querySelector("[data-token-trail]")).toBeInTheDocument();
 
     rerender(
       <ClassicGameBoard
@@ -210,5 +213,63 @@ describe("ClassicGameBoard", () => {
 
     expect(screen.getByLabelText("Ada token at Baltic Avenue, position 3")).toBeInTheDocument();
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
+  });
+
+  it("renders rolling dice as a staged animation and marks the landing token", () => {
+    const { rerender } = render(
+      <ClassicGameBoard
+        game={gameFixture([7, 0])}
+        motion={{
+          dice: [3, 4],
+          playerId: "player-1",
+          status: "rolling",
+          total: 7,
+        }}
+      />,
+    );
+
+    const diceStatus = screen.getByRole("status", { name: "Dice roll animation" });
+    expect(diceStatus).toHaveAttribute("data-dice-motion", "rolling");
+    expect(diceStatus.querySelectorAll("[data-dice-tumble]")).toHaveLength(2);
+    expect(diceStatus).toHaveTextContent("3 + 4 = 7");
+
+    rerender(
+      <ClassicGameBoard
+        game={gameFixture([7, 0])}
+        motion={{
+          dice: [3, 4],
+          displayPosition: 7,
+          fromPosition: 0,
+          playerId: "player-1",
+          status: "settled",
+          toPosition: 7,
+          total: 7,
+        }}
+      />,
+    );
+
+    const landedToken = screen.getByLabelText("Ada token at Chance, position 7");
+    expect(landedToken).toHaveAttribute("data-token-landing", "true");
+    expect(landedToken.querySelector("[data-token-trail]")).toBeInTheDocument();
+  });
+
+  it("presents drawn cards with a board-centered reveal treatment", () => {
+    render(
+      <ClassicGameBoard
+        drawnCard={{
+          description: "Move to GO and collect the payout.",
+          deckLabel: "Chance",
+          eventId: "card-event-1",
+          playerName: "Ada",
+          title: "Move to GO",
+        }}
+        game={gameFixture([7, 0])}
+      />,
+    );
+
+    const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
+    const modal = within(board).getByRole("dialog", { name: "Chance card" });
+    expect(modal).toHaveAttribute("data-card-reveal");
+    expect(modal).toHaveTextContent("Move to GO");
   });
 });

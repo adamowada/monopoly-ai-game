@@ -518,6 +518,7 @@ function baseFetchMock({
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   FakeEventSource.instances = [];
   window.localStorage.clear();
   routerMock.push.mockReset();
@@ -614,7 +615,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(await screen.findByLabelText("Ada token at GO, position 0")).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
 
-    expect(await screen.findByLabelText("Ada token at Chance, position 7", {}, { timeout: 3_000 })).toBeVisible();
+    expect(await screen.findByLabelText("Ada token at Chance, position 7", {}, { timeout: 6_000 })).toBeVisible();
     expect(screen.getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("3 + 4");
     const activePlayer = screen.getByRole("region", { name: "Active player" });
     expect(within(activePlayer).getByText("Space")).toBeInTheDocument();
@@ -660,7 +661,21 @@ describe("GamePlaySurface turn controls", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
 
     const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
-    const modal = await within(board).findByRole("dialog", { name: "Chance card" });
+    await waitFor(() =>
+      expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute(
+        "data-dice-motion",
+        "rolling",
+      ),
+    );
+    await waitFor(() =>
+      expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("3 + 4 = 7"),
+    );
+    expect(within(board).queryByRole("dialog", { name: "Chance card" })).not.toBeInTheDocument();
+
+    await waitFor(() => expect(board).toHaveAttribute("data-board-motion", "moving"), { timeout: 2_000 });
+    expect(within(board).queryByRole("dialog", { name: "Chance card" })).not.toBeInTheDocument();
+
+    const modal = await within(board).findByRole("dialog", { name: "Chance card" }, { timeout: 6_000 });
     expect(modal).toHaveTextContent("Move to GO");
     expect(modal).toHaveTextContent("Move to GO and apply the normal pass-GO payout.");
     expect(modal).toHaveTextContent("Ada");
