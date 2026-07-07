@@ -40,7 +40,16 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   expect(submitted.headers()["idempotency-key"]).toBeTruthy();
   expect(submitted.postDataJSON()).toMatchObject({ type: "ROLL_DICE" });
 
+  const slidingToken = page.locator("[data-token-slide='true']").first();
+  await expect(slidingToken).toBeVisible();
+  await expect(slidingToken).toHaveClass(/board-token-motion-overlay/);
+  await expect(page.getByRole("status", { name: "Board movement" })).toBeVisible();
+  await expect
+    .poll(() => slidingToken.evaluate((element) => window.getComputedStyle(element).transitionDuration))
+    .toContain("0.38s");
+
   await expect(page.getByLabel("Ada token at Chance, position 7")).toBeVisible();
+  await expect(page.getByRole("status", { name: "Board landing" })).toContainText("Ada landed on Chance");
   await expect(page.getByLabel("Ada token at GO, position 0")).toHaveCount(0);
   await page.getByRole("tab", { name: "Contracts" }).click();
   const log = page.getByRole("region", { name: "Game log" });

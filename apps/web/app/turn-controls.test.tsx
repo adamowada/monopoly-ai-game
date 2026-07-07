@@ -1103,7 +1103,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(diceStatus).toHaveTextContent("2 + 3 = 5");
     await waitFor(
       () =>
-        expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent(
+        expect(within(board).getByRole("status", { name: "Board landing" })).toHaveTextContent(
           "Ada landed on Reading Railroad",
         ),
       { timeout: 3_000 },

@@ -95,13 +95,14 @@ textarea {
 
 .board-token-motion-overlay {
   transform: translate(-50%, -50%);
+  will-change: left, top, transform;
   transition:
-    left 220ms ease-out,
-    top 220ms ease-out;
+    left 380ms cubic-bezier(0.22, 0.86, 0.26, 1),
+    top 380ms cubic-bezier(0.22, 0.86, 0.26, 1);
 }
 
 .board-token-motion-overlay.board-token-moving {
-  animation: token-overlay-hop 240ms ease-in-out infinite;
+  animation: token-overlay-hop 440ms ease-in-out infinite;
 }
 
 .drawn-card-reveal {

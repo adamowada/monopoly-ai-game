@@ -144,7 +144,7 @@ const cardsById = new Map<string, StaticDataCard>(
   [...CHANCE_DECK, ...COMMUNITY_CHEST_DECK].map((card) => [card.id, card]),
 );
 const diceRevealDelayMs = 700;
-const tokenStepDelayMs = 260;
+const tokenStepDelayMs = 440;
 const tokenSettleDelayMs = 160;
 const motionClearDelayMs = 1200;
 const cardRevealDelayMs = 320;

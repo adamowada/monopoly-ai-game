@@ -350,6 +350,8 @@ describe("ClassicGameBoard", () => {
     expect(diceStatus).toHaveTextContent("3 + 4");
     const movingToken = screen.getByLabelText("Ada token at GO, position 0");
     expect(movingToken).toHaveAttribute("data-token-motion-overlay", "true");
+    expect(movingToken).toHaveAttribute("data-token-slide", "true");
+    expect(movingToken).toHaveClass("board-token-motion-overlay");
     expect(movingToken).toHaveAttribute("data-token-moving", "true");
     expect(movingToken.querySelector("[data-token-trail]")).toBeInTheDocument();
 
@@ -374,6 +376,7 @@ describe("ClassicGameBoard", () => {
       "data-token-motion-overlay",
       "true",
     );
+    expect(screen.getByRole("status", { name: "Board movement" })).toHaveTextContent("Ada moving to Baltic Avenue");
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
   });
 
@@ -420,7 +423,11 @@ describe("ClassicGameBoard", () => {
     const landedToken = screen.getByLabelText("Ada token at Chance, position 7");
     expect(landedToken).toHaveAttribute("data-token-landing", "true");
     expect(landedToken.querySelector("[data-token-trail]")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("Ada landed on Chance");
+    expect(screen.getByRole("status", { name: "Dice roll animation" })).not.toHaveTextContent("Ada landed on Chance");
+    const centerBoard = screen.getByTestId("center-board-art");
+    expect(within(centerBoard).getByRole("status", { name: "Board landing" })).toHaveTextContent(
+      "Ada landed on Chance",
+    );
   });
 
   it("presents drawn cards with deck art and keyboard dismissal", () => {

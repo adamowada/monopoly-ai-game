@@ -461,9 +461,39 @@ function WinnerBoardCelebration({ winner }: Readonly<{ winner: GamePlayer }>) {
   );
 }
 
-function CenterBoardArt({ winner }: Readonly<{ winner: GamePlayer | null }>) {
+function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
+  if (!motion || motion.status === "rolling") {
+    return null;
+  }
+  const playerLabel = motion.playerName?.trim() || "Player";
+  const currentSpaceName = motion.status === "moving" ? spaceNameForPosition(motion.displayPosition) : null;
+  const landedSpaceName = motion.landedSpaceName ?? spaceNameForPosition(motion.toPosition);
+  const isLanding = motion.status === "settled";
+  const message = isLanding
+    ? `${playerLabel} landed on ${landedSpaceName ?? "the board"}`
+    : `${playerLabel} moving to ${currentSpaceName ?? landedSpaceName ?? "next space"}`;
+
   return (
-    <div className="col-start-3 col-end-12 row-start-3 row-end-12 overflow-hidden border-4 border-[#2f2418] bg-[#eaf3d7] p-3 text-[#2f2418] shadow-inner">
+    <div
+      aria-label={isLanding ? "Board landing" : "Board movement"}
+      aria-live="polite"
+      className="relative mx-auto my-2 w-full max-w-md rounded border-2 border-[#2f2418] bg-[#fffbea] px-3 py-2 text-center text-[#1f2a1f] shadow-[0_6px_0_rgba(47,36,24,0.18)]"
+      data-board-motion-banner={motion.status}
+      role="status"
+    >
+      <p className="text-[10px] font-black uppercase text-[#6f604c]">{isLanding ? "Landed" : "Moving"}</p>
+      <p className="mt-0.5 break-words text-xs font-black leading-tight">{message}</p>
+    </div>
+  );
+}
+
+function CenterBoardArt({ motion, winner }: Readonly<{ motion?: BoardMotion; winner: GamePlayer | null }>) {
+  return (
+    <div
+      className="col-start-3 col-end-12 row-start-3 row-end-12 overflow-hidden border-4 border-[#2f2418] bg-[#eaf3d7] p-3 text-[#2f2418] shadow-inner"
+      data-center-board-art=""
+      data-testid="center-board-art"
+    >
       <div className="relative flex h-full min-h-0 flex-col justify-between overflow-hidden border border-[#2f2418]/20 bg-[#eaf3d7] p-3">
         {winner ? (
           <WinnerBoardCelebration winner={winner} />
@@ -472,6 +502,8 @@ function CenterBoardArt({ winner }: Readonly<{ winner: GamePlayer | null }>) {
             <div className="relative">
               <BoardTitleMark />
             </div>
+
+            <BoardMotionBanner motion={motion} />
 
             <div className="relative grid min-h-0 grid-cols-2 gap-3">
               <DeckArtPreview deck={DECK_ART.chance} />
@@ -533,15 +565,8 @@ function DiceMotionStatus({ motion }: Readonly<{ motion?: BoardMotion }>) {
   const diceLabel = motion.dice && motion.dice.length > 0 ? motion.dice.join(" + ") : "Rolling dice";
   const totalLabel = typeof motion.total === "number" ? ` = ${motion.total}` : "";
   const primaryLabel = motion.dice && motion.dice.length > 0 ? `${diceLabel}${totalLabel}` : "Rolling dice";
-  const playerLabel = motion.playerName?.trim() || "Player";
-  const currentSpaceName = motion.status === "moving" ? spaceNameForPosition(motion.displayPosition) : null;
-  const landedSpaceName = motion.landedSpaceName ?? spaceNameForPosition(motion.toPosition);
-  let movementLabel = "Dice in motion";
-  if (motion.status === "moving") {
-    movementLabel = `${playerLabel} moving to ${currentSpaceName ?? landedSpaceName ?? "next space"}`;
-  } else if (motion.status === "settled") {
-    movementLabel = `${playerLabel} landed on ${landedSpaceName ?? "the board"}`;
-  }
+  const movementLabel =
+    motion.status === "rolling" ? "Dice in motion" : motion.status === "moving" ? "Token moving" : "Dice resolved";
 
   return (
     <div
@@ -910,6 +935,7 @@ function MotionTokenOverlay({
       data-space-index={space.position}
       data-token-motion-overlay="true"
       data-token-moving="true"
+      data-token-slide="true"
       data-token-shape={shape}
       style={tokenOverlayStyle(position, color)}
       tabIndex={0}
@@ -1050,7 +1076,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
             transformOrigin: "center",
           }}
         >
-          <CenterBoardArt winner={winner} />
+          <CenterBoardArt motion={motion} winner={winner} />
 
           {BOARD_SPACES.map((space) => {
             const coordinates = boardCoordinates(space.position);
