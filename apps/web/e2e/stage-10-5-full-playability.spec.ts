@@ -296,7 +296,7 @@ test("completes a 5-player mixed human/fake-AI full-table browser round", async 
   await auction.getByRole("group", { name: "Marie auction controls" }).getByRole("button", { name: "Step AI" }).click();
   await auction.getByRole("group", { name: "Nia auction controls" }).getByRole("button", { name: "Step AI" }).click();
 
-  await expect(auction).toContainText("Grace won Mediterranean Avenue for $1");
+  await expect(page.getByRole("region", { name: "Turn context" })).toContainText("Grace won Mediterranean Avenue for $1");
   await expect(page.getByRole("region", { name: "Property detail: Mediterranean Avenue" })).toContainText("Owner Grace");
   await expect(log).toContainText("AUCTION_RESULT");
 

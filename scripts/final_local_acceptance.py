@@ -57,7 +57,7 @@ def run_final_browser_spec() -> None:
             "playwright",
             "test",
             FINAL_SPEC,
-            "--project=chromium",
+            "--project=chrome",
         ],
         timeout=900,
         env=env,

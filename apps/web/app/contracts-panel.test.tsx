@@ -290,7 +290,7 @@ function createContractsFetchMock({
   });
 }
 
-function renderPanel(fetchMock: FetchMock) {
+function renderPanel(fetchMock: FetchMock, events: AcceptedEvent[] = eventsFixture()) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: 0 },
@@ -306,7 +306,7 @@ function renderPanel(fetchMock: FetchMock) {
   render(
     <ContractsPanel
       apiBaseUrl={apiBaseUrl}
-      events={eventsFixture()}
+      events={events}
       game={gameFixture()}
       gameId={gameId}
       rejectedActions={[rejectedActionFixture()]}
@@ -402,5 +402,27 @@ describe("ContractsPanel", () => {
     fireEvent.click(within(log).getByLabelText("Rejections"));
     expect(log).not.toHaveTextContent("Rejected action");
     expect(log).toHaveTextContent("No log entries match the selected filters.");
+  });
+
+  it("caps mounted log rows for long browser play sessions while preserving the full count", async () => {
+    const longEvents = Array.from({ length: 320 }, (_, index): AcceptedEvent => ({
+      id: `long-event-${index + 1}`,
+      game_id: gameId,
+      sequence: index + 1,
+      actor_player_id: adaId,
+      event_type: "TURN_STATE_SET",
+      payload: { summary: `Long session event ${index + 1}` },
+      state_hash: `state-${index + 1}`,
+      created_at: new Date(Date.UTC(2026, 6, 4, 0, 0, index)).toISOString(),
+    }));
+    renderPanel(createContractsFetchMock({ deals: [] }), longEvents);
+
+    const log = await screen.findByRole("region", { name: "Game log" });
+    await within(log).findByText("Long session event 320");
+
+    expect(log).toHaveTextContent("200 of 321 shown");
+    expect(within(log).getAllByRole("listitem")).toHaveLength(200);
+    expect(within(log).queryByText("Long session event 1", { exact: true })).not.toBeInTheDocument();
+    expect(log).toHaveTextContent("Long session event 320");
   });
 });

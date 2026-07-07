@@ -28,7 +28,8 @@ WEB_PACKAGE_SCRIPTS = {
     "start": "node scripts/start.mjs",
     "test": "pnpm run test:unit && pnpm run test:e2e",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --project=chrome",
+    "test:e2e:chrome": "playwright test --project=chrome",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
 }
@@ -150,15 +151,15 @@ def check_web_surface() -> None:
     page = read_text("apps/web/app/page.tsx")
     dashboard = read_text("apps/web/app/dashboard-shell.tsx")
     for marker in [
-        "Local Game Research Console",
+        "Monopoly 2.0 Game Table",
         "readBackendHealth",
     ]:
         require(marker in page, f"apps/web/app/page.tsx missing {marker!r}")
     for marker in [
-        "Phase 1 Stage 1.4",
-        "Next.js app",
-        "FastAPI service",
-        "Postgres",
+        "Rules referee",
+        "Game table",
+        "AI notebook",
+        "referee-checked moves",
     ]:
         require(marker in dashboard, f"apps/web/app/dashboard-shell.tsx missing {marker!r}")
 

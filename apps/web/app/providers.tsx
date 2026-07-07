@@ -9,6 +9,7 @@ export function Providers({ children }: Readonly<{ children: React.ReactNode }>)
       new QueryClient({
         defaultOptions: {
           queries: {
+            gcTime: 60_000,
             refetchOnWindowFocus: false,
             retry: 1,
           },

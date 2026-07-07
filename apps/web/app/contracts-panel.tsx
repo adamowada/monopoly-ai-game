@@ -51,6 +51,7 @@ const filterLabels: Record<LogFilter, string> = {
   rejections: "Rejections",
 };
 
+const maxRenderedLogEntries = 200;
 const upcomingStatuses = new Set<ObligationRecord["status"]>(["pending", "due", "scheduled"]);
 
 function formatDate(value: string | null | undefined): string {
@@ -576,6 +577,11 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
   });
 
   const visibleEntries = entries.filter((entry) => filters[entry.kind]);
+  const renderedEntries = visibleEntries.slice(-maxRenderedLogEntries);
+  const shownCountText =
+    renderedEntries.length < visibleEntries.length
+      ? `${renderedEntries.length} of ${visibleEntries.length} shown`
+      : `${visibleEntries.length} shown`;
 
   function toggleFilter(filter: LogFilter) {
     setFilters((current) => ({ ...current, [filter]: !current[filter] }));
@@ -590,7 +596,7 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
         </div>
         <div className="flex items-center gap-2 text-xs text-neutral-500">
           <ListFilter aria-hidden="true" className="size-3.5" />
-          <span>{visibleEntries.length} shown</span>
+          <span>{shownCountText}</span>
         </div>
       </div>
 
@@ -606,7 +612,7 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
         </div>
       ) : (
         <ol className="mt-3 divide-y divide-neutral-200 text-sm">
-          {visibleEntries.map((entry) => (
+          {renderedEntries.map((entry) => (
             <li key={entry.id} className="py-2">
               <div className="flex items-start gap-2">
                 <LogKindIcon kind={entry.kind} />

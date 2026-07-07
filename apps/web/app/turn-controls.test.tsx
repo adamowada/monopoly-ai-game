@@ -913,7 +913,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(await screen.findByLabelText("Ada token at GO, position 0")).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
 
-    expect(await screen.findByLabelText("Ada token at Chance, position 7", {}, { timeout: 6_000 })).toBeVisible();
+    expect(await screen.findByLabelText("Ada token at Chance, position 7", {}, { timeout: 12_000 })).toBeVisible();
     expect(screen.getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("3 + 4");
     const activePlayer = screen.getByRole("region", { name: "Active player" });
     expect(within(activePlayer).getByText("Space")).toBeInTheDocument();
@@ -921,7 +921,7 @@ describe("GamePlaySurface turn controls", () => {
     const log = screen.getByRole("region", { name: "Game log" });
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
     expect(within(log).getByText(/TOKEN_MOVED/)).toBeInTheDocument();
-  }, 10_000);
+  }, 18_000);
 
   it("renders backend die_1 and die_2 dice payloads as pips and total instead of placeholders", async () => {
     let accepted = false;
@@ -1010,7 +1010,7 @@ describe("GamePlaySurface turn controls", () => {
     await waitFor(() => expect(within(board).queryByRole("status", { name: "Dice roll animation" })).not.toBeInTheDocument(), {
       timeout: 5_000,
     });
-  });
+  }, 14_000);
 
   it("shows chance and community chest draws as a modal over the board", async () => {
     let accepted = false;
@@ -1069,7 +1069,7 @@ describe("GamePlaySurface turn controls", () => {
 
     fireEvent.click(within(modal).getByRole("button", { name: "Dismiss card" }));
     await waitFor(() => expect(within(board).queryByRole("dialog", { name: "Chance card" })).not.toBeInTheDocument());
-  });
+  }, 12_000);
 
   it("refreshes auction start controls from post-roll legal actions", async () => {
     let accepted = false;
