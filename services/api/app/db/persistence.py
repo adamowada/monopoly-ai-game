@@ -549,10 +549,17 @@ async def _update_game_current_state(
     game_id: UUID,
     state: GameState,
 ) -> None:
+    game_values: dict[str, Any] = {
+        "current_phase": state.turn.phase.value,
+        "updated_at": sa.func.now(),
+    }
+    if state.turn.phase.value == "GAME_OVER":
+        game_values["status"] = "ended"
+
     await session.execute(
         games.update()
         .where(games.c.id == game_id)
-        .values(current_phase=state.turn.phase.value, updated_at=sa.func.now())
+        .values(**game_values)
     )
     for player_state in state.players:
         await session.execute(

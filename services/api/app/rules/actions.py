@@ -34,6 +34,7 @@ from app.rules.mechanics import (
     close_auction,
     declare_bankruptcy,
     end_turn,
+    is_game_over,
     mortgage_property,
     pass_auction,
     pay_jail_fine,
@@ -560,8 +561,8 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
         creditor_id = _bankruptcy_creditor_for_payload(state, action.actor_id, payload)
         next_state = declare_bankruptcy(state, action.actor_id, creditor_id, event_id_prefix)
         if state.active_payment is not None and state.active_payment.debtor_id == action.actor_id:
-            return clear_active_debt(next_state, event_id_prefix)
-        return next_state
+            next_state = clear_active_debt(next_state, event_id_prefix)
+        return _complete_bankruptcy_action(next_state, event_id_prefix)
 
     if action.type == "SETTLE_DEBT":
         next_state = settle_debt_with_cash(
@@ -851,6 +852,14 @@ def _complete_resolved_timing_window(state: GameState, event_id_prefix: str) -> 
     if current_phase == TurnPhase.PAYMENT_RESOLUTION and state.active_payment is None:
         return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
     return state
+
+
+def _complete_bankruptcy_action(state: GameState, event_id_prefix: str) -> GameState:
+    if not is_game_over(state):
+        return state
+
+    state = _set_turn_phase(state, TurnPhase.BANKRUPTCY_RESOLUTION, event_id_prefix)
+    return _set_turn_phase(state, TurnPhase.GAME_OVER, event_id_prefix)
 
 
 def _prepare_pending_doubles_roll(state: GameState, actor_id: str, event_id_prefix: str) -> GameState:
