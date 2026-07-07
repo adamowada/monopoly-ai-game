@@ -136,7 +136,7 @@ const cardsById = new Map<string, StaticDataCard>(
   [...CHANCE_DECK, ...COMMUNITY_CHEST_DECK].map((card) => [card.id, card]),
 );
 const diceRevealDelayMs = 700;
-const tokenStepDelayMs = 170;
+const tokenStepDelayMs = 260;
 const tokenSettleDelayMs = 160;
 const motionClearDelayMs = 1200;
 const cardRevealDelayMs = 320;
@@ -386,6 +386,7 @@ function latestSignificantEvent(events: AcceptedEvent[]): AcceptedEvent | null {
     "DECK_STATE_SET",
     "BANK_INVENTORY_SET",
     "TURN_STATE_SET",
+    "ACTIVE_PAYMENT_SET",
     "ACTIVE_AUCTION_SET",
     "ACTIVE_NEGOTIATION_SET",
     "ACTIVE_ATOMIC_RESOLUTION_SET",
@@ -525,9 +526,12 @@ function latestDrawnCardFromEvents(
 }
 
 function diceFromEvent(event: AcceptedEvent | undefined): number[] | undefined {
-  const dice = eventPayloadRecord(event).dice;
+  const payload = eventPayloadRecord(event);
+  const dice = payload.dice;
   if (!Array.isArray(dice)) {
-    return undefined;
+    const die1 = typeof payload.die_1 === "number" && Number.isFinite(payload.die_1) ? payload.die_1 : null;
+    const die2 = typeof payload.die_2 === "number" && Number.isFinite(payload.die_2) ? payload.die_2 : null;
+    return die1 !== null && die2 !== null ? [die1, die2] : undefined;
   }
   const values = dice.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   return values.length > 0 ? values : undefined;

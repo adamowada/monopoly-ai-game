@@ -10,6 +10,7 @@ from app.rules.actions import (
     GameAction,
     LegalAction,
     apply_action,
+    execute_action,
     list_legal_actions,
     validate_action,
 )
@@ -342,6 +343,37 @@ def test_settle_debt_transfers_cash_to_creditor_and_clears_when_paid() -> None:
     assert _player(settled, "player-2").cash == 1580
     assert settled.active_payment is None
     assert is_debt_settled(settled)
+
+
+def test_settle_debt_legal_action_executes_with_captured_events_for_api() -> None:
+    state = _set_active_payment(
+        _state_in_phase(_initial_state(), TurnPhase.PAYMENT_RESOLUTION),
+        amount_owed=26,
+        amount_paid=20,
+    )
+    legal_action = next(action for action in list_legal_actions(state, "player-1") if action.type == "SETTLE_DEBT")
+
+    execution = execute_action(
+        state,
+        GameAction(
+            actor_id=legal_action.actor_id,
+            type=legal_action.type,
+            payload=legal_action.payload,
+            expected_state_hash=legal_action.expected_state_hash,
+            expected_event_sequence=legal_action.expected_event_sequence,
+        ),
+        "api-debt-settle",
+    )
+
+    assert [event.type for event in execution.events] == [
+        "PLAYER_CASH_DELTA",
+        "PLAYER_CASH_DELTA",
+        "ACTIVE_PAYMENT_SET",
+        "TURN_STATE_SET",
+    ]
+    assert execution.state.active_payment is None
+    assert _player(execution.state, "player-1").cash == 1494
+    assert _player(execution.state, "player-2").cash == 1506
 
 
 def test_settle_bank_debt_only_reduces_debtor_cash() -> None:

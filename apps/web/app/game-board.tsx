@@ -363,18 +363,42 @@ function CenterBoardArt() {
   );
 }
 
+const dicePipCells: Record<number, number[]> = {
+  1: [4],
+  2: [0, 8],
+  3: [0, 4, 8],
+  4: [0, 2, 6, 8],
+  5: [0, 2, 4, 6, 8],
+  6: [0, 2, 3, 5, 6, 8],
+};
+
 function DiceFace({ index, rolling, value }: Readonly<{ index: number; rolling: boolean; value: number | "?" }>) {
   const style = rolling ? ({ "--dice-delay": `${index * 90}ms` } as CSSProperties) : undefined;
+  const pipCells = typeof value === "number" ? (dicePipCells[value] ?? []) : [];
 
   return (
     <span
       aria-hidden="true"
       className="dice-motion-face grid size-9 place-items-center rounded-md border-2 border-[#1f2a1f] bg-white text-base font-black text-[#1f2a1f] shadow-sm"
       data-dice-face=""
+      data-dice-value={typeof value === "number" ? value : undefined}
       data-dice-tumble={rolling ? "true" : undefined}
       style={style}
     >
-      {value}
+      {pipCells.length > 0 ? (
+        <span className="grid size-6 grid-cols-3 grid-rows-3 gap-0.5" data-dice-pips="">
+          {Array.from({ length: 9 }, (_, cellIndex) => (
+            <span
+              key={cellIndex}
+              aria-hidden="true"
+              className={pipCells.includes(cellIndex) ? "size-1.5 self-center justify-self-center rounded-full bg-[#1f2a1f]" : ""}
+              data-dice-pip={pipCells.includes(cellIndex) ? "" : undefined}
+            />
+          ))}
+        </span>
+      ) : (
+        value
+      )}
     </span>
   );
 }

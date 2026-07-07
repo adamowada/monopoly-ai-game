@@ -231,6 +231,9 @@ describe("ClassicGameBoard", () => {
     const diceStatus = screen.getByRole("status", { name: "Dice roll animation" });
     expect(diceStatus).toHaveAttribute("data-dice-motion", "rolling");
     expect(diceStatus.querySelectorAll("[data-dice-tumble]")).toHaveLength(2);
+    expect(diceStatus.querySelector("[data-dice-value='3']")).toBeInTheDocument();
+    expect(diceStatus.querySelector("[data-dice-value='4']")).toBeInTheDocument();
+    expect(diceStatus.querySelectorAll("[data-dice-pip]")).toHaveLength(7);
     expect(diceStatus).toHaveTextContent("3 + 4 = 7");
 
     rerender(

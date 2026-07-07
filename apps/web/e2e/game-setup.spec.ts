@@ -16,7 +16,9 @@ test("creates a configured game and navigates to the board shell", async ({ page
 
   await expect(page).toHaveURL(/\/games\/mock-game-\d+$/);
   expect(page.url()).toContain("/games/");
-  await expect(page.getByRole("heading", { level: 1, name: /Game table/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Classic Monopoly-style board" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Active player" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Turn controls" })).toBeVisible();
   await expect(page.getByText("stage-5-e2e-seed")).toBeVisible();
   await expect(page.getByRole("row", { name: /Ada Human #0f766e GO \(0\)/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /Grace AI #7c3aed GO \(0\)/ })).toBeVisible();

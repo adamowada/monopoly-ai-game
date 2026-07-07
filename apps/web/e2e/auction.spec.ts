@@ -111,10 +111,9 @@ test("auction can start, receive bids and passes, reject a low bid, and assign t
 
   await auction.getByRole("group", { name: "Linus auction controls" }).getByRole("button", { name: "Pass" }).click();
 
-  await expect(auction).toContainText("Auction result");
-  await expect(auction).toContainText("Grace won Mediterranean Avenue for $1");
-  await expect(auction).toContainText("Winner Grace");
-  await expect(page.getByRole("region", { name: "Property detail: Mediterranean Avenue" })).toContainText("Owner Grace");
+  const turnContext = page.getByRole("region", { name: "Turn context" });
+  await expect(turnContext).toContainText("Last turn result");
+  await expect(turnContext).toContainText("Grace won Mediterranean Avenue for $1");
 
   const finalState = await readMockJson<{
     state: {

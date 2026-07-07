@@ -1,13 +1,12 @@
 "use client";
 
 import { Bot, Gavel, HandCoins, Loader2, LogOut, Trophy } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PROPERTIES, PROPERTIES_BY_ID, type StaticDataProperty } from "@monopoly-ai-game/schemas";
 
 import { Button } from "../components/ui/button";
 import type { AcceptedEvent, GameStateResponse, LegalAction } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
-import { cn } from "../lib/ui";
 
 export const AUCTION_ACTION_TYPES = new Set(["START_AUCTION", "BID_AUCTION", "PASS_AUCTION"]);
 
@@ -128,10 +127,20 @@ function bidMinimumFromSchema(action: LegalAction): number | null {
   return amount ? readNumber(amount.minimum) : null;
 }
 
-function concreteBidAction(action: LegalAction, auction: AuctionStateView): LegalAction {
+function minimumBidAmount(action: LegalAction, auction: AuctionStateView): number {
+  const schemaMinimum = bidMinimumFromSchema(action);
+  if (schemaMinimum !== null) {
+    return schemaMinimum;
+  }
+  return auction.high_bid_amount === null ? 1 : auction.high_bid_amount + 1;
+}
+
+function defaultBidAmount(action: LegalAction, auction: AuctionStateView): number {
   const payloadAmount = isRecord(action.payload) ? readNumber(action.payload.amount) : null;
-  const fallbackAmount = auction.high_bid_amount === null ? 1 : auction.high_bid_amount + 1;
-  const amount = payloadAmount ?? bidMinimumFromSchema(action) ?? fallbackAmount;
+  return payloadAmount ?? minimumBidAmount(action, auction);
+}
+
+function concreteBidAction(action: LegalAction, auction: AuctionStateView, amount = defaultBidAmount(action, auction)): LegalAction {
   return {
     ...action,
     payload: {
@@ -143,9 +152,7 @@ function concreteBidAction(action: LegalAction, auction: AuctionStateView): Lega
 }
 
 function latestAuctionResultEvent(events: AcceptedEvent[]): AcceptedEvent | null {
-  const resultEvents = events.filter(
-    (event) => event.event_type === "AUCTION_RESULT" || event.event_type === "PROPERTY_OWNER_SET",
-  );
+  const resultEvents = events.filter((event) => event.event_type === "AUCTION_RESULT");
   return [...resultEvents].sort((left, right) => right.sequence - left.sequence)[0] ?? null;
 }
 
@@ -163,9 +170,7 @@ function auctionResultText(game: GameMetadata, event: AcceptedEvent | null): str
     return `Winner ${winner}. ${winner} won ${propertyName(propertyId)} for ${bidText}.`;
   }
 
-  const propertyId = readString(event.payload.property_id);
-  const ownerId = readString(event.payload.owner_id);
-  return `Winner ${playerName(game, ownerId)}. ${playerName(game, ownerId)} owns ${propertyName(propertyId)}.`;
+  return "No auction result yet.";
 }
 
 function playerAuctionStatus(playerId: string, auction: AuctionStateView): string {
@@ -234,6 +239,57 @@ function AuctionAiStepButton({
       )}
       Step AI
     </Button>
+  );
+}
+
+function AuctionBidControl({
+  action,
+  auction,
+  controlsDisabled,
+  disabled,
+  pendingActionType,
+  playerName,
+  onSubmit,
+}: Readonly<{
+  action: LegalAction;
+  auction: AuctionStateView;
+  controlsDisabled: boolean;
+  disabled: boolean;
+  pendingActionType: string | null;
+  playerName: string;
+  onSubmit: (action: LegalAction) => void;
+}>) {
+  const minimumBid = minimumBidAmount(action, auction);
+  const initialBid = defaultBidAmount(action, auction);
+  const [bidAmount, setBidAmount] = useState(String(initialBid));
+  const parsedBid = Number.parseInt(bidAmount, 10);
+  const submittedBid = Number.isFinite(parsedBid) ? Math.max(parsedBid, minimumBid) : minimumBid;
+  const concreteBid = concreteBidAction(action, auction, submittedBid);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="grid gap-1 text-xs font-medium text-neutral-700">
+        <span>{playerName} bid amount</span>
+        <input
+          aria-label={`${playerName} bid amount`}
+          className="h-9 w-24 rounded-md border border-neutral-300 bg-white px-2 text-sm font-semibold text-neutral-950 outline-none focus:border-amber-700 focus:ring-2 focus:ring-amber-700/20 disabled:bg-neutral-100 disabled:text-neutral-500"
+          disabled={controlsDisabled || disabled}
+          min={minimumBid}
+          onChange={(event) => setBidAmount(event.target.value)}
+          step={1}
+          type="number"
+          value={bidAmount}
+        />
+      </label>
+      <AuctionActionButton
+        action={concreteBid}
+        disabled={controlsDisabled || disabled}
+        icon={HandCoins}
+        label="Bid"
+        onSubmit={onSubmit}
+        pendingActionType={pendingActionType}
+      />
+    </div>
   );
 }
 
@@ -337,8 +393,7 @@ export function AuctionPanel({
               {game.players.map((player) => {
                 const bidAction = legalActionFor(legalActions, "BID_AUCTION", auction.property_id, player.id);
                 const passAction = legalActionFor(legalActions, "PASS_AUCTION", auction.property_id, player.id);
-                const concreteBid = bidAction ? concreteBidAction(bidAction, auction) : null;
-                const hasControls = Boolean(concreteBid ?? passAction);
+                const hasControls = Boolean(bidAction ?? passAction);
                 const canStepAiBidder =
                   player.controller_type === "ai" &&
                   player.id !== activeAiPlayerId &&
@@ -357,14 +412,15 @@ export function AuctionPanel({
                     </div>
                     {hasControls ? (
                       <div className="flex flex-wrap gap-2">
-                        {concreteBid ? (
-                          <AuctionActionButton
-                            action={concreteBid}
-                            disabled={controlsDisabled || isActionDisabled(concreteBid)}
-                            icon={HandCoins}
-                            label="Bid"
+                        {bidAction ? (
+                          <AuctionBidControl
+                            action={bidAction}
+                            auction={auction}
+                            controlsDisabled={controlsDisabled}
+                            disabled={isActionDisabled(bidAction)}
                             onSubmit={onSubmit}
                             pendingActionType={pendingActionType}
+                            playerName={player.name}
                           />
                         ) : null}
                         {passAction ? (

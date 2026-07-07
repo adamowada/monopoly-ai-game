@@ -126,6 +126,34 @@ function stateFixture(position = 0, eventSequence = 0) {
   };
 }
 
+function debtStateFixture(eventSequence = 0) {
+  const state = stateFixture(4, eventSequence);
+  return {
+    ...state,
+    state: {
+      ...state.state,
+      players: [
+        { id: adaId, cash: 1500, position: 4 },
+        { id: graceId, cash: 1500, position: 0 },
+      ],
+      turn: {
+        phase: "PAYMENT_RESOLUTION",
+        current_player_index: 0,
+        current_player_id: adaId,
+      },
+      active_payment: {
+        debtor_id: adaId,
+        creditor_id: graceId,
+        amount_owed: 6,
+        amount_paid: 0,
+        reason: "rent:property_oriental_avenue",
+        negotiation_allowed: true,
+      },
+    },
+    state_hash: `debt-state-${eventSequence}`,
+  };
+}
+
 function holdingsStateFixture() {
   const state = stateFixture(0, 4);
   return {
@@ -278,6 +306,164 @@ function acceptedRollResponse() {
     state: stateFixture(7, 2).state,
     state_hash: "state-2",
     event_sequence: 2,
+  };
+}
+
+function acceptedBackendDiceRollResponse() {
+  return {
+    ...acceptedRollResponse(),
+    accepted_events: [
+      {
+        id: "event-1",
+        game_id: gameId,
+        sequence: 1,
+        actor_player_id: adaId,
+        event_type: "DICE_ROLLED",
+        payload: { player_id: adaId, die_1: 3, die_2: 4, total: 7, is_doubles: false, roll_counter: 1 },
+        state_hash: "state-1",
+        created_at: "2026-07-04T00:01:00.000Z",
+      },
+      {
+        id: "event-2",
+        game_id: gameId,
+        sequence: 2,
+        actor_player_id: adaId,
+        event_type: "TOKEN_MOVED",
+        payload: { player_id: adaId, from_position: 0, to_position: 7 },
+        state_hash: "state-2",
+        created_at: "2026-07-04T00:01:01.000Z",
+      },
+    ],
+  };
+}
+
+function acceptedShortStepRollResponse() {
+  return {
+    ...acceptedRollResponse(),
+    accepted_events: [
+      {
+        id: "event-short-1",
+        game_id: gameId,
+        sequence: 1,
+        actor_player_id: adaId,
+        event_type: "DICE_ROLLED",
+        payload: { player_id: adaId, die_1: 1, die_2: 2, total: 3, is_doubles: false, roll_counter: 1 },
+        state_hash: "state-1",
+        created_at: "2026-07-04T00:01:00.000Z",
+      },
+      {
+        id: "event-short-2",
+        game_id: gameId,
+        sequence: 2,
+        actor_player_id: adaId,
+        event_type: "TOKEN_MOVED",
+        payload: { player_id: adaId, from_position: 0, to_position: 3 },
+        state_hash: "state-2",
+        created_at: "2026-07-04T00:01:01.000Z",
+      },
+    ],
+    state: stateFixture(3, 2).state,
+    state_hash: "state-2",
+    event_sequence: 2,
+  };
+}
+
+function acceptedAiDiceStepResponse() {
+  return aiStepResponse("done", {
+    accepted_events: [
+      {
+        id: "event-ai-1",
+        game_id: gameId,
+        sequence: 1,
+        actor_player_id: graceId,
+        event_type: "DICE_ROLLED",
+        payload: { player_id: graceId, die_1: 5, die_2: 2, total: 7, is_doubles: false, roll_counter: 1 },
+        state_hash: "ai-state-1",
+        created_at: "2026-07-04T00:01:00.000Z",
+      },
+      {
+        id: "event-ai-2",
+        game_id: gameId,
+        sequence: 2,
+        actor_player_id: graceId,
+        event_type: "TOKEN_MOVED",
+        payload: { player_id: graceId, from_position: 0, to_position: 7 },
+        state_hash: "ai-state-2",
+        created_at: "2026-07-04T00:01:01.000Z",
+      },
+    ],
+    accepted_event_id: "event-ai-2",
+  });
+}
+
+function acceptedDebtSettlementResponse() {
+  const settledState = debtStateFixture(4);
+  return {
+    status: "accepted",
+    game_id: gameId,
+    accepted_events: [
+      {
+        id: "event-debt-1",
+        game_id: gameId,
+        sequence: 1,
+        actor_player_id: adaId,
+        event_type: "PLAYER_CASH_DELTA",
+        payload: { player_id: adaId, amount: -6 },
+        state_hash: "debt-state-1",
+        created_at: "2026-07-04T00:01:00.000Z",
+      },
+      {
+        id: "event-debt-2",
+        game_id: gameId,
+        sequence: 2,
+        actor_player_id: adaId,
+        event_type: "PLAYER_CASH_DELTA",
+        payload: { player_id: graceId, amount: 6 },
+        state_hash: "debt-state-2",
+        created_at: "2026-07-04T00:01:01.000Z",
+      },
+      {
+        id: "event-debt-3",
+        game_id: gameId,
+        sequence: 3,
+        actor_player_id: adaId,
+        event_type: "ACTIVE_PAYMENT_SET",
+        payload: { active: false },
+        state_hash: "debt-state-3",
+        created_at: "2026-07-04T00:01:02.000Z",
+      },
+      {
+        id: "event-debt-4",
+        game_id: gameId,
+        sequence: 4,
+        actor_player_id: adaId,
+        event_type: "TURN_STATE_SET",
+        payload: {
+          turn_number: 1,
+          current_player_index: 0,
+          current_player_id: adaId,
+          phase: "POST_ROLL_MANAGEMENT",
+          consecutive_doubles: 0,
+        },
+        state_hash: "debt-state-4",
+        created_at: "2026-07-04T00:01:03.000Z",
+      },
+    ],
+    state: {
+      ...settledState.state,
+      players: [
+        { id: adaId, cash: 1494, position: 4 },
+        { id: graceId, cash: 1506, position: 0 },
+      ],
+      turn: {
+        phase: "POST_ROLL_MANAGEMENT",
+        current_player_index: 0,
+        current_player_id: adaId,
+      },
+      active_payment: null,
+    },
+    state_hash: "debt-state-4",
+    event_sequence: 4,
   };
 }
 
@@ -650,6 +836,46 @@ describe("GamePlaySurface turn controls", () => {
     expect(within(controls).queryByRole("button", { name: "Settle debt" })).not.toBeInTheDocument();
   });
 
+  it("settles an active debt with the backend-provided legal action payload", async () => {
+    const state = debtStateFixture();
+    const debtPayload = {
+      amount: 6,
+      debt_id: "active-debt:game-turn-controls:0:player-1:player-2:6:0:rent:property_oriental_avenue",
+      creditor_player_id: graceId,
+    };
+    const fetchMock = baseFetchMock({
+      game: gameFixture(4),
+      state,
+      legalActions: [legalAction("SETTLE_DEBT", debtPayload, state.state_hash, state.event_sequence)],
+      actionResponse: acceptedDebtSettlementResponse(),
+    });
+
+    renderSurface(fetchMock, gameFixture(4));
+
+    const controls = await screen.findByRole("region", { name: "Turn controls" });
+    fireEvent.click(await within(controls).findByRole("button", { name: "Settle debt" }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    const submittedCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(submittedCall?.[1]?.body))).toEqual(
+      expect.objectContaining({
+        type: "SETTLE_DEBT",
+        payload: debtPayload,
+      }),
+    );
+    const context = await screen.findByRole("region", { name: "Turn context" });
+    await waitFor(() => expect(context).toHaveTextContent("Ada paid Grace $6."));
+    expect(screen.queryByRole("region", { name: "Rejected action" })).not.toBeInTheDocument();
+  });
+
   it("updates the board, active player position, and Game log after an accepted action is refetched", async () => {
     let accepted = false;
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
@@ -695,6 +921,95 @@ describe("GamePlaySurface turn controls", () => {
     const log = screen.getByRole("region", { name: "Game log" });
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
     expect(within(log).getByText(/TOKEN_MOVED/)).toBeInTheDocument();
+  }, 10_000);
+
+  it("renders backend die_1 and die_2 dice payloads as pips and total instead of placeholders", async () => {
+    let accepted = false;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(accepted ? gameFixture(7) : gameFixture(0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(accepted ? stateFixture(7, 2) : stateFixture(0, 0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: accepted ? [legalAction("END_TURN", {}, "state-2", 2)] : [legalAction("ROLL_DICE")],
+          state_hash: accepted ? "state-2" : "state-0",
+          event_sequence: accepted ? 2 : 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(accepted ? eventsFixture(acceptedBackendDiceRollResponse().accepted_events) : eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        accepted = true;
+        return Response.json(acceptedBackendDiceRollResponse());
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
+
+    const diceStatus = await screen.findByRole("status", { name: "Dice roll animation" });
+    await waitFor(() => expect(diceStatus).toHaveTextContent("3 + 4 = 7"));
+    expect(diceStatus).not.toHaveTextContent("?");
+    expect(diceStatus.querySelector("[data-dice-value='3']")).toBeInTheDocument();
+    expect(diceStatus.querySelector("[data-dice-value='4']")).toBeInTheDocument();
+    expect(diceStatus.querySelectorAll("[data-dice-pip]")).toHaveLength(7);
+  });
+
+  it("moves a player token square by square and clears dice after landing", async () => {
+    let accepted = false;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(accepted ? gameFixture(3) : gameFixture(0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(accepted ? stateFixture(3, 2) : stateFixture(0, 0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: accepted ? [legalAction("END_TURN", {}, "state-2", 2)] : [legalAction("ROLL_DICE")],
+          state_hash: accepted ? "state-2" : "state-0",
+          event_sequence: accepted ? 2 : 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(accepted ? eventsFixture(acceptedShortStepRollResponse().accepted_events) : eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        accepted = true;
+        return Response.json(acceptedShortStepRollResponse());
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
+
+    const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
+    expect(await within(board).findByLabelText("Ada token at Mediterranean Avenue, position 1", {}, { timeout: 3_000 })).toBeVisible();
+    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("1 + 2 = 3");
+    expect(await within(board).findByLabelText("Ada token at Baltic Avenue, position 3", {}, { timeout: 3_000 })).toBeVisible();
+    await waitFor(() => expect(within(board).queryByRole("status", { name: "Dice roll animation" })).not.toBeInTheDocument(), {
+      timeout: 5_000,
+    });
   });
 
   it("shows chance and community chest draws as a modal over the board", async () => {
@@ -957,6 +1272,52 @@ describe("GamePlaySurface turn controls", () => {
       mandatory: true,
       request_context: { mode: "manual" },
     });
+  });
+
+  it("shows AI dice rolls with pips and total when an AI step accepts roll events", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(acceptedAiDiceStepResponse());
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
+
+    await waitFor(() => expect(screen.getByRole("status", { name: "AI step status" })).toHaveTextContent("AI done"));
+    const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
+    const diceStatus = within(board).getByRole("status", { name: "Dice roll animation" });
+    expect(diceStatus).toHaveTextContent("5 + 2 = 7");
+    expect(diceStatus).not.toHaveTextContent("?");
+    expect(diceStatus.querySelector("[data-dice-value='5']")).toBeInTheDocument();
+    expect(diceStatus.querySelector("[data-dice-value='2']")).toBeInTheDocument();
+    expect(diceStatus.querySelectorAll("[data-dice-pip]")).toHaveLength(7);
   });
 
   it("refetches AI audit records after a successful Manual AI step", async () => {
