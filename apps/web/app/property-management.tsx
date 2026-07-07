@@ -11,7 +11,7 @@ import {
   LockKeyhole,
   Undo2,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   BOARD_SPACES,
   PROPERTIES,
@@ -55,6 +55,12 @@ type OwnerGroup = {
   key: string;
   label: string;
   properties: StaticDataProperty[];
+};
+
+type PropertyActionCard = {
+  property: StaticDataProperty;
+  ownership: PropertyOwnershipView;
+  actions: Record<ManagementActionType, LegalAction | null>;
 };
 
 export type PropertyManagementPanelProps = {
@@ -177,6 +183,34 @@ function legalActionFor(legalActions: LegalAction[], type: ManagementActionType,
 
 function isManagementAction(action: LegalAction): boolean {
   return MANAGEMENT_ACTION_TYPES.includes(action.type as ManagementActionType);
+}
+
+function actionsForProperty(legalActions: LegalAction[], propertyId: string): Record<ManagementActionType, LegalAction | null> {
+  return {
+    BUY_HOUSE: legalActionFor(legalActions, "BUY_HOUSE", propertyId),
+    SELL_HOUSE: legalActionFor(legalActions, "SELL_HOUSE", propertyId),
+    MORTGAGE_PROPERTY: legalActionFor(legalActions, "MORTGAGE_PROPERTY", propertyId),
+    UNMORTGAGE_PROPERTY: legalActionFor(legalActions, "UNMORTGAGE_PROPERTY", propertyId),
+  };
+}
+
+function hasAnyManagementAction(actions: Record<ManagementActionType, LegalAction | null>): boolean {
+  return Boolean(actions.BUY_HOUSE ?? actions.SELL_HOUSE ?? actions.MORTGAGE_PROPERTY ?? actions.UNMORTGAGE_PROPERTY);
+}
+
+function buildPropertyActionCards(
+  legalActions: LegalAction[],
+  ownerships: Map<string, PropertyOwnershipView>,
+  onlyActionable: boolean,
+): PropertyActionCard[] {
+  return PROPERTIES.map((propertyRef) => {
+    const property = PROPERTIES_BY_ID[propertyRef.id];
+    return {
+      property,
+      ownership: ownerships.get(property.id) ?? defaultOwnership(property.id),
+      actions: actionsForProperty(legalActions, property.id),
+    };
+  }).filter((card) => !onlyActionable || hasAnyManagementAction(card.actions));
 }
 
 function propertyFacts(property: StaticDataProperty): string[] {
@@ -436,7 +470,7 @@ function PropertyDetailCard({
   const sellAction = actions.SELL_HOUSE;
   const mortgageAction = actions.MORTGAGE_PROPERTY;
   const unmortgageAction = actions.UNMORTGAGE_PROPERTY;
-  const hasAnyAction = Boolean(buyAction ?? sellAction ?? mortgageAction ?? unmortgageAction);
+  const hasAnyAction = hasAnyManagementAction(actions);
   const boardSpace = propertySpaceById.get(property.id);
   const art = boardSpace ? SPACE_ART_BY_ID[boardSpace.id] : null;
 
@@ -533,10 +567,19 @@ export function PropertyManagementPanel({
   pendingActionType,
   onSubmit,
 }: PropertyManagementPanelProps) {
+  const [showDeedCatalog, setShowDeedCatalog] = useState(false);
   const ownerships = useMemo(() => ownershipByProperty(snapshot), [snapshot]);
   const inventory = useMemo(() => bankInventory(snapshot), [snapshot]);
   const ownerGroups = useMemo(() => buildOwnerGroups(game, ownerships), [game, ownerships]);
   const managementLegalActions = useMemo(() => legalActions.filter(isManagementAction), [legalActions]);
+  const legalActionCards = useMemo(
+    () => buildPropertyActionCards(managementLegalActions, ownerships, true),
+    [managementLegalActions, ownerships],
+  );
+  const deedCatalogCards = useMemo(
+    () => buildPropertyActionCards(managementLegalActions, ownerships, false),
+    [managementLegalActions, ownerships],
+  );
 
   return (
     <section aria-label="Property management" className="rounded-md border border-neutral-200 bg-white p-4 shadow-sm">
@@ -553,35 +596,64 @@ export function PropertyManagementPanel({
       </div>
 
       <div className="mt-4 grid gap-4">
+        <section aria-label="Legal deed actions" className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-neutral-950">Legal deed actions</h3>
+              <p className="mt-1 text-xs text-neutral-600">Actionable deeds appear here when the referee opens a legal move.</p>
+            </div>
+            <Button
+              aria-expanded={showDeedCatalog}
+              className="w-fit"
+              onClick={() => setShowDeedCatalog((current) => !current)}
+              type="button"
+              variant="secondary"
+            >
+              {showDeedCatalog ? "Close deed catalog" : "Open deed catalog"}
+            </Button>
+          </div>
+          {legalActionCards.length === 0 ? (
+            <p className="mt-3 rounded border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-600">
+              No deed actions available
+            </p>
+          ) : (
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {legalActionCards.map((card) => (
+                <PropertyDetailCard
+                  key={card.property.id}
+                  actions={card.actions}
+                  controlsDisabled={controlsDisabled}
+                  game={game}
+                  onSubmit={onSubmit}
+                  ownership={card.ownership}
+                  pendingActionType={pendingActionType}
+                  property={card.property}
+                />
+              ))}
+            </div>
+          )}
+        </section>
         <OwnerPropertyList groups={ownerGroups} ownerships={ownerships} />
         <div className="grid gap-4 lg:grid-cols-2">
           <BankInventoryPanel inventory={inventory} />
           <MonopolyGroupsPanel game={game} ownerships={ownerships} />
         </div>
-        <section aria-label="Property detail cards" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {PROPERTIES.map((propertyRef) => {
-            const property = PROPERTIES_BY_ID[propertyRef.id];
-            const ownership = ownerships.get(property.id) ?? defaultOwnership(property.id);
-            const actions: Record<ManagementActionType, LegalAction | null> = {
-              BUY_HOUSE: legalActionFor(managementLegalActions, "BUY_HOUSE", property.id),
-              SELL_HOUSE: legalActionFor(managementLegalActions, "SELL_HOUSE", property.id),
-              MORTGAGE_PROPERTY: legalActionFor(managementLegalActions, "MORTGAGE_PROPERTY", property.id),
-              UNMORTGAGE_PROPERTY: legalActionFor(managementLegalActions, "UNMORTGAGE_PROPERTY", property.id),
-            };
-            return (
+        {showDeedCatalog ? (
+          <section aria-label="Deed catalog" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {deedCatalogCards.map((card) => (
               <PropertyDetailCard
-                key={property.id}
-                actions={actions}
+                key={card.property.id}
+                actions={card.actions}
                 controlsDisabled={controlsDisabled}
                 game={game}
                 onSubmit={onSubmit}
-                ownership={ownership}
+                ownership={card.ownership}
                 pendingActionType={pendingActionType}
-                property={property}
+                property={card.property}
               />
-            );
-          })}
-        </section>
+            ))}
+          </section>
+        ) : null}
       </div>
     </section>
   );

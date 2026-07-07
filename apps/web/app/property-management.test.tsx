@@ -353,8 +353,14 @@ describe("PropertyManagementPanel", () => {
     expect(within(graceGroup).getByText("Hotel")).toBeInTheDocument();
   });
 
-  it("shows Property detail, Bank inventory, and Monopoly groups from static data plus state", () => {
+  it("keeps the full deed catalog behind a disclosure while preserving static property facts", () => {
     const { container } = renderPanel();
+
+    const deedActions = screen.getByRole("region", { name: "Legal deed actions" });
+    expect(deedActions).toHaveTextContent("No deed actions available");
+    expect(container.querySelectorAll("[data-property-art]")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
 
     const detail = screen.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
     expect(detail).toHaveTextContent("Property detail");
@@ -382,6 +388,24 @@ describe("PropertyManagementPanel", () => {
     expect(monopolyGroups).toHaveTextContent("Incomplete");
   });
 
+  it("shows legal deed action cards before the full catalog", () => {
+    renderPanel({
+      legalActions: [
+        legalAction("BUY_HOUSE", "property_mediterranean_avenue", { cost: 50 }),
+        legalAction("SELL_HOUSE", "property_mediterranean_avenue", { proceeds: 25 }),
+        legalAction("MORTGAGE_PROPERTY", "property_baltic_avenue", { proceeds: 30 }),
+        legalAction("UNMORTGAGE_PROPERTY", "property_park_place", { cost: 33 }),
+      ],
+    });
+
+    const deedActions = screen.getByRole("region", { name: "Legal deed actions" });
+    expect(within(deedActions).getByRole("region", { name: "Property detail: Mediterranean Avenue" })).toBeInTheDocument();
+    expect(within(deedActions).getByRole("region", { name: "Property detail: Baltic Avenue" })).toBeInTheDocument();
+    expect(within(deedActions).getByRole("region", { name: "Property detail: Park Place" })).toBeInTheDocument();
+    expect(within(deedActions).queryByRole("region", { name: "Property detail: Boardwalk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Deed catalog" })).not.toBeInTheDocument();
+  });
+
   it("enables Mortgage, Unmortgage, Build house, and Sell house only for matching legal actions", () => {
     renderPanel({
       legalActions: [
@@ -404,6 +428,12 @@ describe("PropertyManagementPanel", () => {
     const parkPlace = screen.getByRole("region", { name: "Property detail: Park Place" });
     expect(within(parkPlace).getByRole("button", { name: "Unmortgage" })).toBeEnabled();
 
+    expect(
+      within(screen.getByRole("region", { name: "Legal deed actions" })).queryByRole("region", {
+        name: "Property detail: Boardwalk",
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
     const boardwalk = screen.getByRole("region", { name: "Property detail: Boardwalk" });
     expect(within(boardwalk).queryByRole("button")).not.toBeInTheDocument();
   });
@@ -446,8 +476,14 @@ describe("GamePlaySurface property management integration", () => {
 
     fireEvent.click(within(baltic).getByRole("button", { name: "Build house" }));
 
-    await waitFor(() => expect(baltic).toHaveTextContent("Houses: 2"));
-    expect(screen.getByRole("region", { name: "Bank inventory" })).toHaveTextContent("Houses remaining 28");
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Bank inventory" })).toHaveTextContent("Houses remaining 28"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
+    const updatedBaltic = screen.getByRole("region", { name: "Property detail: Baltic Avenue" });
+    expect(updatedBaltic).toHaveTextContent("Houses: 2");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Contracts" }));
     const log = screen.getByRole("region", { name: "Game log" });
     expect(within(log).getByText(/BANK_INVENTORY_SET/)).toBeInTheDocument();
     expect(within(log).getByText(/PROPERTY_IMPROVEMENTS_SET/)).toBeInTheDocument();
