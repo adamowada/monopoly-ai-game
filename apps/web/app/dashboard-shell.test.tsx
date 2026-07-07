@@ -49,6 +49,7 @@ describe("DashboardShell", () => {
         name: "Monopoly 2.0 Game Table",
       }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveClass("bg-[#eaf3d7]");
 
     expect(screen.queryByRole("navigation", { name: "Game prep navigation" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Setup" })).not.toBeInTheDocument();
@@ -59,6 +60,8 @@ describe("DashboardShell", () => {
     ).not.toBeInTheDocument();
 
     expect(screen.getByRole("region", { name: "Choose seats" })).toBeInTheDocument();
+    expect(screen.queryByText("Local tabletop setup")).not.toBeInTheDocument();
+    expect(screen.queryByText("2 ready")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2, name: "Table check" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2, name: "Table areas" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Connection details" })).not.toBeInTheDocument();

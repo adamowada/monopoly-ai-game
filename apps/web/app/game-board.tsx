@@ -37,6 +37,8 @@ export type BoardMotion =
       fromPosition?: number;
       toPosition?: number;
       dice?: number[];
+      landedSpaceName?: string;
+      playerName?: string;
       total?: number;
     }
   | {
@@ -46,6 +48,8 @@ export type BoardMotion =
       toPosition: number;
       displayPosition: number;
       dice?: number[];
+      landedSpaceName?: string;
+      playerName?: string;
       total?: number;
     };
 
@@ -117,6 +121,13 @@ function normalizedPosition(rawPosition: unknown): number {
     return 0;
   }
   return ((rawPosition % BOARD_SPACES.length) + BOARD_SPACES.length) % BOARD_SPACES.length;
+}
+
+function spaceNameForPosition(position: number | undefined): string | null {
+  if (typeof position !== "number" || !Number.isInteger(position)) {
+    return null;
+  }
+  return BOARD_SPACES[normalizedPosition(position)]?.name ?? null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -522,12 +533,15 @@ function DiceMotionStatus({ motion }: Readonly<{ motion?: BoardMotion }>) {
   const diceLabel = motion.dice && motion.dice.length > 0 ? motion.dice.join(" + ") : "Rolling dice";
   const totalLabel = typeof motion.total === "number" ? ` = ${motion.total}` : "";
   const primaryLabel = motion.dice && motion.dice.length > 0 ? `${diceLabel}${totalLabel}` : "Rolling dice";
-  const movementLabel =
-    motion.status === "moving"
-      ? `Moving ${motion.fromPosition} to ${motion.toPosition}`
-      : rolling
-        ? "Dice in motion"
-        : "Landed";
+  const playerLabel = motion.playerName?.trim() || "Player";
+  const currentSpaceName = motion.status === "moving" ? spaceNameForPosition(motion.displayPosition) : null;
+  const landedSpaceName = motion.landedSpaceName ?? spaceNameForPosition(motion.toPosition);
+  let movementLabel = "Dice in motion";
+  if (motion.status === "moving") {
+    movementLabel = `${playerLabel} moving to ${currentSpaceName ?? landedSpaceName ?? "next space"}`;
+  } else if (motion.status === "settled") {
+    movementLabel = `${playerLabel} landed on ${landedSpaceName ?? "the board"}`;
+  }
 
   return (
     <div
@@ -854,6 +868,65 @@ function TokenStack({
   );
 }
 
+function tokenOverlayStyle(position: number, color: string): CSSProperties {
+  const coordinates = boardCoordinates(normalizedPosition(position));
+  const centerColumn = coordinates.column - 1 + coordinates.columnSpan / 2;
+  const centerRow = coordinates.row - 1 + coordinates.rowSpan / 2;
+  return {
+    color: readableTextColor(color),
+    left: `${(centerColumn / boardGridSize) * 100}%`,
+    top: `${(centerRow / boardGridSize) * 100}%`,
+  };
+}
+
+function MotionTokenOverlay({
+  game,
+  motion,
+}: Readonly<{
+  game: GameMetadata;
+  motion?: BoardMotion;
+}>) {
+  if (motion?.status !== "moving") {
+    return null;
+  }
+  const player = game.players.find((candidate) => candidate.id === motion.playerId);
+  if (!player) {
+    return null;
+  }
+  const position = normalizedPosition(motion.displayPosition);
+  const space = BOARD_SPACES[position];
+  if (!space) {
+    return null;
+  }
+  const color = getPlayerColor(game, player.seat_order);
+  const shape = tokenShapeForSeat(player.seat_order);
+
+  return (
+    <span
+      aria-label={`${player.name} token at ${space.name}, position ${space.position}`}
+      className="board-token board-token-moving board-token-motion-overlay group/token absolute z-50 grid size-6 place-items-center text-[10px] font-black shadow-sm ring-2 ring-[#2f2418]/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f766e]"
+      data-player-id={player.id}
+      data-player-token=""
+      data-space-index={space.position}
+      data-token-motion-overlay="true"
+      data-token-moving="true"
+      data-token-shape={shape}
+      style={tokenOverlayStyle(position, color)}
+      tabIndex={0}
+      title={player.name}
+    >
+      <span aria-hidden="true" className="board-token-trail" data-token-trail="" />
+      <TokenSilhouette color={color} shape={shape} />
+      <span className="relative z-10 drop-shadow-[0_1px_0_rgba(0,0,0,0.45)]">
+        {tokenText(player.name, player.seat_order)}
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-[#1f2a1f] px-1.5 py-0.5 text-[9px] font-bold text-white opacity-0 shadow-sm transition-opacity group-hover/token:opacity-100 group-focus/token:opacity-100" data-player-token-label="">
+        {player.name}
+      </span>
+    </span>
+  );
+}
+
 function StreetPropertyCell({
   bandColor,
   game,
@@ -941,7 +1014,11 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
   const propertyOwnerships = ownershipByProperty(snapshot);
   const playersByPosition = new Map<number, GamePlayer[]>();
+  const movingPlayerId = motion?.status === "moving" ? motion.playerId : null;
   for (const player of game.players) {
+    if (player.id === movingPlayerId) {
+      continue;
+    }
     const position = playerPosition(player, snapshot, motion);
     const players = playersByPosition.get(position) ?? [];
     players.push(player);
@@ -1055,6 +1132,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
               </div>
             );
           })}
+          <MotionTokenOverlay game={game} motion={motion} />
         </div>
         <DiceMotionStatus motion={motion} />
         <DrawnCardModal card={drawnCard} onDismiss={onDismissDrawnCard} />

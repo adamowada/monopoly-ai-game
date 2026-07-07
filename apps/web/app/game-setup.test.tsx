@@ -93,8 +93,11 @@ describe("GameSetupPanel", () => {
 
     render(<GameSetupPanel />);
 
-    expect(screen.getByRole("heading", { level: 2, name: "Choose seats" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Choose seats" })).toBeInTheDocument();
+    expect(screen.queryByText("Local tabletop setup")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Choose seats" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Build the table as seats and tokens, then open the board when everyone is ready.")).not.toBeInTheDocument();
+    expect(screen.queryByText("2 ready")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue(
       expectedGeneratedSeed(timestamp, randomValue),
     );

@@ -335,7 +335,9 @@ describe("ClassicGameBoard", () => {
           dice: [3, 4],
           displayPosition: 0,
           fromPosition: 0,
+          landedSpaceName: "Chance",
           playerId: "player-1",
+          playerName: "Ada",
           status: "moving",
           toPosition: 7,
           total: 7,
@@ -347,6 +349,7 @@ describe("ClassicGameBoard", () => {
     expect(diceStatus).toHaveAttribute("data-dice-motion", "moving");
     expect(diceStatus).toHaveTextContent("3 + 4");
     const movingToken = screen.getByLabelText("Ada token at GO, position 0");
+    expect(movingToken).toHaveAttribute("data-token-motion-overlay", "true");
     expect(movingToken).toHaveAttribute("data-token-moving", "true");
     expect(movingToken.querySelector("[data-token-trail]")).toBeInTheDocument();
 
@@ -357,7 +360,9 @@ describe("ClassicGameBoard", () => {
           dice: [3, 4],
           displayPosition: 3,
           fromPosition: 0,
+          landedSpaceName: "Chance",
           playerId: "player-1",
+          playerName: "Ada",
           status: "moving",
           toPosition: 7,
           total: 7,
@@ -365,7 +370,10 @@ describe("ClassicGameBoard", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Ada token at Baltic Avenue, position 3")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ada token at Baltic Avenue, position 3")).toHaveAttribute(
+      "data-token-motion-overlay",
+      "true",
+    );
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
   });
 
@@ -375,7 +383,9 @@ describe("ClassicGameBoard", () => {
         game={gameFixture([7, 0])}
         motion={{
           dice: [3, 4],
+          landedSpaceName: "Chance",
           playerId: "player-1",
+          playerName: "Ada",
           status: "rolling",
           total: 7,
         }}
@@ -397,7 +407,9 @@ describe("ClassicGameBoard", () => {
           dice: [3, 4],
           displayPosition: 7,
           fromPosition: 0,
+          landedSpaceName: "Chance",
           playerId: "player-1",
+          playerName: "Ada",
           status: "settled",
           toPosition: 7,
           total: 7,
@@ -408,6 +420,7 @@ describe("ClassicGameBoard", () => {
     const landedToken = screen.getByLabelText("Ada token at Chance, position 7");
     expect(landedToken).toHaveAttribute("data-token-landing", "true");
     expect(landedToken.querySelector("[data-token-trail]")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("Ada landed on Chance");
   });
 
   it("presents drawn cards with deck art and keyboard dismissal", () => {

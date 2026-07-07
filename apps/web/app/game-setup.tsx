@@ -230,25 +230,9 @@ export function GameSetupPanel() {
   }
 
   return (
-    <section id="game-setup" aria-labelledby="game-setup-title" className="bg-[#eaf3d7]">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-xs font-black uppercase text-[#0f766e]">Local tabletop setup</p>
-            <h2 id="game-setup-title" className="mt-1 text-xl font-black tracking-normal text-[#2f2418]">
-              Choose seats
-            </h2>
-            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-[#6f604c]">
-              Build the table as seats and tokens, then open the board when everyone is ready.
-            </p>
-          </div>
-          <div className="rounded-md border-2 border-[#2f2418]/25 bg-[#fff8e8] px-3 py-2 text-sm text-[#6f604c]">
-            <span className="block text-xs font-black uppercase">Seats</span>
-            <span className="mt-1 block font-black text-[#2f2418]">{players.length} ready</span>
-          </div>
-        </div>
-
-        <form noValidate onSubmit={handleSubmit} className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <section id="game-setup" aria-label="Choose seats" className="bg-[#eaf3d7]">
+      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+        <form noValidate onSubmit={handleSubmit} className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div
             className="min-w-0 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_10px_25px_rgba(47,36,24,0.14)]"
           >

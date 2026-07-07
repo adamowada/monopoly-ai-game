@@ -588,7 +588,23 @@ function boardPath(fromPosition: number, toPosition: number): number[] {
   return path;
 }
 
-function boardMotionFromAcceptedEvents(events: AcceptedEvent[], fallbackPlayerId: string): BoardMotionState | null {
+function normalizedBoardPosition(position: number): number {
+  return ((position % BOARD_SPACES.length) + BOARD_SPACES.length) % BOARD_SPACES.length;
+}
+
+function boardSpaceName(position: number): string {
+  return BOARD_SPACES[normalizedBoardPosition(position)]?.name ?? `position ${position}`;
+}
+
+function playerNameForMotion(players: GameMetadata["players"], playerId: string): string | undefined {
+  return players.find((player) => player.id === playerId)?.name;
+}
+
+function boardMotionFromAcceptedEvents(
+  events: AcceptedEvent[],
+  fallbackPlayerId: string,
+  players: GameMetadata["players"],
+): BoardMotionState | null {
   const diceEvent = events.find((event) => event.event_type === "DICE_ROLLED");
   const moveEvent = events.find((event) => event.event_type === "TOKEN_MOVED");
   const dice = diceFromEvent(diceEvent);
@@ -604,9 +620,11 @@ function boardMotionFromAcceptedEvents(events: AcceptedEvent[], fallbackPlayerId
         dice,
         displayPosition: path[0] ?? fromPosition,
         fromPosition,
+        landedSpaceName: boardSpaceName(toPosition),
         motionKey: `${moveEvent.id}:${moveEvent.sequence}`,
         path,
         playerId,
+        playerName: playerNameForMotion(players, playerId),
         status: "moving",
         stepIndex: 0,
         toPosition,
@@ -620,9 +638,11 @@ function boardMotionFromAcceptedEvents(events: AcceptedEvent[], fallbackPlayerId
       dice,
       displayPosition: 0,
       fromPosition: 0,
+      landedSpaceName: boardSpaceName(0),
       motionKey: `${diceEvent.id}:${diceEvent.sequence}`,
       path: [0],
       playerId: fallbackPlayerId,
+      playerName: playerNameForMotion(players, fallbackPlayerId),
       status: "settled",
       stepIndex: 0,
       toPosition: 0,
@@ -1447,8 +1467,10 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         dice: nextMotion.dice,
         displayPosition: nextMotion.fromPosition,
         fromPosition: nextMotion.fromPosition,
+        landedSpaceName: nextMotion.landedSpaceName,
         motionKey: `${nextMotion.motionKey}:dice-reveal`,
         playerId: nextMotion.playerId,
+        playerName: nextMotion.playerName,
         status: "rolling",
         toPosition: nextMotion.toPosition,
         total: nextMotion.total,
@@ -1553,6 +1575,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           ? {
               motionKey: `${action.actor_id}:${action.expected_event_sequence}:rolling`,
               playerId: action.actor_id,
+              playerName: playerNameForMotion(game.players, action.actor_id),
               status: "rolling",
             }
           : null,
@@ -1561,7 +1584,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     onSuccess: (result, action) => {
       if (result.status === "accepted") {
         setAcceptedEvents(result.accepted_events);
-        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, action.actor_id));
+        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, action.actor_id, game.players));
         queryClient.setQueryData<GameStateResponse>(["game-state", gameId], {
           game_id: gameId,
           state: result.state,
@@ -1647,7 +1670,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       setAiStepResult(result);
       if (result.accepted_events.length > 0) {
         setAcceptedEvents(result.accepted_events);
-        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, result.player_id));
+        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, result.player_id, game.players));
       }
       void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
     },

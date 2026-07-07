@@ -19,7 +19,7 @@ export function DashboardShell({
   const [showRuleRulings, setShowRuleRulings] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#173c45] text-[#2f2418]">
+    <div className="min-h-screen bg-[#eaf3d7] text-[#2f2418]">
       <header className="border-b-4 border-[#2f2418] bg-[#fff8e8]">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
           <div className="flex items-center gap-3">
@@ -34,7 +34,7 @@ export function DashboardShell({
         </div>
       </header>
 
-      <main>
+      <main className="bg-[#eaf3d7]">
         <GameSetupPanel />
 
         {initialRejectedActions.length > 0 ? (

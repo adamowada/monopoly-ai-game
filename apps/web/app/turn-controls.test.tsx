@@ -338,7 +338,7 @@ function acceptedBackendDiceRollResponse() {
   };
 }
 
-function acceptedShortStepRollResponse() {
+function acceptedReadingRailroadRollResponse() {
   return {
     ...acceptedRollResponse(),
     accepted_events: [
@@ -348,7 +348,7 @@ function acceptedShortStepRollResponse() {
         sequence: 1,
         actor_player_id: adaId,
         event_type: "DICE_ROLLED",
-        payload: { player_id: adaId, die_1: 1, die_2: 2, total: 3, is_doubles: false, roll_counter: 1 },
+        payload: { player_id: adaId, die_1: 2, die_2: 3, total: 5, is_doubles: false, roll_counter: 1 },
         state_hash: "state-1",
         created_at: "2026-07-04T00:01:00.000Z",
       },
@@ -358,12 +358,12 @@ function acceptedShortStepRollResponse() {
         sequence: 2,
         actor_player_id: adaId,
         event_type: "TOKEN_MOVED",
-        payload: { player_id: adaId, from_position: 0, to_position: 3 },
+        payload: { player_id: adaId, from_position: 0, to_position: 5 },
         state_hash: "state-2",
         created_at: "2026-07-04T00:01:01.000Z",
       },
     ],
-    state: stateFixture(3, 2).state,
+    state: stateFixture(5, 2).state,
     state_hash: "state-2",
     event_sequence: 2,
   };
@@ -1057,10 +1057,10 @@ describe("GamePlaySurface turn controls", () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
       if (url === `${apiBaseUrl}/games/${gameId}`) {
-        return Response.json(accepted ? gameFixture(3) : gameFixture(0));
+        return Response.json(accepted ? gameFixture(5) : gameFixture(0));
       }
       if (url === `${apiBaseUrl}/games/${gameId}/state`) {
-        return Response.json(accepted ? stateFixture(3, 2) : stateFixture(0, 0));
+        return Response.json(accepted ? stateFixture(5, 2) : stateFixture(0, 0));
       }
       if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
         return Response.json({
@@ -1072,14 +1072,14 @@ describe("GamePlaySurface turn controls", () => {
         });
       }
       if (url === `${apiBaseUrl}/games/${gameId}/events`) {
-        return Response.json(accepted ? eventsFixture(acceptedShortStepRollResponse().accepted_events) : eventsFixture());
+        return Response.json(accepted ? eventsFixture(acceptedReadingRailroadRollResponse().accepted_events) : eventsFixture());
       }
       if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
         return Response.json(rejectedActionsFixture());
       }
       if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
         accepted = true;
-        return Response.json(acceptedShortStepRollResponse());
+        return Response.json(acceptedReadingRailroadRollResponse());
       }
       throw new Error(`Unexpected fetch ${url}`);
     });
@@ -1089,9 +1089,25 @@ describe("GamePlaySurface turn controls", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
 
     const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
-    expect(await within(board).findByLabelText("Ada token at Mediterranean Avenue, position 1", {}, { timeout: 3_000 })).toBeVisible();
-    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("1 + 2 = 3");
-    expect(await within(board).findByLabelText("Ada token at Baltic Avenue, position 3", {}, { timeout: 3_000 })).toBeVisible();
+    const expectedSteps = [
+      "Ada token at Mediterranean Avenue, position 1",
+      "Ada token at Community Chest, position 2",
+      "Ada token at Baltic Avenue, position 3",
+      "Ada token at Income Tax, position 4",
+      "Ada token at Reading Railroad, position 5",
+    ];
+    for (const stepLabel of expectedSteps) {
+      expect(await within(board).findByLabelText(stepLabel, {}, { timeout: 3_000 })).toBeVisible();
+    }
+    const diceStatus = within(board).getByRole("status", { name: "Dice roll animation" });
+    expect(diceStatus).toHaveTextContent("2 + 3 = 5");
+    await waitFor(
+      () =>
+        expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent(
+          "Ada landed on Reading Railroad",
+        ),
+      { timeout: 3_000 },
+    );
     await waitFor(() => expect(within(board).queryByRole("status", { name: "Dice roll animation" })).not.toBeInTheDocument(), {
       timeout: 5_000,
     });
