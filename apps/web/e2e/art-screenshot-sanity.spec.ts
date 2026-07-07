@@ -1,17 +1,41 @@
 import { inflateSync } from "node:zlib";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
+const mockApiPort = process.env.MOCK_API_PORT ?? "18101";
+const mockApiBaseUrl = `http://127.0.0.1:${mockApiPort}`;
+
 type PngInfo = {
   width: number;
   height: number;
   uniqueColorCount: number;
 };
 
-async function createGame(page: Page, seed: string) {
+type TestPlayer = {
+  color: string;
+  kind: "human" | "ai";
+  name: string;
+};
+
+const defaultPlayers: TestPlayer[] = [
+  { color: "#0f766e", kind: "human", name: "Ada" },
+  { color: "#7c3aed", kind: "human", name: "Grace" },
+];
+
+async function createGame(page: Page, seed: string, players: TestPlayer[] = defaultPlayers) {
   await page.goto("/");
+
+  for (let index = 2; index < players.length; index += 1) {
+    await page.getByRole("button", { name: "Add player" }).click();
+  }
+
   await page.getByRole("textbox", { name: "Seed" }).fill(seed);
-  await page.getByRole("textbox", { name: "Player 1 name" }).fill("Ada");
-  await page.getByRole("textbox", { name: "Player 2 name" }).fill("Grace");
+  for (const [index, player] of players.entries()) {
+    const playerNumber = index + 1;
+    await page.getByRole("textbox", { name: `Player ${playerNumber} name` }).fill(player.name);
+    await page.getByRole("combobox", { name: `Player ${playerNumber} type` }).selectOption(player.kind);
+    await page.getByRole("textbox", { name: `Player ${playerNumber} color hex` }).fill(player.color);
+  }
+
   await page.getByRole("button", { name: "Create game" }).click();
   await expect(page).toHaveURL(/\/games\/mock-game-\d+$/);
   await expect(page.getByRole("region", { name: "Classic Monopoly-style board" })).toBeVisible();
@@ -112,6 +136,78 @@ test("captures nonblank desktop and mobile game-table screenshots", async ({ pag
   await expectViewportScreenshot(page, testInfo, "game-table-desktop", 1440, 900);
   await expect(page.getByRole("region", { name: "Turn controls" })).toBeVisible();
 
+  await expectViewportScreenshot(page, testInfo, "game-table-tablet", 768, 1024);
+  await expect(page.getByRole("region", { name: "Turn controls" })).toBeVisible();
+
   await expectViewportScreenshot(page, testInfo, "game-table-mobile", 390, 844);
   await expect(page.getByRole("region", { name: "Turn controls" })).toBeInViewport();
+});
+
+test("captures five-player long-name and stacked-token game-table screenshots", async ({ page }, testInfo) => {
+  await createGame(page, "art-screenshot-five-player-stack", [
+    { color: "#0f766e", kind: "human", name: "Ada Lovelace Longname" },
+    { color: "#7c3aed", kind: "ai", name: "Grace Hopper Longname" },
+    { color: "#2563eb", kind: "human", name: "Linus Torvalds Longname" },
+    { color: "#dc2626", kind: "ai", name: "Marie Curie Longname" },
+    { color: "#ca8a04", kind: "ai", name: "Nia Franklin Longname" },
+  ]);
+
+  await expect(page.locator("[data-player-token][data-space-index='0']")).toHaveCount(5);
+  await expect(page.getByRole("region", { name: "Player trays" })).toContainText("Ada Lovelace Longname");
+  await expectViewportScreenshot(page, testInfo, "game-table-five-player-stack", 1440, 900);
+});
+
+test("captures contract-heavy and rejected-log secondary screenshots", async ({ page }, testInfo) => {
+  await createGame(page, "stage-5-7-contracts-log", [
+    { color: "#0f766e", kind: "human", name: "Ada" },
+    { color: "#7c3aed", kind: "human", name: "Grace" },
+    { color: "#c2410c", kind: "ai", name: "Linus" },
+  ]);
+  await page.getByRole("tab", { name: "Contracts" }).click();
+
+  const panel = page.getByRole("region", { name: "Contracts obligations panel" });
+  await expect(panel).toContainText("Agreement between Ada, Grace");
+  await expect(panel).not.toContainText("contract_id");
+  await expect(page.getByRole("region", { name: "Game log" })).toContainText("Rejected action");
+  await expectViewportScreenshot(page, testInfo, "game-table-contract-heavy", 1180, 900);
+});
+
+test("captures AI thinking and rejected-action stress screenshots", async ({ page }, testInfo) => {
+  await page.route(`${mockApiBaseUrl}/games/*/ai/step`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const response = await route.fetch();
+    await route.fulfill({ response });
+  });
+
+  await createGame(page, "stage-7-6-ai-step-mixed", [
+    { color: "#7c3aed", kind: "ai", name: "Grace" },
+    { color: "#0f766e", kind: "human", name: "Ada" },
+  ]);
+
+  const controls = page.getByRole("region", { name: "Turn controls" });
+  const aiStepDone = page.waitForResponse((response) => response.url().includes("/ai/step") && response.request().method() === "POST");
+  await controls.getByRole("button", { name: "Step AI" }).click();
+  await expect(page.getByRole("status", { name: "AI step status" })).toContainText("AI thinking");
+  await expectViewportScreenshot(page, testInfo, "game-table-ai-thinking", 900, 760);
+  await aiStepDone;
+  await expect(page.getByRole("status", { name: "AI step status" })).toContainText("AI done");
+
+  await page.unroute(`${mockApiBaseUrl}/games/*/ai/step`);
+  await createGame(page, "stage-7-6-ai-blocked", [
+    { color: "#7c3aed", kind: "ai", name: "Grace" },
+    { color: "#0f766e", kind: "human", name: "Ada" },
+  ]);
+  await page.getByRole("region", { name: "Turn controls" }).getByRole("button", { name: "Step AI" }).click();
+  await expect(page.getByRole("alert", { name: "Rejected action" })).toContainText("codex_exec_timeout");
+  await expectViewportScreenshot(page, testInfo, "game-table-ai-blocked-rejection", 900, 760);
+});
+
+test("captures game-over winner board art screenshot", async ({ page }, testInfo) => {
+  await createGame(page, "art-screenshot-game-over", [
+    { color: "#0f766e", kind: "human", name: "Ada Champion" },
+    { color: "#7c3aed", kind: "human", name: "Grace Bankrupt" },
+  ]);
+
+  await expect(page.getByRole("status", { name: "Winner Ada Champion!" })).toBeVisible();
+  await expectViewportScreenshot(page, testInfo, "game-table-game-over", 1440, 900);
 });

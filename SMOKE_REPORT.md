@@ -76,18 +76,18 @@ Status: fail
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts e2e/game-table-layout.spec.ts e2e/ai-audit.spec.ts e2e/contracts-log.spec.ts e2e/negotiation.spec.ts e2e/property-management.spec.ts e2e/stage-11-3-playability-review.spec.ts e2e/stage-11-4-render-reliability.spec.ts e2e/art-screenshot-sanity.spec.ts --project=chrome`
 - Passing screenshot sanity check:
   - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/art-screenshot-sanity.spec.ts --project=chrome`
-  - This writes non-full-page desktop and mobile viewport screenshots to the Playwright per-test output directory and decodes their PNG data to verify expected dimensions and nonblank color variation.
+  - This writes non-full-page desktop, tablet, mobile, five-player stacked-token, contract-heavy, AI-thinking, AI-blocked/rejected, and game-over viewport screenshots to the Playwright per-test output directory and decodes their PNG data to verify expected dimensions and nonblank color variation.
 - Passing typecheck:
   - `pnpm --filter @monopoly-ai-game/web run typecheck`
 - Required build command: `pnpm --filter @monopoly-ai-game/web run build`.
 - Required remaining unit/component checks: broader web unit suite after the next visual polish pass.
 - Required remaining E2E checks: full web E2E suite after the next visual polish pass.
-- Required remaining screenshot evidence: tablet viewport, contract-heavy state, AI-thinking state, rejected-action state, game-over state, and final production/build verification screenshots.
+- Required remaining screenshot evidence: final production/build verification screenshots.
 - Required cleanup: stop any web/API servers started during verification and confirm their ports are no longer listening.
 
 ## Residual Risks
 
 - Implementation has not yet been completed against the rewritten `ART_PLAN.md`.
 - Property management, negotiation, contracts, game log, and AI notebook now demote most raw technical detail, but need final visual review against the full game-artifact bar.
-- Board token silhouettes and drawn-card art now have tests, but need final screenshot review for overlap/text fit under long names and five-player stacks.
+- Board token silhouettes, drawn-card art, long names, and five-player stacks now have tests and screenshot sanity coverage, but still need final production-build visual review.
 - The report is intentionally failing until current-state evidence proves the redesigned game surface meets the full acceptance checklist.

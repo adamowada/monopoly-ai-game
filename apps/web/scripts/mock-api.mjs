@@ -241,6 +241,7 @@ function createGame(payload) {
   configureContractsLogSeed(game);
   configureAiAuditSeed(game);
   configureStage105Seed(game);
+  configureArtScreenshotSeed(game);
   games.set(id, game);
   return game;
 }
@@ -412,6 +413,33 @@ function isStage105ContractSeed(seed) {
 
 function isStage105IncomeTaxSeed(seed) {
   return typeof seed === "string" && seed.startsWith("stage-10-5-income-tax-bank-debt");
+}
+
+function isArtScreenshotGameOverSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("art-screenshot-game-over");
+}
+
+function configureArtScreenshotSeed(game) {
+  if (!isArtScreenshotGameOverSeed(game.seed) || game.players.length === 0) {
+    return;
+  }
+
+  game.status = "ended";
+  game.current_phase = "GAME_OVER";
+  game.current_player_index = 0;
+  game.pending_debt = null;
+
+  for (const [index, player] of game.players.entries()) {
+    const isWinner = index === 0;
+    player.status = isWinner ? "active" : "bankrupt";
+    player.state = {
+      ...player.state,
+      cash: isWinner ? 2420 : 0,
+      is_bankrupt: !isWinner,
+      position: isWinner ? 0 : 4 + index,
+    };
+    player.updated_at = nowIso();
+  }
 }
 
 function ensureMockAiProfiles(game) {
