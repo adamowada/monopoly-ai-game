@@ -855,11 +855,41 @@ def _complete_resolved_timing_window(state: GameState, event_id_prefix: str) -> 
 
 
 def _complete_bankruptcy_action(state: GameState, event_id_prefix: str) -> GameState:
-    if not is_game_over(state):
-        return state
-
     state = _set_turn_phase(state, TurnPhase.BANKRUPTCY_RESOLUTION, event_id_prefix)
-    return _set_turn_phase(state, TurnPhase.GAME_OVER, event_id_prefix)
+    if is_game_over(state):
+        return _set_turn_phase(state, TurnPhase.GAME_OVER, event_id_prefix)
+
+    state = _set_turn_phase(state, TurnPhase.END_TURN, event_id_prefix)
+    return _advance_to_next_active_start_turn(state, event_id_prefix)
+
+
+def _advance_to_next_active_start_turn(state: GameState, event_id_prefix: str) -> GameState:
+    next_player_index = _next_active_player_index(state)
+    next_player = state.players[next_player_index]
+    event = GameEvent(
+        event_id=f"{event_id_prefix}-{state.event_sequence + 1}",
+        sequence=state.event_sequence + 1,
+        type="TURN_STATE_SET",
+        payload=TurnStateSetPayload(
+            turn_number=state.turn.turn_number + 1,
+            current_player_index=next_player_index,
+            current_player_id=next_player.id,
+            phase=TurnPhase.START_TURN.value,
+            consecutive_doubles=0,
+        ),
+    )
+    record_rule_event(event)
+    return apply_event(state, event)
+
+
+def _next_active_player_index(state: GameState) -> int:
+    player_count = len(state.players)
+    for offset in range(1, player_count + 1):
+        player_index = (state.turn.current_player_index + offset) % player_count
+        if not state.players[player_index].is_bankrupt:
+            return player_index
+
+    raise IllegalRuleActionError("no active players remain")
 
 
 def _prepare_pending_doubles_roll(state: GameState, actor_id: str, event_id_prefix: str) -> GameState:

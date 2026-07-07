@@ -328,6 +328,79 @@ async def test_final_bankruptcy_action_ends_two_player_game(
 
 
 @pytest.mark.asyncio
+async def test_non_final_bankruptcy_rotates_to_next_active_player(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "non-final-bankruptcy-rotates",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "human"},
+                {"name": "Linus", "kind": "human"},
+                {"name": "Katherine", "kind": "human"},
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    bankrupt_player_id = created["players"][0]["id"]
+    next_player_id = created["players"][1]["id"]
+    try:
+        legal_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": bankrupt_player_id},
+        )
+        bankruptcy_action = next(
+            action
+            for action in legal_response.json()["legal_actions"]
+            if action["type"] == "DECLARE_BANKRUPTCY"
+        )
+
+        action_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "non-final-bankruptcy"},
+            json=bankruptcy_action,
+        )
+        metadata_response = await client.get(f"/games/{game_id}")
+        next_actions_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": next_player_id},
+        )
+
+        assert action_response.status_code == 200, action_response.text
+        body = action_response.json()
+        assert body["status"] == "accepted"
+        assert body["state"]["turn"]["phase"] == "START_TURN"
+        assert body["state"]["turn"]["current_player_id"] == next_player_id
+        assert body["state"]["turn"]["turn_number"] == 2
+        assert [event["event_type"] for event in body["accepted_events"]][-3:] == [
+            "TURN_STATE_SET",
+            "TURN_STATE_SET",
+            "TURN_STATE_SET",
+        ]
+        assert body["state"]["players"][0]["is_bankrupt"] is True
+        assert sum(not player["is_bankrupt"] for player in body["state"]["players"]) == 3
+
+        assert metadata_response.status_code == 200
+        metadata = metadata_response.json()
+        assert metadata["status"] == "active"
+        assert metadata["current_phase"] == "START_TURN"
+        assert metadata["players"][0]["status"] == "bankrupt"
+
+        assert next_actions_response.status_code == 200
+        assert {action["type"] for action in next_actions_response.json()["legal_actions"]} >= {
+            "ROLL_DICE",
+            "DECLARE_BANKRUPTCY",
+        }
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
 async def test_income_tax_bank_debt_settlement_persists_clean_clear_event(
     client: httpx.AsyncClient,
     session_factory: async_sessionmaker,
