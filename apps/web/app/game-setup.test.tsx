@@ -78,16 +78,20 @@ describe("GameSetupPanel", () => {
   it("renders setup controls for local 2-5 player game creation", () => {
     render(<GameSetupPanel initialSeed="seed-fixed" />);
 
-    expect(screen.getByRole("heading", { level: 2, name: "Game setup" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Choose seats" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Choose seats" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Seed" })).toHaveValue("seed-fixed");
     expect(screen.getByRole("button", { name: "Generate seed" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add player" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Configured players" })).not.toBeInTheDocument();
 
-    const players = screen.getByRole("table", { name: "Configured players" });
-    expect(within(players).getByRole("textbox", { name: "Player 1 name" })).toHaveValue("Player 1");
-    expect(within(players).getByRole("combobox", { name: "Player 1 type" })).toHaveValue("human");
-    expect(within(players).getByRole("textbox", { name: "Player 1 color hex" })).toHaveValue("#0f766e");
-    expect(within(players).getByRole("textbox", { name: "Player 2 name" })).toHaveValue("Player 2");
+    const seats = screen.getByRole("region", { name: "Choose seats" });
+    const seat1 = within(seats).getByRole("group", { name: "Seat 1 token setup" });
+    const seat2 = within(seats).getByRole("group", { name: "Seat 2 token setup" });
+    expect(within(seat1).getByRole("textbox", { name: "Player 1 name" })).toHaveValue("Player 1");
+    expect(within(seat1).getByRole("combobox", { name: "Player 1 type" })).toHaveValue("human");
+    expect(within(seat1).getByRole("textbox", { name: "Player 1 color hex" })).toHaveValue("#0f766e");
+    expect(within(seat2).getByRole("textbox", { name: "Player 2 name" })).toHaveValue("Player 2");
 
     expect(screen.getByRole("spinbutton", { name: "Max negotiation rounds" })).toHaveValue(3);
     expect(screen.getByRole("spinbutton", { name: "Proposal limit per player" })).toHaveValue(4);

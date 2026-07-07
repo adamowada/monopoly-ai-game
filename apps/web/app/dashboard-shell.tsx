@@ -1,18 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import {
-  Activity,
-  BadgeCheck,
-  Brain,
-  Blocks,
-  Database,
-  Gamepad2,
-  RefreshCw,
-  Server,
-  Settings2,
-  ShieldAlert,
-} from "lucide-react";
+import { BadgeCheck, Gamepad2, RefreshCw, ShieldAlert, UsersRound } from "lucide-react";
+import { useState } from "react";
 
 import { GameSetupPanel } from "./game-setup";
 import { RejectedActionAuditView } from "./rejected-action-audit";
@@ -27,35 +17,10 @@ type DashboardShellProps = {
   title?: string;
 };
 
-const navigation = [
-  { name: "Overview", href: "#overview", icon: Activity },
-  { name: "Game setup", href: "#game-setup", icon: Gamepad2 },
-  { name: "Table check", href: "#table-check", icon: BadgeCheck },
-  { name: "Rulings", href: "#rulings", icon: ShieldAlert },
-  { name: "Table areas", href: "#table-areas", icon: Blocks },
-  { name: "House rules", href: "#game-setup", icon: Settings2 },
-];
-
-const workspaceRows = [
-  {
-    name: "Game table",
-    status: "Ready",
-    detail: "Created games open into the illustrated board with player tokens, legal actions, and live table state.",
-    icon: Gamepad2,
-  },
-  {
-    name: "AI notebook",
-    status: "Active",
-    detail: "AI players keep a private notebook for decisions, memory, dialogue, and rejected moves.",
-    icon: Brain,
-  },
-  {
-    name: "Rules authority",
-    status: "Referee-checked",
-    detail: "The local referee checks every move before the table state changes.",
-    icon: ShieldAlert,
-  },
-];
+const prepNavigation = [
+  { name: "Setup", href: "#game-setup", icon: UsersRound },
+  { name: "Connection details", href: "#connection-details", icon: BadgeCheck },
+] as const;
 
 async function fetchHealthSnapshot(): Promise<HealthSnapshot> {
   const response = await fetch("/api/backend-health", {
@@ -80,68 +45,8 @@ function formatCheckedAt(value: string): string {
   });
 }
 
-function StatusBadge({
-  tone,
-  children,
-}: Readonly<{
-  tone: "neutral" | "success" | "warning" | "danger" | "info";
-  children: React.ReactNode;
-}>) {
-  const tones = {
-    neutral: "bg-neutral-100 text-neutral-700 ring-neutral-300 [&>svg]:fill-neutral-400",
-    success: "bg-green-50 text-green-700 ring-green-200 [&>svg]:fill-green-500",
-    warning: "bg-amber-50 text-amber-800 ring-amber-200 [&>svg]:fill-amber-500",
-    danger: "bg-rose-50 text-rose-700 ring-rose-200 [&>svg]:fill-rose-500",
-    info: "bg-sky-50 text-sky-700 ring-sky-200 [&>svg]:fill-sky-500",
-  };
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-        tones[tone],
-      )}
-    >
-      <svg viewBox="0 0 6 6" aria-hidden="true" className="size-1.5">
-        <circle r={3} cx={3} cy={3} />
-      </svg>
-      {children}
-    </span>
-  );
-}
-
-function getTierRows(snapshot: HealthSnapshot) {
-  const backendOnline = snapshot.state === "online";
-
-  return [
-    {
-      tier: "Rules referee",
-      status: backendOnline ? "ready" : "offline",
-      tone: backendOnline ? "success" : "danger",
-      stage: backendOnline ? "Move validation" : "Connection failed",
-      environment: backendOnline ? "Local table" : snapshot.error,
-      record: backendOnline ? "Ready for play" : "Not verified",
-      icon: Server,
-    },
-    {
-      tier: "Game board",
-      status: "ready",
-      tone: "info",
-      stage: "Board and controls",
-      environment: "local browser",
-      record: "Ready for play",
-      icon: Activity,
-    },
-    {
-      tier: "Save data",
-      status: backendOnline ? "ready" : "pending",
-      tone: backendOnline ? "success" : "warning",
-      stage: "Game persistence",
-      environment: "local database",
-      record: backendOnline ? snapshot.health.database : "awaiting referee",
-      icon: Database,
-    },
-  ] as const;
+function readinessLabel(snapshot: HealthSnapshot): string {
+  return snapshot.state === "online" ? "Ready" : "Unavailable";
 }
 
 export function DashboardShell({
@@ -157,243 +62,155 @@ export function DashboardShell({
   });
   const snapshot = healthQuery.data;
   const backendOnline = snapshot.state === "online";
-  const tierRows = getTierRows(snapshot);
+  const [showConnectionDetails, setShowConnectionDetails] = useState(false);
+  const [showRuleRulings, setShowRuleRulings] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[var(--color-page)] text-neutral-950">
-      <div className="lg:flex">
-        <aside className="hidden border-r border-neutral-200 bg-white lg:fixed lg:inset-y-0 lg:flex lg:w-72 lg:flex-col">
-          <div className="flex h-16 items-center gap-3 border-b border-neutral-200 px-6">
-            <div className="flex size-9 items-center justify-center rounded-md bg-teal-700 text-white">
-              <Gamepad2 aria-hidden="true" className="size-5" />
-            </div>
+    <div className="min-h-screen bg-[#173c45] text-[#2f2418]">
+      <header className="border-b-4 border-[#2f2418] bg-[#fff8e8]">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+          <div className="flex items-center gap-3">
+            <span className="grid size-11 place-items-center rounded-md border-2 border-[#2f2418] bg-[#d7a84c] text-[#173c45] shadow-[0_3px_0_rgba(47,36,24,0.25)]">
+              <Gamepad2 aria-hidden="true" className="size-6" />
+            </span>
             <div>
-              <p className="text-sm font-semibold text-neutral-950">Monopoly 2.0</p>
-              <p className="text-xs text-neutral-500">Local tabletop game</p>
+              <p className="text-xs font-black uppercase text-[#6f604c]">Local tabletop build</p>
+              <h1 className="text-2xl font-black tracking-normal text-[#2f2418]">{title}</h1>
             </div>
           </div>
-          <nav aria-label="Table navigation" className="flex flex-1 flex-col gap-1 px-4 py-5">
-            {navigation.map((item) => (
+          <nav aria-label="Game prep navigation" className="flex flex-wrap gap-2 text-sm">
+            {prepNavigation.map((item) => (
               <a
-                key={`${item.name}-${item.href}`}
+                key={item.name}
+                className="inline-flex items-center gap-2 rounded-sm border-2 border-[#2f2418]/25 bg-white/70 px-3 py-2 font-black text-[#2f2418] hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]"
                 href={item.href}
-                className="group flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
               >
-                <item.icon aria-hidden="true" className="size-4 text-neutral-500 group-hover:text-teal-700" />
+                <item.icon aria-hidden="true" className="size-4 text-[#0f766e]" />
                 {item.name}
               </a>
             ))}
           </nav>
-        </aside>
+        </div>
+      </header>
 
-        <div className="min-w-0 flex-1 lg:pl-72">
-          <header className="border-b border-neutral-200 bg-white">
-            <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <main>
+        <section className="bg-[#173c45] text-[#fff8e8]" aria-labelledby="table-prep-title">
+          <div className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8">
+            <div>
+              <h2 id="table-prep-title" className="text-xl font-black tracking-normal">
+                Set the seats, then open the board.
+              </h2>
+              <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-[#f7e6ad]">
+                Pick tokens, colors, human or AI seats, and the local negotiation limits before the
+                game table opens.
+              </p>
+            </div>
+
+            <div
+              role="status"
+              aria-label="Referee readiness"
+              aria-live="polite"
+              className="rounded-md border-2 border-[#f7d977] bg-[#fff8e8] p-3 text-[#2f2418] shadow-[0_5px_0_rgba(0,0,0,0.2)]"
+            >
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase text-teal-700">
-                    Local tabletop build
+                  <p className="text-xs font-black uppercase text-[#6f604c]">Referee readiness</p>
+                  <p className="mt-1 text-lg font-black">{readinessLabel(snapshot)}</p>
+                  <p className="mt-1 text-xs font-semibold text-[#6f604c]">
+                    {backendOnline ? "Local referee" : "Connection unavailable"}
                   </p>
-                  <h1 className="mt-1 text-2xl font-semibold tracking-normal text-neutral-950">
-                    {title}
-                  </h1>
                 </div>
-                <nav
-                  aria-label="Table navigation"
-                  className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3 lg:hidden"
+                <Button
+                  aria-label="Refresh referee readiness"
+                  disabled={healthQuery.isFetching}
+                  onClick={() => {
+                    void healthQuery.refetch();
+                  }}
+                  variant="secondary"
                 >
-                  {navigation.map((item) => (
-                    <a
-                      key={`${item.name}-${item.href}`}
-                      href={item.href}
-                      className="flex items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 font-medium text-neutral-700 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
-                    >
-                      <item.icon aria-hidden="true" className="size-4" />
-                      {item.name}
-                    </a>
-                  ))}
-                </nav>
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={cn("size-4", healthQuery.isFetching && "animate-spin")}
+                  />
+                </Button>
               </div>
             </div>
-          </header>
+          </div>
+        </section>
 
-          <main>
-            <section id="overview" aria-labelledby="overview-title" className="border-b border-neutral-200 bg-white">
-              <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] lg:px-8">
-                <div>
-                  <h2 id="overview-title" className="text-base font-semibold text-neutral-950">
-                    Table status
-                  </h2>
-                  <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
-                    Start a local table, choose human or AI seats, then play from the illustrated
-                    board with referee-checked moves, negotiations, contracts, and the AI notebook.
-                  </p>
+        <GameSetupPanel />
+
+        <section className="bg-[#eaf3d7]" aria-label="Troubleshooting">
+          <div className="mx-auto grid max-w-7xl gap-3 px-4 py-5 sm:px-6 lg:px-8">
+            <div className="rounded-md border-2 border-[#2f2418]/25 bg-[#fff8e8] p-3">
+              <button
+                id="connection-details"
+                aria-expanded={showConnectionDetails}
+                className="text-sm font-black text-[#2f2418]"
+                onClick={() => setShowConnectionDetails((current) => !current)}
+                type="button"
+              >
+                Connection details
+              </button>
+              {showConnectionDetails ? (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="text-xs uppercase text-[#6f604c]">
+                      <tr>
+                        <th scope="col" className="px-3 py-2 font-black">
+                          Area
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-black">
+                          Status
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-black">
+                          Role
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-black">
+                          Mode
+                        </th>
+                        <th scope="col" className="px-3 py-2 font-black">
+                          Checked
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#b99768]/40">
+                      <tr>
+                        <th scope="row" className="px-3 py-3 font-black">
+                          Rules referee
+                        </th>
+                        <td className="px-3 py-3">{backendOnline ? "ready" : "offline"}</td>
+                        <td className="px-3 py-3">{backendOnline ? "Move validation" : "Connection failed"}</td>
+                        <td className="px-3 py-3">{backendOnline ? "Local table" : snapshot.error}</td>
+                        <td className="px-3 py-3">{formatCheckedAt(snapshot.checkedAt)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
+              ) : null}
+            </div>
 
-                <div
-                  role="status"
-                  aria-label="Table connection"
-                  aria-live="polite"
-                  className="rounded-md border border-neutral-200 bg-neutral-50 p-4"
+            {initialRejectedActions.length > 0 ? (
+              <div className="rounded-md border-2 border-[#2f2418]/25 bg-[#fff8e8] p-3">
+                <button
+                  aria-expanded={showRuleRulings}
+                  className="flex items-center gap-2 text-sm font-black text-[#2f2418]"
+                  onClick={() => setShowRuleRulings((current) => !current)}
+                  type="button"
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-medium text-neutral-950">Table connection</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <StatusBadge tone={backendOnline ? "success" : "danger"}>
-                          {backendOnline ? "Ready" : "Unavailable"}
-                        </StatusBadge>
-                        <span className="text-sm text-neutral-600">Rules referee</span>
-                      </div>
-                    </div>
-                    <Button
-                      aria-label="Refresh table connection"
-                      disabled={healthQuery.isFetching}
-                      onClick={() => {
-                        void healthQuery.refetch();
-                      }}
-                    >
-                      <RefreshCw
-                        aria-hidden="true"
-                        className={cn("size-4", healthQuery.isFetching && "animate-spin")}
-                      />
-                      {healthQuery.isFetching ? "Refreshing" : "Refresh"}
-                    </Button>
+                  <ShieldAlert aria-hidden="true" className="size-4 text-[#9b2f18]" />
+                  Rule rulings
+                </button>
+                {showRuleRulings ? (
+                  <div className="mt-4">
+                    <RejectedActionAuditView records={initialRejectedActions} />
                   </div>
-
-                  <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-                    <div>
-                      <dt className="text-xs font-medium uppercase text-neutral-500">Rules</dt>
-                      <dd className="mt-1 text-neutral-950">
-                        {backendOnline ? "Move validation ready" : "Unverified"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium uppercase text-neutral-500">Mode</dt>
-                      <dd className="mt-1 text-neutral-950">
-                        {backendOnline ? "Local table" : "Offline"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium uppercase text-neutral-500">Save data</dt>
-                      <dd className="mt-1 text-neutral-950">
-                        {backendOnline ? snapshot.health.database : "Not verified"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs font-medium uppercase text-neutral-500">Checked</dt>
-                      <dd className="mt-1 text-neutral-950">{formatCheckedAt(snapshot.checkedAt)}</dd>
-                    </div>
-                  </dl>
-                </div>
+                ) : null}
               </div>
-            </section>
-
-            <GameSetupPanel />
-
-            <section id="table-check" aria-labelledby="table-check-title" className="bg-[var(--color-page)]">
-              <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <h2 id="table-check-title" className="text-base font-semibold text-neutral-950">
-                      Table check
-                    </h2>
-                    <p className="mt-2 text-sm text-neutral-600">
-                      Fast local checks for the board, rules referee, and saved game state.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-5 overflow-hidden border-y border-neutral-200 bg-white">
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-left text-sm">
-                      <thead className="bg-neutral-50 text-xs uppercase text-neutral-500">
-                        <tr>
-                          <th scope="col" className="px-4 py-3 font-semibold sm:px-6">
-                            Area
-                          </th>
-                          <th scope="col" className="px-4 py-3 font-semibold">
-                            Status
-                          </th>
-                          <th scope="col" className="px-4 py-3 font-semibold">
-                            Role
-                          </th>
-                          <th scope="col" className="px-4 py-3 font-semibold">
-                            Mode
-                          </th>
-                          <th scope="col" className="px-4 py-3 font-semibold">
-                            Record
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-neutral-200">
-                        {tierRows.map((row) => (
-                          <tr key={row.tier}>
-                            <th scope="row" className="whitespace-nowrap px-4 py-4 font-medium text-neutral-950 sm:px-6">
-                              <span className="flex items-center gap-2">
-                                <row.icon aria-hidden="true" className="size-4 text-neutral-500" />
-                                {row.tier}
-                              </span>
-                            </th>
-                            <td className="px-4 py-4">
-                              <StatusBadge tone={row.tone}>{row.status}</StatusBadge>
-                            </td>
-                            <td className="whitespace-nowrap px-4 py-4 text-neutral-700">{row.stage}</td>
-                            <td className="max-w-xs px-4 py-4 text-neutral-700">{row.environment}</td>
-                            <td className="whitespace-nowrap px-4 py-4 text-neutral-700">{row.record}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section
-              id="rulings"
-              aria-labelledby="rejected-actions-title"
-              className="border-t border-neutral-200 bg-[var(--color-page)]"
-            >
-              <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-                <RejectedActionAuditView records={initialRejectedActions} />
-              </div>
-            </section>
-
-            <section id="table-areas" aria-labelledby="workspace-title" className="border-t border-neutral-200 bg-white">
-              <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:px-8">
-                <div>
-                  <h2 id="workspace-title" className="text-base font-semibold text-neutral-950">
-                    Table areas
-                  </h2>
-                  <div className="mt-5 grid gap-3 md:grid-cols-3">
-                    {workspaceRows.map((item) => (
-                      <article key={item.name} className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <item.icon aria-hidden="true" className="size-5 text-teal-700" />
-                          <StatusBadge tone={item.status === "Referee-checked" ? "info" : "neutral"}>
-                            {item.status}
-                          </StatusBadge>
-                        </div>
-                        <h3 className="mt-4 text-sm font-semibold text-neutral-950">{item.name}</h3>
-                        <p className="mt-2 text-sm leading-6 text-neutral-600">{item.detail}</p>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-
-                <aside className="rounded-md border border-neutral-200 bg-neutral-50 p-4">
-                  <h3 className="text-sm font-semibold text-neutral-950">Local table rules</h3>
-                  <p className="mt-2 text-sm leading-6 text-neutral-600">
-                    Games run locally only. The rules referee checks each move while the board,
-                    action controls, negotiations, contracts, and AI notebook stay visible.
-                  </p>
-                </aside>
-              </div>
-            </section>
-          </main>
-        </div>
-      </div>
+            ) : null}
+          </div>
+        </section>
+      </main>
     </div>
   );
 }

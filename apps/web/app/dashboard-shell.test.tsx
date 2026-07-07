@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DashboardShell } from "./dashboard-shell";
@@ -64,7 +64,7 @@ function renderDashboard(rejectedActions: RejectedActionRecord[] = []) {
 }
 
 describe("DashboardShell", () => {
-  it("renders the tabletop app shell with table connection and area records", () => {
+  it("renders a board-game setup surface instead of an admin dashboard shell", () => {
     renderDashboard();
 
     expect(
@@ -74,29 +74,32 @@ describe("DashboardShell", () => {
       }),
     ).toBeInTheDocument();
 
-    const navigation = screen.getAllByRole("navigation", { name: "Table navigation" })[0];
-    expect(within(navigation).getByRole("link", { name: /Overview/ })).toHaveAttribute("href", "#overview");
-    expect(within(navigation).getByRole("link", { name: /Table check/ })).toHaveAttribute("href", "#table-check");
-    expect(within(navigation).getByRole("link", { name: /Rulings/ })).toHaveAttribute(
+    const navigation = screen.getByRole("navigation", { name: "Game prep navigation" });
+    expect(within(navigation).getByRole("link", { name: "Setup" })).toHaveAttribute("href", "#game-setup");
+    expect(within(navigation).getByRole("link", { name: "Connection details" })).toHaveAttribute(
       "href",
-      "#rulings",
+      "#connection-details",
     );
+    expect(within(navigation).queryByRole("link", { name: /Table check/ })).not.toBeInTheDocument();
+    expect(within(navigation).queryByRole("link", { name: /Table areas/ })).not.toBeInTheDocument();
 
-    const healthStatus = screen.getByRole("status", { name: "Table connection" });
+    const healthStatus = screen.getByRole("status", { name: "Referee readiness" });
     expect(healthStatus).toHaveTextContent("Ready");
-    expect(healthStatus).toHaveTextContent("Rules referee");
-    expect(healthStatus).toHaveTextContent("Move validation ready");
-    expect(healthStatus).toHaveTextContent("Local table");
-    expect(healthStatus).toHaveTextContent("12:00:00 AM UTC");
+    expect(healthStatus).toHaveTextContent("Local referee");
 
+    expect(screen.getByRole("region", { name: "Choose seats" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Table check" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Table areas" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Connection details" }));
     expect(screen.getByRole("row", { name: /Rules referee ready Move validation/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Game board ready Board and controls/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Save data ready Game persistence/ })).toBeInTheDocument();
   });
 
-  it("mounts the rule rulings view inside the app shell", () => {
+  it("keeps rule rulings inside troubleshooting details", () => {
     renderDashboard([rejectedAction]);
 
+    expect(screen.queryByRole("heading", { level: 2, name: "Rule rulings" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Rule rulings" }));
     expect(screen.getByRole("heading", { level: 2, name: "Rule rulings" })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /illegal_action START_TURN BUY_PROPERTY/ })).toBeInTheDocument();
   });

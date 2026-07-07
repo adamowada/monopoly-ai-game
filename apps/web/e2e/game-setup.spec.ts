@@ -3,7 +3,8 @@ import { expect, test } from "@playwright/test";
 test("creates a configured game and navigates to the board shell", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { level: 2, name: "Game setup" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Choose seats" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Choose seats" })).toBeVisible();
   await page.getByRole("textbox", { name: "Seed" }).fill("stage-5-e2e-seed");
   await page.getByRole("textbox", { name: "Player 1 name" }).fill("Ada");
   await page.getByRole("textbox", { name: "Player 2 name" }).fill("Grace");
@@ -17,13 +18,12 @@ test("creates a configured game and navigates to the board shell", async ({ page
   await expect(page).toHaveURL(/\/games\/mock-game-\d+$/);
   expect(page.url()).toContain("/games/");
   await expect(page.getByRole("region", { name: "Classic Monopoly-style board" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Active player" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Turn controls" })).toBeVisible();
-  await expect(page.getByText("stage-5-e2e-seed")).toBeVisible();
-  await expect(page.getByRole("row", { name: /Ada Human #0f766e GO \(0\)/ })).toBeVisible();
-  await expect(page.getByRole("row", { name: /Grace AI #7c3aed GO \(0\)/ })).toBeVisible();
-  await expect(page.getByText("Max rounds: 4")).toBeVisible();
-  await expect(page.getByText("Proposal limit/player: 3")).toBeVisible();
+  const trays = page.getByRole("region", { name: "Player trays" });
+  await expect(trays).toContainText("Ada");
+  await expect(trays).toContainText("Grace");
+  await expect(trays).toContainText("$1,500");
+  await expect(page.getByText("stage-5-e2e-seed")).toHaveCount(0);
 });
 
 test("blocks client invalid setup and displays server validation errors", async ({ page }) => {
@@ -33,7 +33,7 @@ test("blocks client invalid setup and displays server validation errors", async 
   await page.getByRole("textbox", { name: "Player 2 name" }).fill("Ada");
   await page.getByRole("button", { name: "Create game" }).click();
 
-  const setup = page.getByRole("region", { name: "Game setup" });
+  const setup = page.getByRole("region", { name: "Choose seats" });
   await expect(setup.getByRole("alert")).toContainText("Player names must be unique");
   await expect(page).toHaveURL("/");
 

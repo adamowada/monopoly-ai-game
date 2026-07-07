@@ -235,30 +235,32 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
   }
 
   return (
-    <section id="game-setup" aria-labelledby="game-setup-title" className="border-b border-neutral-200 bg-white">
+    <section id="game-setup" aria-labelledby="game-setup-title" className="bg-[#eaf3d7]">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase text-teal-700">Local tabletop setup</p>
-            <h2 id="game-setup-title" className="mt-1 text-base font-semibold text-neutral-950">
-              Game setup
+            <p className="text-xs font-black uppercase text-[#0f766e]">Local tabletop setup</p>
+            <h2 id="game-setup-title" className="mt-1 text-xl font-black tracking-normal text-[#2f2418]">
+              Choose seats
             </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
-              Configure seats, colors, AI players, and negotiation limits before opening the board.
+            <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-[#6f604c]">
+              Build the table as seats and tokens, then open the board when everyone is ready.
             </p>
           </div>
-          <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-            <span className="block text-xs font-medium uppercase text-neutral-500">Player count</span>
-            <span className="mt-1 block font-medium text-neutral-950">{players.length} configured</span>
+          <div className="rounded-md border-2 border-[#2f2418]/25 bg-[#fff8e8] px-3 py-2 text-sm text-[#6f604c]">
+            <span className="block text-xs font-black uppercase">Seats</span>
+            <span className="mt-1 block font-black text-[#2f2418]">{players.length} ready</span>
           </div>
         </div>
 
         <form noValidate onSubmit={handleSubmit} className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-w-0 rounded-md border border-neutral-200 bg-neutral-50">
-            <div className="flex flex-col gap-3 border-b border-neutral-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            className="min-w-0 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_10px_25px_rgba(47,36,24,0.14)]"
+          >
+            <div className="flex flex-col gap-3 border-b border-[#b99768]/50 pb-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-neutral-950">Players</h3>
-                <p className="mt-1 text-sm text-neutral-600">Each row becomes one token at the local table.</p>
+                <h3 className="text-sm font-black text-[#2f2418]">Seat cards</h3>
+                <p className="mt-1 text-sm font-semibold text-[#6f604c]">Each card becomes one token at the board.</p>
               </div>
               <Button onClick={addPlayer} disabled={!canAddPlayer || isSubmitting} className="justify-center">
                 <Plus aria-hidden="true" className="size-4" />
@@ -266,105 +268,102 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
               </Button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table aria-label="Configured players" className="min-w-full text-left text-sm">
-                <thead className="bg-white text-xs uppercase text-neutral-500">
-                  <tr>
-                    <th scope="col" className="px-4 py-3 font-semibold">
-                      Seat
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-semibold">
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {players.map((player, index) => {
+                const playerNumber = index + 1;
+                return (
+                  <article
+                    key={player.id}
+                    aria-label={`Seat ${playerNumber} token setup`}
+                    className="grid gap-3 rounded-md border-2 border-[#b99768]/70 bg-white/85 p-3 text-[#2f2418] shadow-sm"
+                    role="group"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span
+                        aria-hidden="true"
+                        className="grid size-11 shrink-0 place-items-center rounded-[0.35rem] border-2 border-[#2f2418] text-sm font-black text-white shadow-[0_3px_0_rgba(47,36,24,0.25)]"
+                        style={{ backgroundColor: colorInputValue(player.color) }}
+                      >
+                        {playerNumber}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-black uppercase text-[#6f604c]">Seat {playerNumber}</p>
+                        <p className="mt-1 flex items-center gap-1.5 text-sm font-black">
+                          {player.kind === "ai" ? (
+                            <Bot aria-hidden="true" className="size-4 text-purple-700" />
+                          ) : (
+                            <UserRound aria-hidden="true" className="size-4 text-teal-700" />
+                          )}
+                          {player.kind === "ai" ? "AI token" : "Human token"}
+                        </p>
+                      </div>
+                      <Button
+                        aria-label={`Remove Player ${playerNumber}`}
+                        onClick={() => removePlayer(index)}
+                        disabled={!canRemovePlayer || isSubmitting}
+                        variant="secondary"
+                      >
+                        <Trash2 aria-hidden="true" className="size-4" />
+                      </Button>
+                    </div>
+
+                    <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
                       Name
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-semibold">
-                      Type
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-semibold">
-                      Color
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-semibold">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-200 bg-white">
-                  {players.map((player, index) => {
-                    const playerNumber = index + 1;
-                    return (
-                      <tr key={player.id}>
-                        <td className="whitespace-nowrap px-4 py-3 font-medium text-neutral-950">
-                          <span className="inline-flex items-center gap-2">
-                            {player.kind === "ai" ? (
-                              <Bot aria-hidden="true" className="size-4 text-purple-700" />
-                            ) : (
-                              <UserRound aria-hidden="true" className="size-4 text-teal-700" />
-                            )}
-                            {playerNumber}
-                          </span>
-                        </td>
-                        <td className="min-w-48 px-4 py-3">
+                      <input
+                        aria-label={`Player ${playerNumber} name`}
+                        value={player.name}
+                        onChange={(event) => updatePlayer(index, { name: event.target.value })}
+                        className="w-full rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                      />
+                    </label>
+
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                        Seat type
+                        <select
+                          aria-label={`Player ${playerNumber} type`}
+                          value={player.kind}
+                          onChange={(event) => setPlayerKind(index, event.target.value as PlayerKind)}
+                          className="w-full rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                        >
+                          <option value="human">Human</option>
+                          <option value="ai">AI</option>
+                        </select>
+                      </label>
+
+                      <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                        Token color
+                        <span className="flex items-center gap-2">
                           <input
-                            aria-label={`Player ${playerNumber} name`}
-                            value={player.name}
-                            onChange={(event) => updatePlayer(index, { name: event.target.value })}
-                            className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                            aria-label={`Player ${playerNumber} color picker`}
+                            type="color"
+                            value={colorInputValue(player.color)}
+                            onChange={(event) => updatePlayer(index, { color: event.target.value })}
+                            className="size-10 rounded-md border border-[#b99768] bg-white p-1"
                           />
-                        </td>
-                        <td className="min-w-36 px-4 py-3">
-                          <select
-                            aria-label={`Player ${playerNumber} type`}
-                            value={player.kind}
-                            onChange={(event) => setPlayerKind(index, event.target.value as PlayerKind)}
-                            className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
-                          >
-                            <option value="human">Human</option>
-                            <option value="ai">AI</option>
-                          </select>
-                        </td>
-                        <td className="min-w-48 px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <input
-                              aria-label={`Player ${playerNumber} color picker`}
-                              type="color"
-                              value={colorInputValue(player.color)}
-                              onChange={(event) => updatePlayer(index, { color: event.target.value })}
-                              className="size-9 rounded-md border border-neutral-300 bg-white p-1"
-                            />
-                            <input
-                              aria-label={`Player ${playerNumber} color hex`}
-                              value={player.color}
-                              onChange={(event) => updatePlayer(index, { color: event.target.value })}
-                              className="w-28 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
-                            />
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <Button
-                            aria-label={`Remove Player ${playerNumber}`}
-                            onClick={() => removePlayer(index)}
-                            disabled={!canRemovePlayer || isSubmitting}
-                            variant="secondary"
-                          >
-                            <Trash2 aria-hidden="true" className="size-4" />
-                            Remove
-                          </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          <input
+                            aria-label={`Player ${playerNumber} color hex`}
+                            value={player.color}
+                            onChange={(event) => updatePlayer(index, { color: event.target.value })}
+                            className="w-28 rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                          />
+                        </span>
+                      </label>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </div>
 
-          <div className="grid gap-4 rounded-md border border-neutral-200 bg-neutral-50 p-4">
-            <label className="grid gap-1 text-sm font-medium text-neutral-700">
+          <div className="grid gap-4 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-4 shadow-[0_8px_20px_rgba(47,36,24,0.12)]">
+            <label className="grid gap-1 text-sm font-black text-[#2f2418]">
               Seed
               <span className="flex gap-2">
                 <input
                   value={seed}
                   onChange={(event) => setSeed(event.target.value)}
-                  className="min-w-0 flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                  className="min-w-0 flex-1 rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
                 />
                 <Button
                   aria-label="Generate seed"
@@ -379,8 +378,8 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
             </label>
 
             <fieldset className="grid gap-3">
-              <legend className="text-sm font-semibold text-neutral-950">Negotiation cutoffs</legend>
-              <label className="grid gap-1 text-sm font-medium text-neutral-700">
+              <legend className="text-sm font-black text-[#2f2418]">Negotiation cutoffs</legend>
+              <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
                 Max negotiation rounds
                 <input
                   type="number"
@@ -388,10 +387,10 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
                   max={20}
                   value={maxRounds}
                   onChange={(event) => setMaxRounds(event.target.value)}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                  className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
                 />
               </label>
-              <label className="grid gap-1 text-sm font-medium text-neutral-700">
+              <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
                 Proposal limit per player
                 <input
                   type="number"
@@ -399,7 +398,7 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
                   max={50}
                   value={proposalLimit}
                   onChange={(event) => setProposalLimit(event.target.value)}
-                  className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                  className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
                 />
               </label>
             </fieldset>
