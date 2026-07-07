@@ -112,6 +112,36 @@ describe("ClassicGameBoard", () => {
     expect(within(board).queryByText("No board scans")).not.toBeInTheDocument();
   });
 
+  it("replaces the board center with a winner and stars graphic when the game is over", () => {
+    const game = gameFixture();
+    game.status = "ended";
+    game.current_phase = "GAME_OVER";
+    game.players[0] = {
+      ...game.players[0],
+      name: "Player 1",
+      status: "active",
+      state: { ...game.players[0].state, is_bankrupt: false },
+    };
+    game.players[1] = {
+      ...game.players[1],
+      name: "Player 2",
+      status: "bankrupt",
+      state: { ...game.players[1].state, is_bankrupt: true },
+    };
+
+    const { rerender } = render(<ClassicGameBoard game={game} />);
+
+    const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
+    const winnerStatus = within(board).getByRole("status", { name: "Winner Player 1!" });
+    expect(winnerStatus).toHaveAttribute("data-winner-celebration");
+    expect(winnerStatus).toHaveTextContent("Winner Player 1!");
+    expect(board.querySelector("[data-winner-stars]")).toBeInTheDocument();
+
+    rerender(<ClassicGameBoard game={gameFixture()} />);
+
+    expect(screen.queryByRole("status", { name: "Winner Player 1!" })).not.toBeInTheDocument();
+  });
+
   it("renders classic street property cells with only a top color band, name, price, and hover details", () => {
     render(<ClassicGameBoard game={gameFixture()} />);
 

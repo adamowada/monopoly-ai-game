@@ -122,6 +122,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function playerIsBankrupt(player: GamePlayer): boolean {
+  const status = player.status.toLowerCase();
+  return status === "bankrupt" || (isRecord(player.state) && player.state.is_bankrupt === true);
+}
+
+function winnerForGame(game: GameMetadata): GamePlayer | null {
+  const gameStatus = game.status.toLowerCase();
+  if (gameStatus !== "ended" && game.current_phase !== "GAME_OVER") {
+    return null;
+  }
+
+  const survivingPlayers = game.players.filter((player) => !playerIsBankrupt(player));
+  if (survivingPlayers.length === 1) {
+    return survivingPlayers[0];
+  }
+
+  const activeSurvivors = survivingPlayers.filter((player) => player.status.toLowerCase() === "active");
+  return activeSurvivors.length === 1 ? activeSurvivors[0] : null;
+}
+
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -346,18 +366,71 @@ function BoardTitleMark() {
   );
 }
 
-function CenterBoardArt() {
+function WinnerStarsGraphic() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="absolute inset-0 h-full w-full"
+      data-winner-stars=""
+      preserveAspectRatio="none"
+      viewBox="0 0 480 320"
+    >
+      <path d="M240 24 L263 96 L339 96 L277 140 L301 212 L240 168 L179 212 L203 140 L141 96 L217 96 Z" fill="#f7d977" opacity="0.9" />
+      <path d="M96 58 L109 95 L149 95 L117 119 L130 156 L96 133 L62 156 L75 119 L43 95 L83 95 Z" fill="#fff7dc" opacity="0.85" />
+      <path d="M388 72 L401 110 L441 110 L408 133 L421 171 L388 148 L355 171 L368 133 L335 110 L375 110 Z" fill="#fff2ca" opacity="0.82" />
+      <path d="M132 218 L142 247 L173 247 L148 265 L157 294 L132 276 L107 294 L116 265 L91 247 L122 247 Z" fill="#d7a84c" opacity="0.82" />
+      <path d="M350 216 L360 245 L391 245 L366 263 L375 292 L350 274 L325 292 L334 263 L309 245 L340 245 Z" fill="#d7a84c" opacity="0.82" />
+      <path d="M60 190 C112 158 151 156 206 178" fill="none" stroke="#d7a84c" strokeLinecap="round" strokeWidth="6" opacity="0.4" />
+      <path d="M274 178 C329 156 368 158 420 190" fill="none" stroke="#d7a84c" strokeLinecap="round" strokeWidth="6" opacity="0.4" />
+      <circle cx="240" cy="238" fill="#173c45" opacity="0.1" r="132" />
+    </svg>
+  );
+}
+
+function WinnerBoardCelebration({ winner }: Readonly<{ winner: GamePlayer }>) {
+  const message = `Winner ${winner.name}!`;
+
+  return (
+    <div
+      aria-label={message}
+      aria-live="polite"
+      className="relative grid h-full min-h-0 place-items-center overflow-hidden rounded border-2 border-[#2f2418] bg-[#fffbea] px-4 py-5 text-center text-[#1f2a1f] shadow-[inset_0_0_0_5px_rgba(215,168,76,0.22)]"
+      data-winner-celebration=""
+      role="status"
+    >
+      <WinnerStarsGraphic />
+      <div className="relative grid max-w-sm place-items-center gap-3">
+        <span aria-hidden="true" className="rounded-full border border-[#d7a84c] bg-[#173c45] px-3 py-1 text-[10px] font-black uppercase text-[#f7d977]">
+          Game over
+        </span>
+        <h2 className="max-w-[92%] break-words font-serif font-black leading-tight text-[#173c45] [text-shadow:0_2px_0_rgba(247,217,119,0.7)]">
+          <span className="block text-xl">Winner </span>
+          <span className="block whitespace-nowrap text-xl">{winner.name}!</span>
+        </h2>
+        <div aria-hidden="true" className="h-1 w-28 max-w-full rounded-full bg-[#d7a84c]" />
+      </div>
+    </div>
+  );
+}
+
+function CenterBoardArt({ winner }: Readonly<{ winner: GamePlayer | null }>) {
   return (
     <div className="col-start-3 col-end-12 row-start-3 row-end-12 overflow-hidden border-4 border-[#2f2418] bg-[#eaf3d7] p-3 text-[#2f2418] shadow-inner">
       <div className="relative flex h-full min-h-0 flex-col justify-between overflow-hidden border border-[#2f2418]/20 bg-[#eaf3d7] p-3">
-        <div className="relative">
-          <BoardTitleMark />
-        </div>
+        {winner ? (
+          <WinnerBoardCelebration winner={winner} />
+        ) : (
+          <>
+            <div className="relative">
+              <BoardTitleMark />
+            </div>
 
-        <div className="relative grid min-h-0 grid-cols-2 gap-3">
-          <DeckArtPreview deck={DECK_ART.chance} />
-          <DeckArtPreview deck={DECK_ART.community_chest} />
-        </div>
+            <div className="relative grid min-h-0 grid-cols-2 gap-3">
+              <DeckArtPreview deck={DECK_ART.chance} />
+              <DeckArtPreview deck={DECK_ART.community_chest} />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -716,6 +789,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
   const hoveredProperty = hoveredPropertyId ? (propertyById.get(hoveredPropertyId) ?? null) : null;
   const hoveredSpace = hoveredProperty ? propertySpaceById.get(hoveredProperty.id) : null;
   const hoveredTooltipId = hoveredSpace ? `${hoveredSpace.id}-property-details` : "board-property-details";
+  const winner = winnerForGame(game);
 
   return (
     <section
@@ -738,7 +812,7 @@ export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, 
             transformOrigin: "center",
           }}
         >
-          <CenterBoardArt />
+          <CenterBoardArt winner={winner} />
 
           {BOARD_SPACES.map((space) => {
             const coordinates = boardCoordinates(space.position);
