@@ -48,7 +48,7 @@ export default async function GameBoardPage({ params }: GamePageProps) {
               Play turns, auctions, property management, negotiations, contracts, obligations, and AI seats from one illustrated board.
             </p>
           </div>
-          <Button asChild className="w-fit bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100">
+          <Button asChild className="w-fit bg-teal-50 text-teal-950 ring-1 ring-inset ring-teal-700/30 hover:bg-teal-100">
             <Link href="/">
               <ArrowLeft aria-hidden="true" className="size-4" />
               Setup

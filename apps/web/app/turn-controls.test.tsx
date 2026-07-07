@@ -6,6 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GamePlaySurface } from "./game-play-surface";
 import type { GameMetadata } from "../lib/api/games";
 
+const routerMock = vi.hoisted(() => ({
+  push: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => routerMock,
+}));
+
 const createdAt = "2026-07-04T00:00:00.000Z";
 const apiBaseUrl = "http://api.test";
 const gameId = "game-turn-controls";
@@ -245,6 +253,32 @@ function acceptedRollResponse() {
   };
 }
 
+function acceptedChanceCardResponse() {
+  const response = acceptedRollResponse();
+  return {
+    ...response,
+    accepted_events: [
+      ...response.accepted_events,
+      {
+        id: "event-3",
+        game_id: gameId,
+        sequence: 3,
+        actor_player_id: adaId,
+        event_type: "CARD_DRAWN",
+        payload: {
+          deck: "chance",
+          card_id: "card_chance_advance_to_go",
+          draw_counter: 1,
+        },
+        state_hash: "state-3",
+        created_at: "2026-07-04T00:01:02.000Z",
+      },
+    ],
+    event_sequence: 3,
+    state_hash: "state-3",
+  };
+}
+
 function auctionPurchaseStateFixture() {
   return {
     game_id: gameId,
@@ -438,6 +472,7 @@ function baseFetchMock({
   events = eventsFixture(),
   rejectedActions = rejectedActionsFixture(),
   actionResponse,
+  endResponse,
 }: {
   game?: GameMetadata;
   state?: ReturnType<typeof stateFixture>;
@@ -445,6 +480,7 @@ function baseFetchMock({
   events?: ReturnType<typeof eventsFixture>;
   rejectedActions?: ReturnType<typeof rejectedActionsFixture>;
   actionResponse?: unknown;
+  endResponse?: GameMetadata;
 } = {}) {
   return vi.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
@@ -474,16 +510,54 @@ function baseFetchMock({
         status: typeof actionResponse === "object" && actionResponse !== null && "reason_code" in actionResponse ? 409 : 200,
       });
     }
+    if (url === `${apiBaseUrl}/games/${gameId}/end` && init?.method === "POST" && endResponse) {
+      return Response.json(endResponse);
+    }
     throw new Error(`Unexpected fetch ${url}`);
   });
 }
 
 afterEach(() => {
   FakeEventSource.instances = [];
+  window.localStorage.clear();
+  routerMock.push.mockReset();
   vi.unstubAllGlobals();
 });
 
 describe("GamePlaySurface turn controls", () => {
+  it("saves, loads, and ends the current game session", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const endedGame = {
+      ...gameFixture(),
+      status: "ended",
+      current_phase: "ENDED",
+    };
+    const fetchMock = baseFetchMock({ endResponse: endedGame });
+
+    renderSurface(fetchMock);
+
+    const session = await screen.findByRole("region", { name: "Game session" });
+    fireEvent.click(within(session).getByRole("button", { name: "Save game" }));
+
+    expect(window.localStorage.getItem("monopoly-ai-game.saved-games")).toContain(gameId);
+    expect(session).toHaveTextContent("Saved game-turn-controls");
+
+    fireEvent.click(within(session).getByRole("button", { name: "Load game" }));
+    fireEvent.click(await within(session).findByRole("button", { name: "Open game-turn-controls" }));
+    expect(routerMock.push).toHaveBeenCalledWith("/games/game-turn-controls");
+
+    fireEvent.click(within(session).getByRole("button", { name: "End game" }));
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/end` && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(routerMock.push).toHaveBeenCalledWith("/");
+  });
+
   it("renders enabled action buttons only for backend-returned legal actions", async () => {
     renderSurface(
       baseFetchMock({
@@ -548,6 +622,51 @@ describe("GamePlaySurface turn controls", () => {
     const log = screen.getByRole("region", { name: "Game log" });
     expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
     expect(within(log).getByText(/TOKEN_MOVED/)).toBeInTheDocument();
+  });
+
+  it("shows chance and community chest draws as a modal over the board", async () => {
+    let accepted = false;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(accepted ? gameFixture(7) : gameFixture(0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(accepted ? stateFixture(7, 3) : stateFixture(0, 0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: accepted ? [legalAction("END_TURN", {}, "state-3", 3)] : [legalAction("ROLL_DICE")],
+          state_hash: accepted ? "state-3" : "state-0",
+          event_sequence: accepted ? 3 : 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(accepted ? eventsFixture(acceptedChanceCardResponse().accepted_events) : eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        accepted = true;
+        return Response.json(acceptedChanceCardResponse());
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+    fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
+
+    const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
+    const modal = await within(board).findByRole("dialog", { name: "Chance card" });
+    expect(modal).toHaveTextContent("Move to GO");
+    expect(modal).toHaveTextContent("Move to GO and apply the normal pass-GO payout.");
+    expect(modal).toHaveTextContent("Ada");
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Dismiss card" }));
+    await waitFor(() => expect(within(board).queryByRole("dialog", { name: "Chance card" })).not.toBeInTheDocument());
   });
 
   it("refreshes auction start controls from post-roll legal actions", async () => {

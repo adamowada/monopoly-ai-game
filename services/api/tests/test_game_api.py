@@ -154,6 +154,30 @@ async def test_create_game_rejects_malformed_player_setup(client: httpx.AsyncCli
 
 
 @pytest.mark.asyncio
+async def test_end_game_marks_game_terminal(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    try:
+        response = await client.post(f"/games/{game_id}/end")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["id"] == game_id
+        assert body["status"] == "ended"
+        assert body["current_phase"] == "ENDED"
+
+        metadata_response = await client.get(f"/games/{game_id}")
+        assert metadata_response.status_code == 200
+        assert metadata_response.json()["status"] == "ended"
+        assert metadata_response.json()["current_phase"] == "ENDED"
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
 async def test_missing_game_endpoints_return_404(client: httpx.AsyncClient) -> None:
     game_id = "00000000-0000-0000-0000-000000000404"
 
@@ -489,6 +513,7 @@ def test_openapi_includes_stage_4_4_endpoints(api_app: FastAPI) -> None:
     expected = {
         ("post", "/games"),
         ("get", "/games/{game_id}"),
+        ("post", "/games/{game_id}/end"),
         ("get", "/games/{game_id}/state"),
         ("get", "/games/{game_id}/legal-actions"),
         ("post", "/games/{game_id}/actions"),

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { GameSetupPanel } from "./game-setup";
+import { AI_PLAYER_NAMES, GameSetupPanel } from "./game-setup";
 import { createGame, type GameMetadata } from "../lib/api/games";
 
 const push = vi.fn();
@@ -141,6 +141,29 @@ describe("GameSetupPanel", () => {
       });
     });
     await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created"));
+  });
+
+  it("auto-generates common names when seats become AI players", () => {
+    render(<GameSetupPanel initialSeed="seed-fixed" />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Player 2 type" }), {
+      target: { value: "ai" },
+    });
+
+    const player2Name = screen.getByRole("textbox", { name: "Player 2 name" });
+    expect(player2Name).not.toHaveValue("Player 2");
+    expect(AI_PLAYER_NAMES).toContain(player2Name.getAttribute("value"));
+    expect(AI_PLAYER_NAMES).toHaveLength(30);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add player" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Player 3 type" }), {
+      target: { value: "ai" },
+    });
+
+    const player3Name = screen.getByRole("textbox", { name: "Player 3 name" });
+    expect(player3Name).not.toHaveValue("Player 3");
+    expect(AI_PLAYER_NAMES).toContain(player3Name.getAttribute("value"));
+    expect(player3Name).not.toHaveValue(player2Name.getAttribute("value"));
   });
 
   it("blocks invalid setup choices before calling the backend", async () => {

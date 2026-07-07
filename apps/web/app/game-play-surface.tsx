@@ -1,6 +1,6 @@
 "use client";
 
-import { BOARD_SPACES } from "@monopoly-ai-game/schemas";
+import { BOARD_SPACES, CHANCE_DECK, COMMUNITY_CHEST_DECK, type StaticDataCard } from "@monopoly-ai-game/schemas";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -9,14 +9,17 @@ import {
   CheckCircle2,
   CircleDollarSign,
   Dice5,
+  FolderOpen,
   Gavel,
   HandCoins,
   KeyRound,
   Loader2,
   LogOut,
+  Save,
   ShieldAlert,
   UserRound,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../components/ui/button";
@@ -34,13 +37,13 @@ import {
   type GameStateResponse,
   type LegalAction,
 } from "../lib/api/gameplay";
-import { readGame, type GameMetadata } from "../lib/api/games";
+import { endGame, readGame, type GameMetadata } from "../lib/api/games";
 import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
 import { AiAuditPanel } from "./ai-audit-panel";
 import { AuctionPanel, isAuctionAction, readActiveAuction } from "./auction-panel";
 import { ContractsPanel } from "./contracts-panel";
-import { ClassicGameBoard, getPlayerColor, type BoardMotion } from "./game-board";
+import { ClassicGameBoard, getPlayerColor, type BoardMotion, type DrawnCardView } from "./game-board";
 import { NegotiationPanel } from "./negotiation-panel";
 import { PropertyManagementPanel } from "./property-management";
 
@@ -79,6 +82,14 @@ type ActionModel = {
   variant?: "danger";
 };
 
+type SavedGameRecord = {
+  id: string;
+  label: string;
+  status: string;
+  updatedAt: string;
+  savedAt: string;
+};
+
 const actionModels: Record<string, ActionModel> = {
   ROLL_DICE: { label: "Roll dice", group: "turn", icon: Dice5 },
   BUY_PROPERTY: { label: "Buy property", group: "purchase", icon: CircleDollarSign },
@@ -99,8 +110,56 @@ const groupTitles: Record<ActionGroup, string> = {
   jail: "Jail",
 };
 
+const savedGamesStorageKey = "monopoly-ai-game.saved-games";
+const cardsById = new Map<string, StaticDataCard>(
+  [...CHANCE_DECK, ...COMMUNITY_CHEST_DECK].map((card) => [card.id, card]),
+);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSavedGameRecord(value: unknown): value is SavedGameRecord {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.id === "string" &&
+    typeof value.label === "string" &&
+    typeof value.status === "string" &&
+    typeof value.updatedAt === "string" &&
+    typeof value.savedAt === "string"
+  );
+}
+
+function readSavedGames(): SavedGameRecord[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const rawValue = window.localStorage.getItem(savedGamesStorageKey);
+    const parsed: unknown = rawValue ? JSON.parse(rawValue) : [];
+    return Array.isArray(parsed) ? parsed.filter(isSavedGameRecord) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedGames(savedGames: SavedGameRecord[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(savedGamesStorageKey, JSON.stringify(savedGames));
+}
+
+function savedGameRecord(game: GameMetadata): SavedGameRecord {
+  return {
+    id: game.id,
+    label: game.id,
+    status: game.status,
+    updatedAt: game.updated_at,
+    savedAt: new Date().toISOString(),
+  };
 }
 
 function getNegotiationCutoffs(game: GameMetadata): NegotiationCutoffs {
@@ -235,6 +294,43 @@ function eventPayloadNumber(event: AcceptedEvent | undefined, key: string): numb
 function eventPayloadString(event: AcceptedEvent | undefined, key: string): string | null {
   const value = eventPayloadRecord(event)[key];
   return typeof value === "string" && value ? value : null;
+}
+
+function deckLabel(deck: string | null): string {
+  if (deck === "chance") {
+    return "Chance";
+  }
+  if (deck === "community_chest") {
+    return "Community Chest";
+  }
+  return "Card";
+}
+
+function latestDrawnCardFromEvents(
+  events: AcceptedEvent[],
+  playersById: Map<string, GameMetadata["players"][number]>,
+): DrawnCardView | null {
+  for (const event of [...events].reverse()) {
+    if (event.event_type !== "CARD_DRAWN") {
+      continue;
+    }
+    const cardId = eventPayloadString(event, "card_id");
+    if (!cardId) {
+      continue;
+    }
+    const card = cardsById.get(cardId);
+    if (!card) {
+      continue;
+    }
+    return {
+      eventId: event.id,
+      deckLabel: deckLabel(eventPayloadString(event, "deck") ?? card.deck),
+      title: card.title,
+      description: card.description,
+      playerName: event.actor_player_id ? (playersById.get(event.actor_player_id)?.name ?? null) : null,
+    };
+  }
+  return null;
 }
 
 function diceFromEvent(event: AcceptedEvent | undefined): number[] | undefined {
@@ -572,6 +668,84 @@ function ActivePlayerPanel({
   );
 }
 
+function GameSessionPanel({
+  isEnding,
+  message,
+  onEndGame,
+  onLoadGame,
+  onSaveGame,
+  onToggleLoadGames,
+  savedGames,
+  showLoadGames,
+}: Readonly<{
+  isEnding: boolean;
+  message: string | null;
+  onEndGame: () => void;
+  onLoadGame: (gameId: string) => void;
+  onSaveGame: () => void;
+  onToggleLoadGames: () => void;
+  savedGames: SavedGameRecord[];
+  showLoadGames: boolean;
+}>) {
+  return (
+    <section aria-label="Game session" className="rounded-md border border-neutral-200 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-neutral-950">Game session</h2>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-1">
+        <Button onClick={onSaveGame} className="justify-start bg-white text-neutral-800 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100">
+          <Save aria-hidden="true" className="size-4" />
+          Save game
+        </Button>
+        <Button onClick={onToggleLoadGames} className="justify-start bg-white text-neutral-800 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100">
+          <FolderOpen aria-hidden="true" className="size-4" />
+          Load game
+        </Button>
+        <Button
+          onClick={onEndGame}
+          disabled={isEnding}
+          className="justify-start bg-rose-700 hover:bg-rose-800 focus-visible:outline-rose-700"
+        >
+          {isEnding ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <LogOut aria-hidden="true" className="size-4" />}
+          {isEnding ? "Ending..." : "End game"}
+        </Button>
+      </div>
+
+      {message ? (
+        <p aria-live="polite" className="mt-3 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-medium text-teal-800">
+          {message}
+        </p>
+      ) : null}
+
+      {showLoadGames ? (
+        <div aria-label="Saved games" className="mt-3 grid gap-2" role="group">
+          {savedGames.length > 0 ? (
+            savedGames.map((savedGame) => (
+              <button
+                key={savedGame.id}
+                aria-label={`Open ${savedGame.label}`}
+                className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-left text-xs text-neutral-700 transition hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+                onClick={() => onLoadGame(savedGame.id)}
+                type="button"
+              >
+                <span className="block font-semibold text-neutral-950">Open {savedGame.label}</span>
+                <span className="mt-0.5 block uppercase text-neutral-500">{formatGameStatus(savedGame.status)}</span>
+              </button>
+            ))
+          ) : (
+            <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+              No saved games yet.
+            </p>
+          )}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function PlayerTable({ game }: Readonly<{ game: GameMetadata }>) {
   return (
     <section aria-labelledby="players-title" className="overflow-hidden rounded-md border border-neutral-200 bg-white">
@@ -683,6 +857,7 @@ function GameDetails({ game, phase }: Readonly<{ game: GameMetadata; phase: stri
 }
 
 export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySurfaceProps) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const baseUrl = backendBaseUrl(apiBaseUrl);
   const [localRejectedAction, setLocalRejectedAction] = useState<ActionRejectedResponse | null>(null);
@@ -691,7 +866,11 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [aiStepResult, setAiStepResult] = useState<AiStepResponse | null>(null);
   const [autoStepAi, setAutoStepAi] = useState(false);
   const [boardMotion, setBoardMotion] = useState<BoardMotionState | null>(null);
+  const [dismissedCardEventId, setDismissedCardEventId] = useState<string | null>(null);
   const [lastAutoStepKey, setLastAutoStepKey] = useState<string | null>(null);
+  const [savedGames, setSavedGames] = useState<SavedGameRecord[]>(() => readSavedGames());
+  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
+  const [showLoadGames, setShowLoadGames] = useState(false);
 
   const gameQuery = useQuery({
     queryKey: ["game", gameId],
@@ -741,6 +920,22 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         throw new Error(snapshot.error);
       }
       return snapshot.rejectedActions;
+    },
+  });
+
+  const endGameMutation = useMutation({
+    mutationFn: () => endGame({ gameId, baseUrl }),
+    onSuccess: (snapshot) => {
+      if (snapshot.state === "loaded") {
+        queryClient.setQueryData<GameMetadata>(["game", gameId], snapshot.game);
+        setSessionMessage(`Ended ${snapshot.game.id}`);
+        router.push("/");
+        return;
+      }
+      setSessionMessage(snapshot.error);
+    },
+    onError: (error) => {
+      setSessionMessage(error instanceof Error ? error.message : String(error));
     },
   });
 
@@ -954,12 +1149,18 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const latestAuditRejection = latestRejectedAction(rejectedActionsQuery.data ?? []);
   const visibleRejection = localRejectedAction ?? latestAuditRejection;
   const visibleEvents = mergeEvents(eventsQuery.data ?? [], acceptedEvents);
+  const latestDrawnCard = useMemo(
+    () => latestDrawnCardFromEvents(visibleEvents, playersById),
+    [playersById, visibleEvents],
+  );
+  const visibleDrawnCard = latestDrawnCard?.eventId === dismissedCardEventId ? null : latestDrawnCard;
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading;
   const gameAiBlocked = game.status === "AI_BLOCKED";
-  const controlsDisabled = gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending;
+  const gameEnded = game.status.toLowerCase() === "ended";
+  const controlsDisabled = gameEnded || gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending;
   const activeAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
   const directActionControlsDisabled = controlsDisabled || Boolean(activeAiPlayer);
-  const aiStepStateBlocked = gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
+  const aiStepStateBlocked = gameEnded || gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
   const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
@@ -1002,6 +1203,29 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     aiStep.mutate({ mode, playerId });
   }
 
+  function handleSaveGame() {
+    const record = savedGameRecord(game);
+    const nextSavedGames = [record, ...savedGames.filter((savedGame) => savedGame.id !== record.id)];
+    setSavedGames(nextSavedGames);
+    writeSavedGames(nextSavedGames);
+    setSessionMessage(`Saved ${record.id}`);
+  }
+
+  function handleLoadGame(savedGameId: string) {
+    router.push(`/games/${encodeURIComponent(savedGameId)}`);
+  }
+
+  function handleEndGame() {
+    const confirmed =
+      typeof window === "undefined" ||
+      typeof window.confirm !== "function" ||
+      window.confirm("End this game and return to setup?");
+    if (!confirmed) {
+      return;
+    }
+    endGameMutation.mutate();
+  }
+
   useEffect(() => {
     if (gameAiBlocked || !autoStepAi || !activeAiPlayer || !autoStepKey || aiStep.isPending || submitAction.isPending) {
       return;
@@ -1026,7 +1250,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   return (
     <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
       <div className="grid content-start gap-4">
-        <ClassicGameBoard game={game} motion={boardMotion ?? undefined} snapshot={stateQuery.data} />
+        <ClassicGameBoard
+          drawnCard={visibleDrawnCard}
+          game={game}
+          motion={boardMotion ?? undefined}
+          onDismissDrawnCard={() => setDismissedCardEventId(visibleDrawnCard?.eventId ?? null)}
+          snapshot={stateQuery.data}
+        />
         <PropertyManagementPanel
           controlsDisabled={directActionControlsDisabled}
           game={game}
@@ -1041,6 +1271,17 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
       <aside className="grid content-start gap-4">
         <ActivePlayerPanel player={currentPlayer} phase={phase} />
+
+        <GameSessionPanel
+          isEnding={endGameMutation.isPending}
+          message={sessionMessage}
+          onEndGame={handleEndGame}
+          onLoadGame={handleLoadGame}
+          onSaveGame={handleSaveGame}
+          onToggleLoadGames={() => setShowLoadGames((current) => !current)}
+          savedGames={savedGames}
+          showLoadGames={showLoadGames}
+        />
 
         <AuctionPanel
           controlsDisabled={auctionControlsDisabled}

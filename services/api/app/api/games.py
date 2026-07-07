@@ -751,6 +751,23 @@ async def get_game(game_id: UUID, request: Request) -> GameMetadataResponse:
     return await _load_game_metadata(_session_factory(request), game_id)
 
 
+@router.post("/{game_id}/end", response_model=GameMetadataResponse)
+async def end_game(game_id: UUID, request: Request) -> GameMetadataResponse:
+    session_factory = _session_factory(request)
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(
+                sa.update(games)
+                .where(games.c.id == game_id)
+                .values(status="ended", current_phase="ENDED", updated_at=sa.func.now())
+                .returning(games.c.id)
+            )
+            if result.scalar_one_or_none() is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found")
+
+    return await _load_game_metadata(session_factory, game_id)
+
+
 @router.get("/{game_id}/state", response_model=GameStateResponse)
 async def get_game_state(game_id: UUID, request: Request) -> GameStateResponse:
     state = await _load_replayed_state(_session_factory(request), game_id)

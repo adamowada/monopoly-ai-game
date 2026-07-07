@@ -2,7 +2,7 @@
 
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { BOARD_SPACES, PROPERTIES_BY_ID, PROPERTY_GROUPS, type StaticDataBoardSpace, type StaticDataProperty } from "@monopoly-ai-game/schemas";
-import { RotateCw } from "lucide-react";
+import { RotateCw, X } from "lucide-react";
 
 import type { GameMetadata, GamePlayer } from "../lib/api/games";
 import type { GameStateResponse } from "../lib/api/gameplay";
@@ -46,11 +46,22 @@ export type BoardMotion =
       total?: number;
     };
 
+export type DrawnCardView = {
+  eventId: string;
+  deckLabel: string;
+  title: string;
+  description: string;
+  playerName: string | null;
+};
+
 const boardGridSize = 13;
 const fallbackPlayerColor = "#525866";
 const boardSurfaceColor = "#eaf3d7";
 const groupColorById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group.color]));
 const groupById = new Map(PROPERTY_GROUPS.map((group) => [group.id, group]));
+const propertyById = new Map<string, StaticDataProperty>(
+  Object.values(PROPERTIES_BY_ID).map((property) => [property.id, property]),
+);
 const propertySpaceById = new Map<string, StaticDataBoardSpace>(
   BOARD_SPACES.flatMap((space) => (space.property_id ? [[space.property_id, space] as const] : [])),
 );
@@ -388,6 +399,48 @@ function DiceMotionStatus({ motion }: Readonly<{ motion?: BoardMotion }>) {
   );
 }
 
+function DrawnCardModal({
+  card,
+  onDismiss,
+}: Readonly<{
+  card?: DrawnCardView | null;
+  onDismiss?: () => void;
+}>) {
+  if (!card) {
+    return null;
+  }
+
+  return (
+    <div className="absolute inset-0 z-[55] grid place-items-center bg-[#1f2a1f]/35 p-4" data-card-modal="">
+      <article
+        aria-label={`${card.deckLabel} card`}
+        aria-modal="true"
+        className="w-full max-w-sm rounded-md border-2 border-[#1f2a1f] bg-[#fffbea] p-4 text-left text-[#1f2a1f] shadow-[0_22px_60px_rgba(31,42,31,0.38)]"
+        role="dialog"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-[#1f2a1f]/25 pb-3">
+          <div>
+            <p className="text-[11px] font-black uppercase text-[#456038]">{card.deckLabel}</p>
+            <h3 className="mt-1 text-xl font-black uppercase leading-tight">{card.title}</h3>
+          </div>
+          <button
+            aria-label="Dismiss card"
+            className="grid size-8 shrink-0 place-items-center rounded-md border border-[#1f2a1f]/35 bg-white/80 text-[#1f2a1f] transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]"
+            onClick={onDismiss}
+            type="button"
+          >
+            <X aria-hidden="true" className="size-4" />
+          </button>
+        </div>
+        <p className="mt-3 text-sm font-semibold leading-6">{card.description}</p>
+        {card.playerName ? (
+          <p className="mt-3 text-xs font-bold uppercase text-[#456038]">{card.playerName}</p>
+        ) : null}
+      </article>
+    </div>
+  );
+}
+
 function PropertyHoverOverlay({
   game,
   property,
@@ -589,12 +642,14 @@ function OtherSpaceCell({
 }
 
 type ClassicGameBoardProps = {
+  drawnCard?: DrawnCardView | null;
   game: GameMetadata;
   motion?: BoardMotion;
+  onDismissDrawnCard?: () => void;
   snapshot?: GameStateResponse;
 };
 
-export function ClassicGameBoard({ game, motion, snapshot }: ClassicGameBoardProps) {
+export function ClassicGameBoard({ drawnCard, game, motion, onDismissDrawnCard, snapshot }: ClassicGameBoardProps) {
   const [boardRotation, setBoardRotation] = useState(0);
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
   const playersByPosition = new Map<number, GamePlayer[]>();
@@ -604,7 +659,7 @@ export function ClassicGameBoard({ game, motion, snapshot }: ClassicGameBoardPro
     players.push(player);
     playersByPosition.set(position, players);
   }
-  const hoveredProperty = hoveredPropertyId ? (PROPERTIES_BY_ID[hoveredPropertyId] ?? null) : null;
+  const hoveredProperty = hoveredPropertyId ? (propertyById.get(hoveredPropertyId) ?? null) : null;
   const hoveredSpace = hoveredProperty ? propertySpaceById.get(hoveredProperty.id) : null;
   const hoveredTooltipId = hoveredSpace ? `${hoveredSpace.id}-property-details` : "board-property-details";
 
@@ -694,6 +749,7 @@ export function ClassicGameBoard({ game, motion, snapshot }: ClassicGameBoardPro
           })}
         </div>
         <DiceMotionStatus motion={motion} />
+        <DrawnCardModal card={drawnCard} onDismiss={onDismissDrawnCard} />
         <PropertyHoverOverlay game={game} property={hoveredProperty} snapshot={snapshot} tooltipId={hoveredTooltipId} />
       </div>
     </section>

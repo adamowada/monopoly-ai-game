@@ -24,6 +24,39 @@ type GameSetupPanelProps = {
 const playerColors = ["#0f766e", "#2563eb", "#7c3aed", "#dc2626", "#ca8a04"];
 const hexColorPattern = /^#[0-9a-fA-F]{6}$/;
 
+export const AI_PLAYER_NAMES = [
+  "Emma",
+  "Noah",
+  "Olivia",
+  "Liam",
+  "Ava",
+  "Ethan",
+  "Sophia",
+  "Mason",
+  "Mia",
+  "Lucas",
+  "Amelia",
+  "Logan",
+  "Harper",
+  "James",
+  "Evelyn",
+  "Benjamin",
+  "Abigail",
+  "Henry",
+  "Charlotte",
+  "Daniel",
+  "Ella",
+  "Michael",
+  "Grace",
+  "Alexander",
+  "Lily",
+  "Jacob",
+  "Nora",
+  "William",
+  "Chloe",
+  "Samuel",
+];
+
 function generateSeed(): string {
   return `setup-${Date.now().toString(36)}-${Math.floor(Math.random() * 100_000)
     .toString(36)
@@ -53,6 +86,28 @@ function normalizeColor(value: string): string {
 
 function colorInputValue(value: string): string {
   return hexColorPattern.test(value) ? value : "#000000";
+}
+
+function isGenericPlayerName(name: string): boolean {
+  return /^Player \d+$/.test(name.trim());
+}
+
+function generatedAiName(players: SetupPlayer[], targetIndex: number): string {
+  const usedNames = new Set(
+    players
+      .filter((_, index) => index !== targetIndex)
+      .map((player) => player.name.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  for (let offset = 0; offset < AI_PLAYER_NAMES.length; offset += 1) {
+    const name = AI_PLAYER_NAMES[(targetIndex + offset) % AI_PLAYER_NAMES.length];
+    if (!usedNames.has(name.toLowerCase())) {
+      return name;
+    }
+  }
+
+  return `AI ${targetIndex + 1}`;
 }
 
 function validateSetup(players: SetupPlayer[], maxRounds: string, proposalLimit: string): string[] {
@@ -116,6 +171,22 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
       return;
     }
     setPlayers((current) => [...current, defaultPlayer(current.length)]);
+  }
+
+  function setPlayerKind(index: number, kind: PlayerKind) {
+    setPlayers((current) =>
+      current.map((player, playerIndex) => {
+        if (playerIndex !== index) {
+          return player;
+        }
+        const shouldGenerateAiName = kind === "ai" && player.kind !== "ai" && isGenericPlayerName(player.name);
+        return {
+          ...player,
+          kind,
+          name: shouldGenerateAiName ? generatedAiName(current, index) : player.name,
+        };
+      }),
+    );
   }
 
   function removePlayer(index: number) {
@@ -242,7 +313,7 @@ export function GameSetupPanel({ initialSeed }: GameSetupPanelProps) {
                           <select
                             aria-label={`Player ${playerNumber} type`}
                             value={player.kind}
-                            onChange={(event) => updatePlayer(index, { kind: event.target.value as PlayerKind })}
+                            onChange={(event) => setPlayerKind(index, event.target.value as PlayerKind)}
                             className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-950 outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
                           >
                             <option value="human">Human</option>

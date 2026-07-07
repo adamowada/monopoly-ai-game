@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { BOARD_SPACES } from "@monopoly-ai-game/schemas";
 
@@ -122,8 +122,10 @@ describe("ClassicGameBoard", () => {
     expect(boardwalk?.querySelector("[data-property-color-band]")).toBeTruthy();
     expect(boardwalk?.querySelector("[data-space-art]")).toBeNull();
     expect(boardwalk?.querySelector("[data-space-bottom-label]")).toHaveTextContent("$400");
-    expect(boardwalk?.querySelector("[data-property-hover]")).toHaveTextContent("Rent $50");
-    expect(boardwalk?.querySelector("[data-property-hover]")).toHaveTextContent("Mortgage $200");
+    expect(board.querySelector("[data-property-hover]")).toBeNull();
+    fireEvent.mouseEnter(boardwalk as Element);
+    expect(board.querySelector("[data-property-hover]")).toHaveTextContent("Rent $50");
+    expect(board.querySelector("[data-property-hover]")).toHaveTextContent("Mortgage value $200");
     expect(boardwalk?.querySelector("[data-space-name]")).toHaveClass("uppercase");
   });
 
@@ -140,14 +142,19 @@ describe("ClassicGameBoard", () => {
     expect(readingRailroad?.querySelector("[data-property-color-band]")).toBeNull();
     expect(readingRailroad?.querySelector("[data-space-art]")).toBeTruthy();
     expect(readingRailroad?.querySelector("[data-space-bottom-label]")).toHaveTextContent("$200");
-    expect(readingRailroad?.querySelector("[data-property-hover]")).toHaveTextContent("Rent $25");
+    fireEvent.mouseEnter(readingRailroad as Element);
+    expect(board.querySelector("[data-property-hover]")).toHaveTextContent("Rent $25");
+    fireEvent.mouseLeave(readingRailroad as Element);
+    expect(board.querySelector("[data-property-hover]")).toBeNull();
 
     expect(communityChest?.querySelector("[data-space-art]")).toBeTruthy();
     expect(communityChest?.querySelector("[data-space-bottom-label]")).toHaveTextContent("Follow instructions on top card");
-    expect(communityChest?.querySelector("[data-property-hover]")).toBeNull();
+    fireEvent.mouseEnter(communityChest as Element);
+    expect(board.querySelector("[data-property-hover]")).toBeNull();
 
     expect(luxuryTax?.querySelector("[data-space-bottom-label]")).toHaveTextContent("pay $75.00");
-    expect(chance?.querySelector("[data-property-hover]")).toBeNull();
+    fireEvent.mouseEnter(chance as Element);
+    expect(board.querySelector("[data-property-hover]")).toBeNull();
   });
 
   it("derives visible token labels from player positions and updates after rerender", () => {
