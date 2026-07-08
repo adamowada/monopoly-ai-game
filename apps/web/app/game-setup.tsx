@@ -320,7 +320,7 @@ export function GameSetupPanel() {
 
     setIsSubmitting(false);
     if (result.state === "loaded") {
-      router.push(`/games/${encodeURIComponent(result.game.id)}`);
+      router.push(`/games/${encodeURIComponent(result.game.id)}`, { scroll: true });
       return;
     }
     setMessages([result.error]);

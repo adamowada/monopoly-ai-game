@@ -204,7 +204,7 @@ describe("GameSetupPanel", () => {
         },
       });
     });
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created", { scroll: true }));
   });
 
   it("sends optional debug cash and property allocations before navigating", async () => {
@@ -242,7 +242,7 @@ describe("GameSetupPanel", () => {
         }),
       );
     });
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created", { scroll: true }));
   });
 
   it("auto-generates common names when seats become AI players", () => {

@@ -767,7 +767,7 @@ describe("Stage 10.4 frontend component coverage", () => {
         },
       }),
     );
-    expect(push).toHaveBeenCalledWith("/games/game-created-stage-10-4");
+    expect(push).toHaveBeenCalledWith("/games/game-created-stage-10-4", { scroll: true });
   });
 
   it("board rendering shows fixture state without overlapping control data", () => {
