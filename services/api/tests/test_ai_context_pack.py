@@ -553,6 +553,36 @@ def test_context_pack_recommends_rejecting_monopoly_completion_deal_that_drains_
     assert opportunity["cash_floor_gap"] == 20
 
 
+def test_context_pack_recommends_rejecting_deal_that_breaks_actor_monopoly() -> None:
+    state = _state_with_orange_monopoly()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_sell_tennessee_from_monopoly_deal(amount=300)],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_breaks_actor_complete_street_group_below_floor"
+    )
+    assert guidance["deal_evaluations"][0]["actor_receives_cash_total"] == 300
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["kind"] == "actor_street_group_breakup"
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["group"] == "orange"
+    assert risk["actor_owned_group_property_ids"] == [
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    ]
+    assert risk["minimum_cash_value_floor"] == 540
+    assert risk["cash_value_gap"] == 240
+
+
 def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="deal_proposal")
@@ -1349,6 +1379,43 @@ def _fair_tennessee_deal(*, amount: int = 220) -> dict[str, Any]:
                     "instrument_id": "tennessee-transfer",
                     "from_player_id": str(OTHER_PLAYER_ID),
                     "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _sell_tennessee_from_monopoly_deal(*, amount: int) -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "sell-tennessee-from-grace-monopoly",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "monopoly-breakup-cash",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "amount": amount,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
                     "property_id": "property_tennessee_avenue",
                 },
             ],

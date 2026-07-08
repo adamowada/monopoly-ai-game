@@ -1441,7 +1441,8 @@ def _deal_evaluation_guidance(
     if any(evaluation.get("recommendation") == "reject" for evaluation in evaluations):
         guidance_messages.append(
             "Reject proposed deals that transfer away a property completing an opponent's street group, "
-            "overpay for this player's own street-group completion, or breach the liquidity floor."
+            "break up this player's complete street group below value, overpay for this player's own "
+            "street-group completion, or breach the liquidity floor."
         )
     if any(evaluation.get("recommendation") == "accept" for evaluation in evaluations):
         guidance_messages.append(
@@ -1545,7 +1546,41 @@ def _deal_completion_evaluation(
             and group_ownership.owner_id == recipient_player_id
         ]
         if len(recipient_already_owned_property_ids) != len(group.property_ids) - 1:
-            continue
+            actor_owned_group_property_ids = [
+                group_property_id
+                for group_property_id in group.property_ids
+                if (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+                and group_ownership.owner_id == actor_id
+            ]
+            if len(actor_owned_group_property_ids) != len(group.property_ids):
+                continue
+
+            minimum_cash_value_floor = property_data.price * 3
+            if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:
+                continue
+
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": "transfers_property_that_breaks_actor_complete_street_group_below_floor",
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "risk": {
+                    "kind": "actor_street_group_breakup",
+                    "property_id": property_id,
+                    "property_name": property_data.name,
+                    "property_price": property_data.price,
+                    "group": group.id,
+                    "group_name": group.name,
+                    "recipient_player_id": recipient_player_id,
+                    "actor_owned_group_property_ids": actor_owned_group_property_ids,
+                    "minimum_cash_value_floor": minimum_cash_value_floor,
+                    "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+                },
+            }
 
         minimum_cash_value_floor = property_data.price * 3 // 2
         if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:

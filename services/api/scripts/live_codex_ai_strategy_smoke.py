@@ -242,6 +242,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             state_factory=_low_cash_orange_near_monopoly_state,
             verifier=_verify_orange_cash_draining_deal_rejection,
         ),
+        StrategySmokeCase(
+            name="orange_monopoly_breakup_deal_rejection",
+            game_id=UUID("00000000-0000-0000-0000-00000000b223"),
+            decision_type="accept_reject",
+            state_factory=_orange_monopoly_state,
+            verifier=_verify_orange_monopoly_breakup_deal_rejection,
+        ),
     )
 
 
@@ -499,6 +506,15 @@ def _verify_orange_cash_draining_deal_rejection(parsed: dict[str, Any]) -> None:
     assert accept_reject.get("decision") == "reject", f"expected reject, got {accept_reject.get('decision')}"
 
 
+def _verify_orange_monopoly_breakup_deal_rejection(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(BREAKUP_DEAL_ID)
+    assert accept_reject.get("decision") == "reject", f"expected reject, got {accept_reject.get('decision')}"
+
+
 def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, Any]:
     if case.decision_type == "action_decision":
         action = _dict(parsed.get("action"))
@@ -577,6 +593,8 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         current_deal_id = str(OVERPRICED_DEAL_ID)
     elif case.name == "orange_cash_draining_deal_rejection":
         current_deal_id = str(CASH_DRAINING_DEAL_ID)
+    elif case.name == "orange_monopoly_breakup_deal_rejection":
+        current_deal_id = str(BREAKUP_DEAL_ID)
     return (
         {
             "id": str(NEGOTIATION_ID),
@@ -657,6 +675,19 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "created_at": "2026-07-08T00:00:02Z",
             },
         )
+    if case.name == "orange_monopoly_breakup_deal_rejection":
+        return (
+            {
+                "id": "live-strategy-monopoly-breakup-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "recipient_player_id": str(AI_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I can pay $300 for Tennessee Avenue from your Orange monopoly.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
     if case.decision_type != "deal_proposal":
         return ()
     return (
@@ -690,6 +721,10 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
     elif case.name == "orange_cash_draining_deal_rejection":
         deal_id = CASH_DRAINING_DEAL_ID
         terms = _good_deal_terms(amount=220)
+        proposer_id = OTHER_PLAYER_ID
+    elif case.name == "orange_monopoly_breakup_deal_rejection":
+        deal_id = BREAKUP_DEAL_ID
+        terms = _monopoly_breakup_terms(amount=300)
         proposer_id = OTHER_PLAYER_ID
     return (
         {
@@ -943,6 +978,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     ),
                 },
             )
+        if case.name == "orange_monopoly_breakup_deal_rejection":
+            return (
+                {
+                    "id": "live-strategy-reject-monopoly-breakup",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Grace owns the full Orange monopoly. "
+                        "Ada offers $300 for property_tennessee_avenue, but accepting breaks "
+                        "Grace's complete Orange group and the offer is below the $540 monopoly "
+                        "breakup cash value floor. Reject the deal."
+                    ),
+                },
+            )
         return (
             {
                 "id": "live-strategy-reject-lowball-monopoly-enabler",
@@ -999,6 +1047,7 @@ BAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b302")
 GOOD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b303")
 OVERPRICED_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b304")
 CASH_DRAINING_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b305")
+BREAKUP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b306")
 
 
 def _bad_deal_terms() -> dict[str, Any]:
@@ -1045,6 +1094,31 @@ def _good_deal_terms(*, amount: int = 220) -> dict[str, Any]:
                 "instrument_id": "live-strategy-fair-tennessee-transfer",
                 "from_player_id": str(OTHER_PLAYER_ID),
                 "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_tennessee_avenue",
+            },
+        ],
+    }
+
+
+def _monopoly_breakup_terms(*, amount: int) -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-orange-breakup",
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-breakup-cash",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "amount": amount,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-breakup-tennessee-transfer",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
                 "property_id": "property_tennessee_avenue",
             },
         ],
