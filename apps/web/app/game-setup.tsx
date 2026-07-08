@@ -1,6 +1,6 @@
 "use client";
 
-import { BOARD_SPACES, PROPERTIES_BY_ID } from "@monopoly-ai-game/schemas";
+import { BOARD_SPACES, PROPERTIES_BY_ID, PROPERTY_GROUPS } from "@monopoly-ai-game/schemas";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -31,6 +31,11 @@ const debugPropertyOptions = BOARD_SPACES.flatMap((space) => {
   const property = PROPERTIES_BY_ID[space.property_id];
   return property ? [{ id: property.id, name: property.name }] : [];
 });
+const debugPropertySetOptions = PROPERTY_GROUPS.map((group) => ({
+  id: group.id,
+  name: group.name,
+  propertyIds: group.property_ids.filter((propertyId) => Boolean(PROPERTIES_BY_ID[propertyId])),
+})).filter((group) => group.propertyIds.length > 0);
 
 export const AI_PLAYER_NAMES = [
   "Emma",
@@ -254,6 +259,22 @@ export function GameSetupPanel() {
 
   function setDebugPropertyOwner(propertyId: string, seatOrder: string) {
     setDebugPropertyOwners((current) => ({ ...current, [propertyId]: seatOrder }));
+  }
+
+  function debugPropertySetOwnerValue(propertyIds: readonly string[]): string {
+    const ownerValues = propertyIds.map((propertyId) => debugPropertyOwners[propertyId] ?? "");
+    const firstOwnerValue = ownerValues[0] ?? "";
+    return ownerValues.every((ownerValue) => ownerValue === firstOwnerValue) ? firstOwnerValue : "__mixed";
+  }
+
+  function setDebugPropertySetOwner(propertyIds: readonly string[], seatOrder: string) {
+    setDebugPropertyOwners((current) => {
+      const next = { ...current };
+      for (const propertyId of propertyIds) {
+        next[propertyId] = seatOrder;
+      }
+      return next;
+    });
   }
 
   function debugAllocationSettings() {
@@ -534,6 +555,38 @@ export function GameSetupPanel() {
                         />
                       </label>
                     ))}
+                  </div>
+
+                  <div className="grid gap-2">
+                    <div className="text-xs font-black uppercase text-[#6f604c]">Property sets</div>
+                    <div className="grid gap-2">
+                      {debugPropertySetOptions.map((group) => {
+                        const value = debugPropertySetOwnerValue(group.propertyIds);
+                        return (
+                          <label key={group.id} className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                            {group.name} set
+                            <select
+                              aria-label={`${group.name} set owner`}
+                              onChange={(event) => setDebugPropertySetOwner(group.propertyIds, event.target.value)}
+                              value={value}
+                              className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                            >
+                              {value === "__mixed" ? (
+                                <option disabled value="__mixed">
+                                  Mixed
+                                </option>
+                              ) : null}
+                              <option value="">Bank</option>
+                              {players.map((player, seatOrder) => (
+                                <option key={player.id} value={seatOrder}>
+                                  {player.name.trim() || `Player ${seatOrder + 1}`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div className="grid gap-2">

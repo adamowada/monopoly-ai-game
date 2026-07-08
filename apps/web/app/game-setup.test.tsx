@@ -245,6 +245,78 @@ describe("GameSetupPanel", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created", { scroll: true }));
   });
 
+  it("can allocate an entire debug property set for faster AI scenario setup", async () => {
+    createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
+    render(<GameSetupPanel />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), {
+      target: { value: "Ada" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 2 name" }), {
+      target: { value: "Grace" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enable debug setup" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Orange set owner" }), {
+      target: { value: "1" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create game" }));
+
+    await waitFor(() => {
+      expect(createGameMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            debug_allocations: expect.objectContaining({
+              property_owners: expect.arrayContaining([
+                { property_id: "property_st_james_place", seat_order: 1 },
+                { property_id: "property_tennessee_avenue", seat_order: 1 },
+                { property_id: "property_new_york_avenue", seat_order: 1 },
+              ]),
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
+  it("allows individual debug owner overrides after a property-set allocation", async () => {
+    createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
+    render(<GameSetupPanel />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), {
+      target: { value: "Ada" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 2 name" }), {
+      target: { value: "Grace" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enable debug setup" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Orange set owner" }), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Tennessee Avenue owner" }), {
+      target: { value: "" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create game" }));
+
+    await waitFor(() => {
+      const request = createGameMock.mock.calls[0]?.[0];
+      const debugAllocations = request?.settings?.debug_allocations as
+        | { property_owners?: Array<{ property_id: string; seat_order: number }> }
+        | undefined;
+      const propertyOwners = debugAllocations?.property_owners ?? [];
+      expect(propertyOwners).toEqual(
+        expect.arrayContaining([
+          { property_id: "property_st_james_place", seat_order: 1 },
+          { property_id: "property_new_york_avenue", seat_order: 1 },
+        ]),
+      );
+      expect(propertyOwners).not.toEqual(
+        expect.arrayContaining([{ property_id: "property_tennessee_avenue", seat_order: 1 }]),
+      );
+    });
+  });
+
   it("auto-generates common names when seats become AI players", () => {
     render(<GameSetupPanel />);
 
