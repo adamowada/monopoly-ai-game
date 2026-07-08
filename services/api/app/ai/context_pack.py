@@ -2220,7 +2220,7 @@ def _accept_reject_message(*, decision: str, reason_code: str) -> str:
     if reason_code.endswith("_below_cash_floor"):
         return "I reject because this deal would leave my cash below the liquidity floor."
     if reason_code.endswith("_above_value_ceiling"):
-        return "I reject because the cash ask is above my strategic value ceiling."
+        return "I reject because the payment is above my strategic value ceiling."
     if "breaks_actor_complete" in reason_code:
         return "I reject because this would break up my complete set below fair value."
     return "I reject because this offer undervalues set leverage."

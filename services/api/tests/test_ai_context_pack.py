@@ -850,6 +850,9 @@ def test_context_pack_rejects_actor_completion_when_property_payment_overpays() 
     assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
         "decision"
     ] == "reject"
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "message"
+    ] == "I reject because the payment is above my strategic value ceiling."
     assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
     assert guidance["deal_evaluations"][0]["reason_code"] == (
         "receives_property_that_completes_actor_street_group_above_value_ceiling"
