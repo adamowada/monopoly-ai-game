@@ -98,6 +98,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_auction_bid_within_valuation,
         ),
         StrategySmokeCase(
+            name="auction_pass_above_valuation",
+            game_id=UUID("00000000-0000-0000-0000-00000000b207"),
+            decision_type="action_decision",
+            state_factory=_auction_pass_state,
+            verifier=_verify_auction_pass_above_valuation,
+        ),
+        StrategySmokeCase(
             name="orange_monopoly_development",
             game_id=UUID("00000000-0000-0000-0000-00000000b201"),
             decision_type="action_decision",
@@ -202,6 +209,15 @@ def _verify_auction_bid_within_valuation(parsed: dict[str, Any]) -> None:
     assert action.get("type") == "BID_AUCTION", f"expected BID_AUCTION, got {action.get('type')}"
     assert payload.get("property_id") == "property_virginia_avenue"
     assert 52 <= amount <= 160, f"expected a deliberate bid above floor and within valuation, got {amount}"
+
+
+def _verify_auction_pass_above_valuation(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "PASS_AUCTION", f"expected PASS_AUCTION, got {action.get('type')}"
+    assert payload.get("property_id") == "property_virginia_avenue"
 
 
 def _verify_orange_monopoly_development(parsed: dict[str, Any]) -> None:
@@ -408,6 +424,18 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
 
 
 def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ...]:
+    if case.name == "auction_pass_above_valuation":
+        return (
+            {
+                "id": "live-strategy-pass-auction-above-valuation",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace can BID_AUCTION or PASS_AUCTION for "
+                    "property_virginia_avenue. The minimum legal bid is $1001, which is "
+                    "above the valuation ceiling of $160. Choose PASS_AUCTION."
+                ),
+            },
+        )
     if case.name == "auction_bid_within_valuation":
         return (
             {
@@ -544,6 +572,25 @@ def _auction_bid_state(game_id: UUID) -> GameState:
                 "property_id": "property_virginia_avenue",
                 "high_bidder_id": str(OTHER_PLAYER_ID),
                 "high_bid_amount": 50,
+                "passed_player_ids": [],
+            },
+        }
+    )
+
+
+def _auction_pass_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-auction-pass")
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+            "active_auction": {
+                "property_id": "property_virginia_avenue",
+                "high_bidder_id": str(OTHER_PLAYER_ID),
+                "high_bid_amount": 1000,
                 "passed_player_ids": [],
             },
         }

@@ -80,6 +80,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "low" in source
     assert "railroad_purchase_with_healthy_cash" in source
     assert "auction_bid_within_valuation" in source
+    assert "auction_pass_above_valuation" in source
     assert "orange_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
@@ -92,6 +93,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "BID_AUCTION" in source
     assert "PASS_AUCTION" in source
     assert "property_virginia_avenue" in source
+    assert "above the valuation ceiling" in source
     assert "property_reading_railroad" in source
     assert "open_negotiation" in source
     assert "deal_proposal" in source
