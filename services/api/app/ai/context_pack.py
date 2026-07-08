@@ -1278,21 +1278,26 @@ def _negotiation_strategy_guidance(
     actor_id: str,
     negotiations: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    trade_opportunities = _street_group_trade_opportunities(
+    trade_opportunities, deferred_trade_opportunities = _street_group_trade_opportunities(
         state,
         actor_id,
         negotiations,
     )
+    guidance_messages: list[str] = []
+    if trade_opportunities:
+        guidance_messages.append(
+            "Open a concise negotiation for the highest-priority trade opportunity before ordinary low-impact actions."
+        )
+    elif deferred_trade_opportunities:
+        guidance_messages.append(
+            "Wait on near-monopoly negotiations until the available cash budget can support a credible offer."
+        )
+
     guidance: dict[str, Any] = {
         "recommended_decision_types": ["open_negotiation"] if trade_opportunities else [],
         "trade_opportunities": trade_opportunities,
-        "guidance": (
-            [
-                "Open a concise negotiation for the highest-priority trade opportunity before ordinary low-impact actions."
-            ]
-            if trade_opportunities
-            else []
-        ),
+        "deferred_trade_opportunities": deferred_trade_opportunities,
+        "guidance": guidance_messages,
     }
     if trade_opportunities:
         template = _open_negotiation_payload_template(trade_opportunities[0])
@@ -1337,7 +1342,7 @@ def _street_group_trade_opportunities(
     state: GameState,
     actor_id: str,
     negotiations: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     data = load_classic_monopoly_data()
     properties_by_id = {property_data.id: property_data for property_data in data.properties}
     ownership_by_property_id = {
@@ -1347,6 +1352,7 @@ def _street_group_trade_opportunities(
     player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
     active_participant_sets = _active_negotiation_participant_sets(negotiations)
     opportunities: list[dict[str, Any]] = []
+    deferred_opportunities: list[dict[str, Any]] = []
 
     for group in data.property_groups:
         group_properties = [
@@ -1384,6 +1390,26 @@ def _street_group_trade_opportunities(
             max(player_cash - PURCHASE_HEALTHY_CASH_FLOOR, 0),
             target_property.price * 3 // 2,
         )
+        if cash_budget_ceiling < target_property.price:
+            deferred_opportunities.append(
+                {
+                    "kind": "complete_street_group",
+                    "priority": "deferred_until_cash_offer_is_credible",
+                    "group": group.id,
+                    "group_name": group.name,
+                    "target_property_id": target_property.id,
+                    "target_property_name": target_property.name,
+                    "target_owner_id": target_owner_id,
+                    "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
+                    "cash_budget_floor": target_property.price,
+                    "cash_budget_ceiling": cash_budget_ceiling,
+                    "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                    "reason": (
+                        "Available cash above the healthy reserve cannot cover the target property list price."
+                    ),
+                }
+            )
+            continue
         opportunities.append(
             {
                 "kind": "complete_street_group",
@@ -1410,13 +1436,10 @@ def _street_group_trade_opportunities(
             }
         )
 
-    return sorted(
-        opportunities,
-        key=lambda opportunity: (
-            opportunity["group"],
-            opportunity["target_property_id"],
-        ),
-    )
+    def sort_key(opportunity: Mapping[str, Any]) -> tuple[Any, Any]:
+        return opportunity["group"], opportunity["target_property_id"]
+
+    return sorted(opportunities, key=sort_key), sorted(deferred_opportunities, key=sort_key)
 
 
 def _active_negotiation_participant_sets(

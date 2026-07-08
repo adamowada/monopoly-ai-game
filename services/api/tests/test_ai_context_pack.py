@@ -313,6 +313,34 @@ def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
     assert "open_negotiation.negotiation.context must be a JSON object" in instruction_text
 
 
+def test_context_pack_defers_near_monopoly_trade_when_cash_cannot_support_offer() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=350)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "complete_street_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "orange",
+            "group_name": "Orange",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 50,
+            "healthy_cash_floor": 300,
+            "reason": "Available cash above the healthy reserve cannot cover the target property list price.",
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
 def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="deal_proposal")
@@ -1028,9 +1056,9 @@ def _state_with_orange_monopoly() -> GameState:
     )
 
 
-def _state_with_orange_near_monopoly() -> GameState:
+def _state_with_orange_near_monopoly(*, ai_cash: int = 1500) -> GameState:
     state = _state()
-    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
     other_player = state.players[1].model_copy(update={"cash": 1500})
     owner_by_property_id = {
         "property_st_james_place": str(AI_PLAYER_ID),
