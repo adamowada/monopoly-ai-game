@@ -488,13 +488,14 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-50 mx-auto w-fit max-w-[8.25rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-2 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[70] mx-auto w-fit max-w-[7rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-1.5 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
+      data-board-motion-layer="top"
       data-board-motion-placement="above-dice"
       data-board-motion-size="compact"
       role="status"
     >
-      <div className="break-words text-[10px] font-black leading-[1.05]">{message}</div>
+      <div className="break-words text-[9px] font-black leading-[1.05]">{message}</div>
     </div>
   );
 }
@@ -512,13 +513,17 @@ function CenterMotionStack({
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-50 grid place-items-center px-2"
-      data-center-motion-layout="banner-over-dice"
+      className="pointer-events-none absolute inset-0 z-[65] grid place-items-center px-2"
+      data-center-motion-layout="separate-banner-dice-layers"
       data-center-motion-stack=""
     >
-      <div className="grid max-w-[8.75rem] grid-rows-[auto_auto] justify-items-center gap-2">
-        <BoardMotionBanner motion={motion} />
-        <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
+      <div className="grid max-w-[7.5rem] grid-rows-[auto_auto] justify-items-center gap-3">
+        <div className="relative z-[70] -translate-y-1" data-center-motion-banner-layer="">
+          <BoardMotionBanner motion={motion} />
+        </div>
+        <div className="relative z-30 translate-y-1" data-center-dice-layer="">
+          <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
+        </div>
       </div>
     </div>
   );
@@ -642,14 +647,15 @@ function DiceMotionStatus({
       aria-label="Dice roll animation"
       aria-live="polite"
       className={cn(
-        "dice-motion-panel z-40 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]",
+        "dice-motion-panel z-40 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]",
         placement === "board-overlay"
-          ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-          : "relative w-fit max-w-full",
+          ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 px-3 py-2"
+          : "relative w-fit max-w-full px-2 py-1.5",
       )}
       data-dice-placement={placement}
       data-dice-motion={motion?.status ?? "last-roll"}
-      data-dice-layer={placement === "center-board" ? "below-motion-banner" : undefined}
+      data-dice-layer={placement === "center-board" ? "lower-center" : undefined}
+      data-dice-size={placement === "center-board" ? "compact-center" : undefined}
       role="status"
     >
       <span aria-hidden="true" className="dice-motion-ring" />
@@ -838,6 +844,7 @@ function BoardOwnerMarker({
         markerSideClasses[perimeterEdge],
       )}
       data-marker-edge="perimeter"
+      data-marker-placement="owner-perimeter"
       data-marker-side={perimeterEdge}
       data-owner-marker=""
       data-token-icon={icon}
@@ -889,6 +896,7 @@ function DevelopmentMarker({
       )}
       data-development-marker=""
       data-marker-edge="interior"
+      data-marker-placement="development-interior"
       data-marker-side={interiorEdge}
       role="img"
       title={label.replace("Development marker: ", "")}

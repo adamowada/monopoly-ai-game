@@ -54,6 +54,22 @@ textarea {
   animation-name: dice-panel-pop-in-place;
 }
 
+.dice-motion-panel[data-dice-size="compact-center"] .dice-motion-face {
+  width: 2rem;
+  height: 2rem;
+  font-size: 0.875rem;
+}
+
+.dice-motion-panel[data-dice-size="compact-center"] [data-dice-pips] {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.dice-motion-panel[data-dice-size="compact-center"] [data-dice-pip] {
+  width: 0.3125rem;
+  height: 0.3125rem;
+}
+
 .dice-motion-panel[data-dice-motion="rolling"] .dice-motion-ring {
   animation: dice-ring-pulse 620ms ease-out infinite;
 }
