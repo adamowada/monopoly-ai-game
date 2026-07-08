@@ -47,6 +47,7 @@ ACTIVE_NEGOTIATION_STATUSES = ("opened", "active", "countered", "accepted")
 _FIELD_JOINER = "".join
 AIContextPack: TypeAlias = dict[str, Any]
 MORTGAGE_HEALTHY_CASH_FLOOR = 200
+PURCHASE_HEALTHY_CASH_FLOOR = 300
 
 
 def build_ai_context_pack(
@@ -693,11 +694,31 @@ def _action_selection_guidance(
         str(action["type"]) for action in legal_actions if isinstance(action.get("type"), str)
     ]
     development_opportunities = _development_opportunities(state, actor_id, legal_actions)
+    recommended_action_types: list[str] = []
     recommended_before_roll: list[str] = []
     lower_priority_action_types: list[str] = []
     turn_guidance: list[str] = []
+    purchase_guidance = _purchase_guidance(state, actor_id, legal_actions)
     auction_guidance = _auction_guidance(state, actor_id, legal_actions)
     mortgage_guidance = _mortgage_guidance(state, actor_id, legal_actions)
+
+    if purchase_guidance is not None:
+        recommendation = _string_or_none(purchase_guidance.get("recommendation"))
+        if recommendation == "buy_property_at_list_price":
+            recommended_action_types.append("BUY_PROPERTY")
+            if "START_AUCTION" in legal_action_types:
+                lower_priority_action_types.append("START_AUCTION")
+            turn_guidance.append(
+                "Prefer BUY_PROPERTY for this landed unowned property while cash_after_price "
+                "remains healthy; START_AUCTION lets competitors win the property and should "
+                "need a concrete liquidity or valuation reason."
+            )
+        elif recommendation == "consider_auction_for_liquidity":
+            turn_guidance.append(
+                "START_AUCTION may be reasonable because BUY_PROPERTY cash_after_price would "
+                "fall below the healthy liquidity floor; if buying anyway, explain the "
+                "monopoly, railroad, utility, or blocking value."
+            )
 
     if development_opportunities:
         recommended_before_roll.append("BUY_HOUSE")
@@ -742,12 +763,91 @@ def _action_selection_guidance(
             )
 
     return {
+        "recommended_action_types": recommended_action_types,
         "recommended_action_types_before_roll": recommended_before_roll,
         "lower_priority_action_types": lower_priority_action_types,
+        "purchase_guidance": purchase_guidance,
         "development_opportunities": development_opportunities,
         "auction_guidance": auction_guidance,
         "mortgage_guidance": mortgage_guidance,
         "turn_guidance": turn_guidance,
+    }
+
+
+def _purchase_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    buy_action = next((action for action in legal_actions if action.get("type") == "BUY_PROPERTY"), None)
+    if buy_action is None:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    payload = _mapping(buy_action.get("payload"))
+    property_id = _string_or_none(payload.get("property_id"))
+    if property_id is None:
+        return None
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    property_data = properties_by_id.get(property_id)
+    if property_data is None:
+        return None
+
+    price = _int_or_zero(payload.get("price")) or property_data.price
+    cash_after_price = player.cash - price
+    start_auction_available = any(action.get("type") == "START_AUCTION" for action in legal_actions)
+
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    group = groups_by_id.get(property_data.group)
+    same_group_owned_property_ids: list[str] = []
+    same_group_other_owner_ids: list[str] = []
+    completes_property_group = False
+    if group is not None:
+        for group_property_id in group.property_ids:
+            if group_property_id == property_id:
+                continue
+            ownership = ownership_by_property_id.get(group_property_id)
+            if ownership is None or ownership.owner_id is None:
+                continue
+            if ownership.owner_id == actor_id:
+                same_group_owned_property_ids.append(group_property_id)
+            elif ownership.owner_id not in same_group_other_owner_ids:
+                same_group_other_owner_ids.append(ownership.owner_id)
+        completes_property_group = (
+            property_data.kind == "street"
+            and len(same_group_owned_property_ids) == len(group.property_ids) - 1
+        )
+
+    recommendation = (
+        "buy_property_at_list_price"
+        if cash_after_price >= PURCHASE_HEALTHY_CASH_FLOOR
+        else "consider_auction_for_liquidity"
+    )
+
+    return {
+        "action_available": True,
+        "recommendation": recommendation,
+        "property_id": property_data.id,
+        "property_name": property_data.name,
+        "property_kind": property_data.kind,
+        "property_group": property_data.group,
+        "property_price": property_data.price,
+        "buy_payload_price": price,
+        "cash_available": player.cash,
+        "cash_after_price": cash_after_price,
+        "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+        "start_auction_available": start_auction_available,
+        "same_group_owned_property_ids": sorted(same_group_owned_property_ids),
+        "same_group_other_owner_ids": sorted(same_group_other_owner_ids),
+        "completes_property_group": completes_property_group,
     }
 
 
@@ -1140,6 +1240,7 @@ def _instruction_contract() -> dict[str, Any]:
         "instructions": [
             "Choose action_decision.action only from legal_actions when making a game action.",
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
+            "When purchase_guidance recommends BUY_PROPERTY, choose BUY_PROPERTY over START_AUCTION unless cash_after_price, valuation, or blocking risk gives a concrete reason.",
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",

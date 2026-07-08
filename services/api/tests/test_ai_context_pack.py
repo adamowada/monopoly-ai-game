@@ -287,6 +287,41 @@ def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> 
     assert "only enough" in guidance_text
 
 
+def test_context_pack_prefers_buying_landed_property_when_cash_is_healthy() -> None:
+    state = _state_landed_on_unowned_reading_railroad(cash=1500)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    assert any(action["type"] == "BUY_PROPERTY" for action in pack["legal_actions"])
+    assert any(action["type"] == "START_AUCTION" for action in pack["legal_actions"])
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_at_list_price"
+    assert guidance["purchase_guidance"]["property_id"] == "property_reading_railroad"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 1300
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "Prefer BUY_PROPERTY" in guidance_text
+    assert "START_AUCTION" in guidance_text
+    assert any(
+        "BUY_PROPERTY" in instruction and "START_AUCTION" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_keeps_auction_viable_when_buying_would_break_liquidity_floor() -> None:
+    state = _state_landed_on_unowned_reading_railroad(cash=220)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    assert "BUY_PROPERTY" not in guidance["recommended_action_types"]
+    assert "START_AUCTION" not in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "consider_auction_for_liquidity"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 20
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "cash_after_price would fall below" in guidance_text
+
+
 def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops() -> None:
     state = _state_with_active_auction()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -839,6 +874,23 @@ def _state_with_active_debt_and_owned_railroad(*, cash: int) -> GameState:
                 "amount_paid": 0,
                 "reason": "rent",
                 "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _state_landed_on_unowned_reading_railroad(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 5})
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (ai_player.model_dump(mode="python"), *[
+                player.model_dump(mode="python") for player in state.players[1:]
+            ]),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
             },
         }
     )
