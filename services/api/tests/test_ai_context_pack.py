@@ -840,6 +840,56 @@ def test_context_pack_recommends_rejecting_overpriced_deal_that_completes_actor_
     assert opportunity["cash_after_payment"] == 400
 
 
+def test_context_pack_builds_counteroffer_template_for_overpriced_monopoly_completion() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=800)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="counteroffer",
+        deals=[_fair_tennessee_deal(amount=400)],
+    )
+
+    guidance = pack["counteroffer_guidance"]
+    assert guidance["recommended_decision_types"] == ["counteroffer"]
+    assert guidance["guidance"] == [
+        "Use the highest-priority counteroffer_payload_template when a proposed deal has strategic upside but breaches value or liquidity limits."
+    ]
+    template = guidance["counteroffer_templates"][0]
+    payload = template["counteroffer_payload_template"]
+    terms = payload["terms"]
+
+    assert template["responds_to_deal_id"] == str(DEAL_ID)
+    assert template["reason_code"] == "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    assert template["recommended_cash_amount"] == 270
+    assert payload == {
+        "responds_to_deal_id": str(DEAL_ID),
+        "message": "I can counter at $270 for Tennessee Avenue to complete Orange without overpaying.",
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 270,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+    }
+    assert json.loads(template["terms_json_string_example"]) == terms
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "counteroffer_guidance" in instruction_text
+    assert "counteroffer_payload_template" in instruction_text
+
+
 def test_context_pack_recommends_rejecting_monopoly_completion_deal_that_drains_cash() -> None:
     state = _state_with_orange_near_monopoly(ai_cash=300)
     pack = build_ai_context_pack(

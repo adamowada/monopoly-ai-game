@@ -104,6 +104,7 @@ def build_ai_context_pack(
             "public_deals": [_public_deal(row) for row in _sorted_rows(deals)],
         },
         "deal_evaluation_guidance": _deal_evaluation_guidance(state, actor_id, deals),
+        "counteroffer_guidance": _counteroffer_guidance(state, actor_id, deals),
         "contracts": {
             "active_contracts": [_public_contract(row) for row in _sorted_rows(contracts)],
             "active_obligations": [_public_obligation(row) for row in _sorted_rows(obligations)],
@@ -1870,6 +1871,135 @@ def _deal_evaluation_guidance(
     }
 
 
+def _counteroffer_guidance(
+    state: GameState,
+    actor_id: str,
+    deals: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    templates = [
+        template
+        for deal in _sorted_rows(deals)
+        if _string_or_none(deal.get("status")) == "proposed"
+        if (evaluation := _deal_completion_evaluation(state, actor_id, deal)) is not None
+        if (template := _counteroffer_template_from_evaluation(deal, evaluation, actor_id))
+        is not None
+    ]
+    guidance_messages: list[str] = []
+    if templates:
+        guidance_messages.append(
+            "Use the highest-priority counteroffer_payload_template when a proposed deal has strategic upside but breaches value or liquidity limits."
+        )
+
+    return {
+        "recommended_decision_types": ["counteroffer"] if templates else [],
+        "counteroffer_templates": templates,
+        "guidance": guidance_messages,
+    }
+
+
+def _counteroffer_template_from_evaluation(
+    deal: Mapping[str, Any],
+    evaluation: Mapping[str, Any],
+    actor_id: str,
+) -> dict[str, Any] | None:
+    if evaluation.get("recommendation") != "reject":
+        return None
+    opportunity = _mapping(evaluation.get("opportunity"))
+    if not opportunity:
+        return None
+    reason_code = _string_or_none(evaluation.get("reason_code")) or ""
+    if not (
+        reason_code.endswith("_above_value_ceiling")
+        or reason_code.endswith("_below_cash_floor")
+    ):
+        return None
+
+    sender_player_id = _string_or_none(opportunity.get("sender_player_id"))
+    property_id = _string_or_none(opportunity.get("property_id"))
+    if sender_player_id is None or property_id is None:
+        return None
+
+    current_payment = _int_or_zero(evaluation.get("actor_pays_cash_total"))
+    cash_available = _int_or_zero(opportunity.get("cash_after_payment")) + current_payment
+    cash_limited_ceiling = max(cash_available - GROUP_COMPLETION_PURCHASE_CASH_FLOOR, 0)
+    value_ceiling = _int_or_zero(opportunity.get("maximum_cash_value_ceiling"))
+    recommended_cash_amount = min(value_ceiling, cash_limited_ceiling)
+    property_price = _int_or_zero(opportunity.get("property_price"))
+    if recommended_cash_amount <= 0 or recommended_cash_amount >= current_payment:
+        return None
+    if property_price > 0 and recommended_cash_amount < property_price:
+        return None
+
+    terms_source = _mapping(deal.get("terms"))
+    participants = _string_list(terms_source.get("participants"))
+    if not participants:
+        participants = [actor_id, sender_player_id]
+    terms = {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": participants,
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "from_player_id": actor_id,
+                "to_player_id": sender_player_id,
+                "amount": recommended_cash_amount,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "from_player_id": sender_player_id,
+                "to_player_id": actor_id,
+                "property_id": property_id,
+            },
+        ],
+    }
+    template = {
+        "responds_to_deal_id": _string_or_none(deal.get("id")),
+        "reason_code": reason_code,
+        "target_property_id": property_id,
+        "target_property_name": _string_or_none(opportunity.get("property_name")),
+        "target_owner_id": sender_player_id,
+        "current_cash_amount": current_payment,
+        "recommended_cash_amount": recommended_cash_amount,
+        "maximum_cash_value_ceiling": value_ceiling,
+        "cash_limited_ceiling": cash_limited_ceiling,
+        "counteroffer_payload_template": {
+            "responds_to_deal_id": _string_or_none(deal.get("id")),
+            "message": _counteroffer_message(
+                reason_code=reason_code,
+                property_name=_string_or_none(opportunity.get("property_name")) or property_id,
+                group_name=_string_or_none(opportunity.get("group_name")) or "the set",
+                cash_amount=recommended_cash_amount,
+            ),
+            "terms": terms,
+        },
+        "terms_json_string_example": json.dumps(
+            terms,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    }
+    return template
+
+
+def _counteroffer_message(
+    *,
+    reason_code: str,
+    property_name: str,
+    group_name: str,
+    cash_amount: int,
+) -> str:
+    if reason_code.endswith("_below_cash_floor"):
+        return (
+            f"I can counter at ${cash_amount} for {property_name} to complete "
+            f"{group_name} while preserving cash."
+        )
+    return (
+        f"I can counter at ${cash_amount} for {property_name} to complete "
+        f"{group_name} without overpaying."
+    )
+
+
 def _deal_completion_evaluation(
     state: GameState,
     actor_id: str,
@@ -2690,6 +2820,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When deal_proposal_guidance provides a deal_payload_template, use it for deal_proposal unless visible negotiation terms require a safer cash amount or counter structure.",
             "For deal_proposal, deal_proposal.deal.terms must be a valid JSON object string. Do not prefix the string with labels such as structured_deal:.",
             "For deal_proposal, the decoded deal_proposal.deal.terms object must use kind structured_deal, deal_schema_version 1, participants, and a terms array of financial instrument objects.",
+            "When counteroffer_guidance provides a counteroffer_payload_template, use it for counteroffer unless visible negotiation terms make rejection strategically better.",
             "For counteroffer, counteroffer.terms must follow the same valid JSON object string structured_deal shape.",
             "When deal_evaluation_guidance recommends reject for accept_reject, reject that deal unless visible terms clearly offset the listed strategic risk.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",

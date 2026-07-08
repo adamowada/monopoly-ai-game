@@ -275,6 +275,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_overpriced_deal_rejection,
         ),
         StrategySmokeCase(
+            name="orange_overpriced_deal_counteroffer",
+            game_id=UUID("00000000-0000-0000-0000-00000000b229"),
+            decision_type="counteroffer",
+            state_factory=_orange_near_monopoly_state,
+            verifier=_verify_orange_overpriced_deal_counteroffer,
+        ),
+        StrategySmokeCase(
             name="orange_cash_draining_deal_rejection",
             game_id=UUID("00000000-0000-0000-0000-00000000b222"),
             decision_type="accept_reject",
@@ -308,7 +315,7 @@ def _run_strategy_case(case: StrategySmokeCase) -> dict[str, Any]:
         player_id=case.actor_player_id,
         decision_type=case.decision_type,
         negotiation_id=NEGOTIATION_ID
-        if case.decision_type in {"deal_proposal", "accept_reject"}
+        if case.decision_type in {"deal_proposal", "counteroffer", "accept_reject"}
         else None,
         phase=state.turn.phase.value,
         state_hash=state.state_hash(),
@@ -614,6 +621,35 @@ def _verify_orange_overpriced_deal_rejection(parsed: dict[str, Any]) -> None:
     )
 
 
+def _verify_orange_overpriced_deal_counteroffer(parsed: dict[str, Any]) -> None:
+    counteroffer = _dict(parsed.get("counteroffer"))
+    terms = _dict(counteroffer.get("terms"))
+    instruments = [_dict(term) for term in terms.get("terms", [])]
+    cash_terms = [term for term in instruments if term.get("kind") == "immediate_cash_transfer"]
+    property_terms = [
+        term for term in instruments if term.get("kind") == "immediate_property_transfer"
+    ]
+
+    assert parsed.get("decision_type") == "counteroffer"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert counteroffer.get("responds_to_deal_id") == str(OVERPRICED_DEAL_ID)
+    assert terms.get("kind") == "structured_deal"
+    assert terms.get("deal_schema_version") == 1
+    assert terms.get("participants") == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert any(
+        term.get("from_player_id") == str(AI_PLAYER_ID)
+        and term.get("to_player_id") == str(OTHER_PLAYER_ID)
+        and 180 <= int(term.get("amount", 0)) <= 270
+        for term in cash_terms
+    )
+    assert any(
+        term.get("from_player_id") == str(OTHER_PLAYER_ID)
+        and term.get("to_player_id") == str(AI_PLAYER_ID)
+        and term.get("property_id") == "property_tennessee_avenue"
+        for term in property_terms
+    )
+
+
 def _verify_orange_cash_draining_deal_rejection(parsed: dict[str, Any]) -> None:
     accept_reject = _dict(parsed.get("accept_reject"))
 
@@ -656,6 +692,19 @@ def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, 
                 term.get("kind") for term in terms.get("terms", []) if isinstance(term, dict)
             ],
         }
+    if case.decision_type == "counteroffer":
+        terms = _dict(_dict(parsed.get("counteroffer")).get("terms"))
+        return {
+            "case": case.name,
+            "status": "ok",
+            "decision_type": parsed.get("decision_type"),
+            "responds_to_deal_id": _dict(parsed.get("counteroffer")).get(
+                "responds_to_deal_id"
+            ),
+            "term_kinds": [
+                term.get("kind") for term in terms.get("terms", []) if isinstance(term, dict)
+            ],
+        }
     if case.decision_type == "accept_reject":
         accept_reject = _dict(parsed.get("accept_reject"))
         return {
@@ -688,8 +737,17 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
                 "Ada owns Tennessee Avenue and should protect monopoly-blocking leverage unless paid a fair premium."
             ),
         }
-    if case.decision_type != "deal_proposal":
+    if case.decision_type not in {"deal_proposal", "counteroffer"}:
         return {}
+    if case.decision_type == "counteroffer":
+        return {
+            "mode": "live_strategy_smoke",
+            "negotiation_id": str(NEGOTIATION_ID),
+            "deal_id": str(OVERPRICED_DEAL_ID),
+            "requested_decision": (
+                "Counteroffer the overpriced Tennessee Avenue proposal at a strategic value."
+            ),
+        }
     return {
         "mode": "live_strategy_smoke",
         "negotiation_id": str(NEGOTIATION_ID),
@@ -698,14 +756,14 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
 
 
 def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
-    if case.decision_type not in {"deal_proposal", "accept_reject"}:
+    if case.decision_type not in {"deal_proposal", "counteroffer", "accept_reject"}:
         return ()
     current_deal_id = None
     if case.name == "orange_bad_deal_rejection":
         current_deal_id = str(BAD_DEAL_ID)
     elif case.name == "orange_good_deal_acceptance":
         current_deal_id = str(GOOD_DEAL_ID)
-    elif case.name == "orange_overpriced_deal_rejection":
+    elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         current_deal_id = str(OVERPRICED_DEAL_ID)
     elif case.name == "orange_cash_draining_deal_rejection":
         current_deal_id = str(CASH_DRAINING_DEAL_ID)
@@ -765,7 +823,7 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "created_at": "2026-07-08T00:00:02Z",
             },
         )
-    if case.name == "orange_overpriced_deal_rejection":
+    if case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         return (
             {
                 "id": "live-strategy-overpriced-offer-message-1",
@@ -821,7 +879,7 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
 
 
 def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
-    if case.decision_type != "accept_reject":
+    if case.decision_type not in {"counteroffer", "accept_reject"}:
         return ()
     deal_id = BAD_DEAL_ID
     terms = _bad_deal_terms()
@@ -830,7 +888,7 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         deal_id = GOOD_DEAL_ID
         terms = _good_deal_terms()
         proposer_id = OTHER_PLAYER_ID
-    elif case.name == "orange_overpriced_deal_rejection":
+    elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         deal_id = OVERPRICED_DEAL_ID
         terms = _good_deal_terms(amount=400)
         proposer_id = OTHER_PLAYER_ID
@@ -1119,6 +1177,21 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "the $300 cash reserve floor. BUY_HOUSE remains legally available, but "
                     "action_selection_guidance defers every development opportunity. Choose "
                     "ROLL_DICE instead of BUY_HOUSE."
+                ),
+            },
+        )
+    if case.decision_type == "counteroffer":
+        return (
+            {
+                "id": "live-strategy-counter-overpriced-monopoly-completer",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this counteroffer decision, Grace can receive "
+                    "property_tennessee_avenue from Ada, but Ada's $400 ask exceeds "
+                    "the $270 strategic value ceiling. Use "
+                    "counteroffer_guidance.counteroffer_payload_template as the base "
+                    "counteroffer so Grace offers no more than $270 while still asking "
+                    "for Tennessee Avenue."
                 ),
             },
         )
