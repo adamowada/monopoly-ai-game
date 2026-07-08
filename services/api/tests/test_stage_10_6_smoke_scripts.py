@@ -355,6 +355,14 @@ def test_live_codex_strategy_smoke_purchase_blocks_opponent_group_completion() -
     assert guidance["property_id"] == "property_virginia_avenue"
     assert guidance["recommendation"] == "buy_property_to_block_opponent_group_completion"
     assert guidance["cash_after_price"] == 240
+    assert guidance["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_virginia_avenue",
+            "price": 160,
+        },
+        "reason_code": "buy_property_to_block_opponent_group_completion",
+    }
     assert guidance["opponent_group_completion_threats"] == [
         {
             "opponent_player_id": str(module.OTHER_PLAYER_ID),
@@ -385,6 +393,14 @@ def test_live_codex_strategy_smoke_purchase_completes_railroad_set() -> None:
     assert guidance["recommendation"] == "buy_property_to_complete_group"
     assert guidance["cash_after_price"] == 200
     assert guidance["completes_property_group"] is True
+    assert guidance["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_short_line_railroad",
+            "price": 200,
+        },
+        "reason_code": "buy_property_to_complete_group",
+    }
     assert guidance["same_group_owned_property_ids"] == [
         "property_b_and_o_railroad",
         "property_pennsylvania_railroad",

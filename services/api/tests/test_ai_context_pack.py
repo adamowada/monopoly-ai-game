@@ -1314,11 +1314,23 @@ def test_context_pack_prefers_buying_landed_property_when_cash_is_healthy() -> N
     assert guidance["purchase_guidance"]["recommendation"] == "buy_property_at_list_price"
     assert guidance["purchase_guidance"]["property_id"] == "property_reading_railroad"
     assert guidance["purchase_guidance"]["cash_after_price"] == 1300
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_reading_railroad",
+            "price": 200,
+        },
+        "reason_code": "buy_property_at_list_price",
+    }
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "Prefer BUY_PROPERTY" in guidance_text
     assert "START_AUCTION" in guidance_text
     assert any(
         "BUY_PROPERTY" in instruction and "START_AUCTION" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_purchase_action" in instruction
         for instruction in pack["instruction_contract"]["instructions"]
     )
 
@@ -1328,10 +1340,15 @@ def test_context_pack_keeps_auction_viable_when_buying_would_break_liquidity_flo
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
 
     guidance = pack["action_selection_guidance"]
-    assert "BUY_PROPERTY" not in guidance["recommended_action_types"]
-    assert "START_AUCTION" not in guidance["lower_priority_action_types"]
+    assert guidance["recommended_action_types"] == ["START_AUCTION"]
+    assert "BUY_PROPERTY" in guidance["lower_priority_action_types"]
     assert guidance["purchase_guidance"]["recommendation"] == "consider_auction_for_liquidity"
     assert guidance["purchase_guidance"]["cash_after_price"] == 20
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "START_AUCTION",
+        "payload": {"property_id": "property_reading_railroad"},
+        "reason_code": "consider_auction_for_liquidity",
+    }
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "cash_after_price would fall below" in guidance_text
 
@@ -1348,6 +1365,14 @@ def test_context_pack_prefers_buying_property_that_completes_group_with_thin_cas
     assert guidance["purchase_guidance"]["property_id"] == "property_tennessee_avenue"
     assert guidance["purchase_guidance"]["cash_after_price"] == 220
     assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_tennessee_avenue",
+            "price": 180,
+        },
+        "reason_code": "buy_property_to_complete_group",
+    }
     assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
         "property_new_york_avenue",
         "property_st_james_place",
@@ -1370,6 +1395,14 @@ def test_context_pack_prefers_buying_railroad_that_completes_set_with_thin_cash(
     assert guidance["purchase_guidance"]["property_kind"] == "railroad"
     assert guidance["purchase_guidance"]["cash_after_price"] == 200
     assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_short_line_railroad",
+            "price": 200,
+        },
+        "reason_code": "buy_property_to_complete_group",
+    }
     assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
         "property_b_and_o_railroad",
         "property_pennsylvania_railroad",
@@ -1393,6 +1426,14 @@ def test_context_pack_prefers_buying_utility_that_completes_set_with_thin_cash()
     assert guidance["purchase_guidance"]["property_kind"] == "utility"
     assert guidance["purchase_guidance"]["cash_after_price"] == 150
     assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_water_works",
+            "price": 150,
+        },
+        "reason_code": "buy_property_to_complete_group",
+    }
     assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
         "property_electric_company",
     ]
@@ -1414,6 +1455,14 @@ def test_context_pack_prefers_buying_property_that_blocks_opponent_group_complet
     )
     assert guidance["purchase_guidance"]["property_id"] == "property_virginia_avenue"
     assert guidance["purchase_guidance"]["cash_after_price"] == 240
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_virginia_avenue",
+            "price": 160,
+        },
+        "reason_code": "buy_property_to_block_opponent_group_completion",
+    }
     assert guidance["purchase_guidance"]["opponent_group_completion_threats"] == [
         {
             "opponent_player_id": str(OTHER_PLAYER_ID),

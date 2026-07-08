@@ -752,6 +752,10 @@ def _action_selection_guidance(
                 "reason."
             )
         elif recommendation == "consider_auction_for_liquidity":
+            if "START_AUCTION" in legal_action_types:
+                recommended_action_types.append("START_AUCTION")
+            if "BUY_PROPERTY" in legal_action_types:
+                lower_priority_action_types.append("BUY_PROPERTY")
             turn_guidance.append(
                 "START_AUCTION may be reasonable because BUY_PROPERTY cash_after_price would "
                 "fall below the healthy liquidity floor; if buying anyway, explain the "
@@ -997,7 +1001,11 @@ def _purchase_guidance(
 
     price = _int_or_zero(payload.get("price")) or property_data.price
     cash_after_price = player.cash - price
-    start_auction_available = any(action.get("type") == "START_AUCTION" for action in legal_actions)
+    start_auction_action = next(
+        (action for action in legal_actions if action.get("type") == "START_AUCTION"),
+        None,
+    )
+    start_auction_available = start_auction_action is not None
 
     ownership_by_property_id = {
         ownership.property_id: ownership for ownership in state.property_ownership
@@ -1051,10 +1059,16 @@ def _purchase_guidance(
         recommendation = "buy_property_at_list_price"
     else:
         recommendation = "consider_auction_for_liquidity"
+    recommended_purchase_action = _recommended_purchase_action_template(
+        buy_action=buy_action,
+        start_auction_action=start_auction_action,
+        recommendation=recommendation,
+    )
 
     return {
         "action_available": True,
         "recommendation": recommendation,
+        "recommended_purchase_action": recommended_purchase_action,
         "property_id": property_data.id,
         "property_name": property_data.name,
         "property_kind": property_data.kind,
@@ -1072,6 +1086,23 @@ def _purchase_guidance(
         "completes_property_group": completes_property_group,
         "opponent_group_completion_threats": opponent_group_completion_threats,
     }
+
+
+def _recommended_purchase_action_template(
+    *,
+    buy_action: Mapping[str, Any],
+    start_auction_action: Mapping[str, Any] | None,
+    recommendation: str,
+) -> dict[str, Any] | None:
+    if recommendation in {
+        "buy_property_at_list_price",
+        "buy_property_to_complete_group",
+        "buy_property_to_block_opponent_group_completion",
+    }:
+        return _legal_action_template(buy_action, recommendation)
+    if recommendation == "consider_auction_for_liquidity" and start_auction_action is not None:
+        return _legal_action_template(start_auction_action, recommendation)
+    return None
 
 
 def _mortgage_guidance(
@@ -2978,6 +3009,7 @@ def _instruction_contract() -> dict[str, Any]:
             "Choose action_decision.action only from legal_actions when making a game action.",
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
             "When purchase_guidance recommends BUY_PROPERTY, choose BUY_PROPERTY over START_AUCTION unless cash_after_price, valuation, or blocking risk gives a concrete reason.",
+            "When purchase_guidance provides recommended_purchase_action, use that exact legal action payload for BUY_PROPERTY or START_AUCTION unless visible state has changed.",
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance provides recommended_development_action, use that BUY_HOUSE payload for monopoly development unless visible state makes it illegal.",
             "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
