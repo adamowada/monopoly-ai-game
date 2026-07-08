@@ -859,6 +859,7 @@ def test_context_pack_builds_counteroffer_template_for_overpriced_monopoly_compl
     terms = payload["terms"]
 
     assert template["responds_to_deal_id"] == str(DEAL_ID)
+    assert template["negotiation_id"] == str(NEGOTIATION_ID)
     assert template["reason_code"] == "receives_property_that_completes_actor_street_group_above_value_ceiling"
     assert template["recommended_cash_amount"] == 270
     assert payload == {
@@ -888,6 +889,32 @@ def test_context_pack_builds_counteroffer_template_for_overpriced_monopoly_compl
     instruction_text = " ".join(pack["instruction_contract"]["instructions"])
     assert "counteroffer_guidance" in instruction_text
     assert "counteroffer_payload_template" in instruction_text
+
+
+def test_context_pack_builds_counteroffer_template_for_cash_draining_monopoly_completion() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=300)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="counteroffer",
+        deals=[_fair_tennessee_deal(amount=220)],
+    )
+
+    guidance = pack["counteroffer_guidance"]
+    assert guidance["recommended_decision_types"] == ["counteroffer"]
+    template = guidance["counteroffer_templates"][0]
+    payload = template["counteroffer_payload_template"]
+
+    assert template["responds_to_deal_id"] == str(DEAL_ID)
+    assert template["negotiation_id"] == str(NEGOTIATION_ID)
+    assert template["reason_code"] == "receives_property_that_completes_actor_street_group_below_cash_floor"
+    assert template["recommended_cash_amount"] == 200
+    assert template["maximum_cash_value_ceiling"] == 270
+    assert template["cash_limited_ceiling"] == 200
+    assert payload["message"] == (
+        "I can counter at $200 for Tennessee Avenue to complete Orange while preserving cash."
+    )
+    assert json.loads(template["terms_json_string_example"]) == payload["terms"]
 
 
 def test_context_pack_recommends_rejecting_monopoly_completion_deal_that_drains_cash() -> None:

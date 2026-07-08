@@ -109,6 +109,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_overpriced_deal_rejection" in source
     assert "orange_overpriced_deal_counteroffer" in source
     assert "orange_cash_draining_deal_rejection" in source
+    assert "orange_cash_draining_deal_counteroffer" in source
     assert "orange_monopoly_breakup_deal_rejection" in source
     assert "FOURTH_PLAYER_ID" in source
     assert 'PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai")' in source
@@ -551,6 +552,7 @@ def test_live_codex_strategy_smoke_counteroffer_has_context_pack_guidance() -> N
     assert guidance["recommended_decision_types"] == ["counteroffer"]
     template = guidance["counteroffer_templates"][0]
     assert template["responds_to_deal_id"] == str(module.OVERPRICED_DEAL_ID)
+    assert template["negotiation_id"] == str(module.NEGOTIATION_ID)
     assert template["target_property_id"] == "property_tennessee_avenue"
     assert template["recommended_cash_amount"] == 270
     counteroffer_payload = template["counteroffer_payload_template"]
@@ -561,6 +563,26 @@ def test_live_codex_strategy_smoke_counteroffer_has_context_pack_guidance() -> N
         "immediate_cash_transfer",
         "immediate_property_transfer",
     ]
+
+    cash_draining_case = cases["orange_cash_draining_deal_counteroffer"]
+    cash_draining_state = cash_draining_case.state_factory(cash_draining_case.game_id)
+    cash_draining_pack = module.build_ai_context_pack(
+        cash_draining_state,
+        player_id=str(cash_draining_case.actor_player_id),
+        decision_type=cash_draining_case.decision_type,
+        negotiations=module._negotiations(cash_draining_case),
+        negotiation_messages=module._negotiation_messages(cash_draining_case),
+        deals=module._deals(cash_draining_case),
+        rule_snippets=module._strategy_rule_snippets(cash_draining_case),
+    )
+
+    cash_draining_guidance = cash_draining_pack["counteroffer_guidance"]
+    assert cash_draining_guidance["recommended_decision_types"] == ["counteroffer"]
+    cash_draining_template = cash_draining_guidance["counteroffer_templates"][0]
+    assert cash_draining_template["responds_to_deal_id"] == str(module.CASH_DRAINING_DEAL_ID)
+    assert cash_draining_template["negotiation_id"] == str(module.NEGOTIATION_ID)
+    assert cash_draining_template["target_property_id"] == "property_tennessee_avenue"
+    assert cash_draining_template["recommended_cash_amount"] == 200
 
 
 def test_live_codex_strategy_smoke_monopoly_breakup_deal_has_rejection_guidance() -> None:

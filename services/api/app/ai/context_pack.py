@@ -1955,6 +1955,7 @@ def _counteroffer_template_from_evaluation(
     }
     template = {
         "responds_to_deal_id": _string_or_none(deal.get("id")),
+        "negotiation_id": _string_or_none(deal.get("negotiation_id")),
         "reason_code": reason_code,
         "target_property_id": property_id,
         "target_property_name": _string_or_none(opportunity.get("property_name")),
