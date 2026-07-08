@@ -242,6 +242,75 @@ async def test_legal_ai_action_commits_exactly_like_human_action_and_attempts_on
 
 
 @pytest.mark.asyncio
+async def test_legal_ai_buy_house_develops_owned_monopoly(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory, state_transform=_orange_monopoly_state)
+    legal_build = next(
+        action
+        for action in list_legal_actions(fixture.state, str(AI_PLAYER_ID))
+        if action.type == "BUY_HOUSE"
+        and action.payload.get("property_id") == "property_st_james_place"
+    )
+    human_equivalent = execute_action(
+        fixture.state,
+        GameAction(
+            actor_id=legal_build.actor_id,
+            type=legal_build.type,
+            payload=legal_build.payload,
+            expected_state_hash=legal_build.expected_state_hash,
+            expected_event_sequence=legal_build.expected_event_sequence,
+        ),
+        "human-equivalent-build",
+    )
+    ai_output = valid_action_output(fixture.state)
+    ai_output["action"] = {"type": legal_build.type, "payload": dict(legal_build.payload)}
+    ai_output["rationale"] = "Developing the complete orange group before rolling increases rent pressure."
+    runner = FakeCodexRunner(final_output=ai_output)
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="action_decision",
+                mandatory=True,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        replayed = await EventPersistence(session_factory).replay_from_event_zero(GAME_ID)
+        events = await fetch_rows(session_factory, game_events)
+        decisions = await fetch_rows(session_factory, ai_decisions)
+        st_james = next(
+            ownership
+            for ownership in replayed.property_ownership
+            if ownership.property_id == "property_st_james_place"
+        )
+
+        assert len(runner.calls) == 1
+        assert result.status == "accepted"
+        assert result.rejected_action_id is None
+        assert [event["event_type"] for event in events] == [
+            event.type for event in human_equivalent.events
+        ]
+        assert st_james.owner_id == str(AI_PLAYER_ID)
+        assert st_james.houses == 1
+        assert replayed.bank_inventory.houses == fixture.state.bank_inventory.houses - 1
+        assert decisions[0]["status"] == "accepted"
+        assert decisions[0]["parsed_output"]["action"]["type"] == "BUY_HOUSE"
+        assert await table_count(session_factory, rejected_actions) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_legal_ai_action_with_missing_self_dialogue_text_does_not_block_game(
     session_factory: async_sessionmaker,
     tmp_path: Path,
@@ -994,6 +1063,38 @@ def _active_auction_state(state: GameState) -> GameState:
                 "high_bidder_id": str(HUMAN_PLAYER_ID),
                 "high_bid_amount": 12,
                 "passed_player_ids": [],
+            },
+        }
+    )
+
+
+def _orange_monopoly_state(state: GameState) -> GameState:
+    orange_property_ids = {
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }
+    property_ownership = [
+        (
+            {
+                **ownership.model_dump(mode="python"),
+                "owner_id": str(AI_PLAYER_ID),
+                "mortgaged": False,
+                "houses": 0,
+                "hotel": False,
+            }
+            if ownership.property_id in orange_property_ids
+            else ownership.model_dump(mode="python")
+        )
+        for ownership in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "property_ownership": property_ownership,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.START_TURN,
             },
         }
     )
