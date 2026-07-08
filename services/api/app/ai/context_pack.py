@@ -2215,6 +2215,8 @@ def _accept_reject_template_from_evaluation(
 def _accept_reject_message(*, decision: str, reason_code: str) -> str:
     if decision == "accept":
         return "I accept because this deal completes my set within value and liquidity limits."
+    if reason_code.endswith("_for_weaker_actor_completion"):
+        return "I reject because this trade gives you the stronger completed set."
     if reason_code.endswith("_below_cash_floor"):
         return "I reject because this deal would leave my cash below the liquidity floor."
     if reason_code.endswith("_above_value_ceiling"):
@@ -2425,6 +2427,50 @@ def _deal_completion_evaluation(
     actor_receives_total_compensation_value = (
         actor_receives_cash_total + actor_receives_property_value_total
     )
+    actor_completion_opportunities_by_property_id: dict[str, dict[str, Any]] = {}
+    for receipt in actor_receives:
+        receipt_property_id = _string_or_none(receipt.get("property_id"))
+        sender_player_id = _string_or_none(receipt.get("sender_player_id"))
+        if receipt_property_id is None or sender_player_id is None:
+            continue
+        receipt_ownership = ownership_by_property_id.get(receipt_property_id)
+        receipt_property_data = properties_by_id.get(receipt_property_id)
+        if (
+            receipt_ownership is None
+            or receipt_ownership.owner_id != sender_player_id
+            or receipt_property_data is None
+        ):
+            continue
+        receipt_group = groups_by_id.get(receipt_property_data.group)
+        if receipt_group is None or len(receipt_group.property_ids) <= 1:
+            continue
+        receipt_group_kind = _deal_group_kind(receipt_group.kind)
+        actor_already_owned_property_ids = [
+            group_property_id
+            for group_property_id in receipt_group.property_ids
+            if group_property_id != receipt_property_id
+            and (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+            and group_ownership.owner_id == actor_id
+        ]
+        if len(actor_already_owned_property_ids) != len(receipt_group.property_ids) - 1:
+            continue
+        receipt_group_properties = [
+            properties_by_id[group_property_id]
+            for group_property_id in receipt_group.property_ids
+            if group_property_id in properties_by_id
+        ]
+        actor_completion_opportunities_by_property_id[receipt_property_id] = {
+            "property_id": receipt_property_id,
+            "property_name": receipt_property_data.name,
+            "group": receipt_group.id,
+            "group_name": receipt_group.name,
+            "group_kind": receipt_group_kind,
+            "completion_priority_score": _property_group_completion_priority_score(
+                receipt_group_kind,
+                receipt_group_properties,
+                receipt_group.house_cost,
+            ),
+        }
 
     for transfer in actor_transfers:
         property_id = _string_or_none(transfer.get("property_id"))
@@ -2503,6 +2549,75 @@ def _deal_completion_evaluation(
             }
 
         minimum_cash_value_floor = property_data.price * 3 // 2
+        group_properties = [
+            properties_by_id[group_property_id]
+            for group_property_id in group.property_ids
+            if group_property_id in properties_by_id
+        ]
+        opponent_completion_priority_score = _property_group_completion_priority_score(
+            group_kind,
+            group_properties,
+            group.house_cost,
+        )
+        actor_completion_opportunity = max(
+            actor_completion_opportunities_by_property_id.values(),
+            key=lambda opportunity: _int_or_zero(
+                opportunity.get("completion_priority_score")
+            ),
+            default=None,
+        )
+        actor_completion_priority_score = _int_or_zero(
+            actor_completion_opportunity.get("completion_priority_score")
+            if actor_completion_opportunity is not None
+            else None
+        )
+        if (
+            actor_receives_total_compensation_value >= minimum_cash_value_floor
+            and actor_completion_opportunity is not None
+            and actor_completion_priority_score < opponent_completion_priority_score
+        ):
+            risk = {
+                "kind": _opponent_group_completion_kind(group_kind),
+                "property_id": property_id,
+                "property_name": property_data.name,
+                "property_price": property_data.price,
+                "group": group.id,
+                "group_name": group.name,
+                "recipient_player_id": recipient_player_id,
+                "recipient_already_owned_property_ids": recipient_already_owned_property_ids,
+                "minimum_cash_value_floor": minimum_cash_value_floor,
+                "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+                "actor_receives_property_value_total": actor_receives_property_value_total,
+                "total_compensation_value": actor_receives_total_compensation_value,
+                "opponent_completion_priority_score": opponent_completion_priority_score,
+                "actor_completion_priority_score": actor_completion_priority_score,
+                "completion_priority_gap": (
+                    opponent_completion_priority_score - actor_completion_priority_score
+                ),
+                "actor_completion_property_id": actor_completion_opportunity.get(
+                    "property_id"
+                ),
+                "actor_completion_group": actor_completion_opportunity.get("group"),
+                "actor_completion_group_name": actor_completion_opportunity.get(
+                    "group_name"
+                ),
+            }
+            _include_property_group_kind(risk, group_kind)
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": _deal_group_reason_code(
+                    "transfers_property_that_completes_opponent",
+                    group_kind,
+                    "for_weaker_actor_completion",
+                ),
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "risk": risk,
+            }
         if actor_receives_total_compensation_value >= minimum_cash_value_floor:
             continue
 

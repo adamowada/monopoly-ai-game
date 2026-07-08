@@ -802,6 +802,38 @@ def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopo
     assert "Accept proposed deals" in guidance["guidance"][0]
 
 
+def test_context_pack_rejects_mutual_completion_that_gives_opponent_stronger_group() -> None:
+    state = _state_with_light_blue_near_set_and_opponent_orange_near_set()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_mutual_light_blue_for_orange_completion_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "message"
+    ] == "I reject because this trade gives you the stronger completed set."
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_for_weaker_actor_completion"
+    )
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["group"] == "orange"
+    assert risk["actor_completion_group"] == "light_blue"
+    assert risk["opponent_completion_priority_score"] == 1400
+    assert risk["actor_completion_priority_score"] == 690
+    assert risk["completion_priority_gap"] == 710
+    assert risk["total_compensation_value"] == 270
+
+
 def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_railroad_set() -> None:
     state = _state_with_railroad_near_set(ai_cash=500)
     pack = build_ai_context_pack(
@@ -2315,6 +2347,50 @@ def _fair_tennessee_deal(*, amount: int = 220) -> dict[str, Any]:
     }
 
 
+def _mutual_light_blue_for_orange_completion_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "mutual-light-blue-for-orange-completion",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "sweetener-cash",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "amount": 150,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "connecticut-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_connecticut_avenue",
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
 def _cash_for_property_deal(
     *,
     property_id: str,
@@ -2551,6 +2627,33 @@ def _state_with_orange_near_monopoly(*, ai_cash: int = 1500) -> GameState:
         "property_st_james_place": str(AI_PLAYER_ID),
         "property_new_york_avenue": str(AI_PLAYER_ID),
         "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_light_blue_near_set_and_opponent_orange_near_set() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_oriental_avenue": str(AI_PLAYER_ID),
+        "property_vermont_avenue": str(AI_PLAYER_ID),
+        "property_connecticut_avenue": str(OTHER_PLAYER_ID),
+        "property_tennessee_avenue": str(AI_PLAYER_ID),
+        "property_st_james_place": str(OTHER_PLAYER_ID),
+        "property_new_york_avenue": str(OTHER_PLAYER_ID),
     }
     return state.model_copy(
         update={
