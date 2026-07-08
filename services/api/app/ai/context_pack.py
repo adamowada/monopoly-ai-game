@@ -1059,7 +1059,7 @@ def _negotiation_strategy_guidance(
         actor_id,
         negotiations,
     )
-    return {
+    guidance: dict[str, Any] = {
         "recommended_decision_types": ["open_negotiation"] if trade_opportunities else [],
         "trade_opportunities": trade_opportunities,
         "guidance": (
@@ -1069,6 +1069,43 @@ def _negotiation_strategy_guidance(
             if trade_opportunities
             else []
         ),
+    }
+    if trade_opportunities:
+        template = _open_negotiation_payload_template(trade_opportunities[0])
+        guidance["open_negotiation_payload_template"] = template
+        guidance["open_negotiation_schema_notes"] = {
+            "participant_player_ids": (
+                "Use exactly the participant_player_ids from the template; the list must "
+                "include both this AI player and the target owner."
+            ),
+            "context": (
+                "Return open_negotiation.negotiation.context as a JSON object encoded as a "
+                "JSON string. Use context_json_string_example as the exact shape."
+            ),
+            "context_json_string_example": json.dumps(
+                template["context"],
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+    return guidance
+
+
+def _open_negotiation_payload_template(opportunity: Mapping[str, Any]) -> dict[str, Any]:
+    target_property_name = _string_or_none(opportunity.get("target_property_name")) or "target property"
+    group_name = _string_or_none(opportunity.get("group_name")) or "property group"
+    context = {
+        "topic": f"Trade for {target_property_name} to complete {group_name}",
+        "target_property_id": _string_or_none(opportunity.get("target_property_id")),
+        "target_property_name": target_property_name,
+        "target_owner_id": _string_or_none(opportunity.get("target_owner_id")),
+        "target_owner_name": _string_or_none(opportunity.get("target_owner_name")),
+        "strategic_reason": _string_or_none(opportunity.get("strategic_reason")),
+        "suggested_offer": _mapping(opportunity.get("suggested_offer")),
+    }
+    return {
+        "participant_player_ids": _string_list(opportunity.get("participants")),
+        "context": context,
     }
 
 
@@ -1373,6 +1410,8 @@ def _instruction_contract() -> dict[str, Any]:
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a street group or blocking an opponent's street group.",
+            "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",
+            "For open_negotiation, open_negotiation.negotiation.context must be a JSON object encoded as a JSON string, not prose text.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",

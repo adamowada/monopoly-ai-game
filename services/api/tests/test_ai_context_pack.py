@@ -254,6 +254,27 @@ def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
     guidance = pack["negotiation_strategy_guidance"]
 
     assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"] == {
+        "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "context": {
+            "topic": "Trade for Tennessee Avenue to complete Orange",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "strategic_reason": (
+                "Completing Orange unlocks BUY_HOUSE development and materially raises rent pressure."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "avoid_trading_away_group_property_ids": [
+                    "property_st_james_place",
+                    "property_new_york_avenue",
+                ],
+            },
+        },
+    }
     assert guidance["trade_opportunities"] == [
         {
             "kind": "complete_street_group",
@@ -286,7 +307,10 @@ def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
             },
         }
     ]
-    assert any("open_negotiation" in instruction for instruction in pack["instruction_contract"]["instructions"])
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "open_negotiation" in instruction_text
+    assert "participant_player_ids must include both this AI player and the target owner" in instruction_text
+    assert "open_negotiation.negotiation.context must be a JSON object" in instruction_text
 
 
 def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt() -> None:
