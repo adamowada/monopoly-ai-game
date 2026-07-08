@@ -396,10 +396,10 @@ const ownerMarkerSideClasses: Record<BoardEdge, string> = {
 };
 
 const developmentMarkerSideClasses: Record<BoardEdge, string> = {
-  bottom: "bottom-1 left-1/2 -translate-x-1/2",
-  left: "left-1 top-1/2 -translate-y-1/2",
-  right: "right-1 top-1/2 -translate-y-1/2",
-  top: "left-1/2 top-1 -translate-x-1/2",
+  bottom: "bottom-0 left-1/2 -translate-x-1/2 rounded-b-none",
+  left: "left-0 top-1/2 -translate-x-px -translate-y-1/2 rounded-l-none",
+  right: "right-0 top-1/2 translate-x-px -translate-y-1/2 rounded-r-none",
+  top: "left-1/2 top-0 -translate-x-1/2 -translate-y-px rounded-t-none",
 };
 
 function developmentMarkerAxisClass(edge: BoardEdge): string {
@@ -495,15 +495,15 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-[80] mx-auto w-fit max-w-[5.25rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[80] mx-auto w-fit max-w-[4.25rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-layer="top"
       data-board-motion-overlap="separate-from-dice"
       data-board-motion-placement="upper-center"
-      data-board-motion-size="compact-narrow"
+      data-board-motion-size="micro-narrow"
       role="status"
     >
-      <div className="break-words text-[9px] font-black leading-[1.05]">{message}</div>
+      <div className="break-words text-[8px] font-black leading-none">{message}</div>
     </div>
   );
 }
@@ -523,13 +523,13 @@ function CenterMotionStack({
   return (
     <div
       className="pointer-events-none absolute inset-0 z-[65] px-2"
-      data-center-motion-gap="separated"
-      data-center-motion-layout="stacked-nonoverlap-dice-below"
+      data-center-motion-gap="wide"
+      data-center-motion-layout="split-fixed-lanes"
       data-center-motion-stack=""
     >
       {showMotionBanner ? (
         <div
-          className="absolute left-1/2 top-[25%] z-[80] w-fit max-w-[5.25rem] -translate-x-1/2 -translate-y-1/2"
+          className="absolute left-1/2 top-[23%] z-[80] w-fit max-w-[4.25rem] -translate-x-1/2 -translate-y-1/2"
           data-center-motion-banner-layer=""
           data-center-motion-lane="movement"
         >
@@ -539,7 +539,7 @@ function CenterMotionStack({
       <div
         className={cn(
           "absolute left-1/2 z-30 w-fit max-w-[7.5rem] -translate-x-1/2 -translate-y-1/2",
-          showMotionBanner ? "top-[69%]" : "top-1/2",
+          showMotionBanner ? "top-[82%]" : "top-1/2",
         )}
         data-center-dice-layer=""
         data-center-motion-lane="dice"
