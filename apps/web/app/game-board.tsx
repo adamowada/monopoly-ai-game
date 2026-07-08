@@ -287,7 +287,7 @@ function bottomLabel(space: StaticDataBoardSpace, property: StaticDataProperty |
     return money(property.price);
   }
   if (space.type === "tax") {
-    const taxAmount = space.id === "space_luxury_tax" ? 75 : (space.amount ?? 0);
+    const taxAmount = space.amount ?? 0;
     return `pay $${taxAmount.toFixed(2)}`;
   }
   return null;

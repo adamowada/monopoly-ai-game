@@ -335,7 +335,7 @@ describe("ClassicGameBoard", () => {
     fireEvent.mouseEnter(communityChest as Element);
     expect(board.querySelector("[data-property-hover]")).toBeNull();
 
-    expect(luxuryTax?.querySelector("[data-space-bottom-label]")).toHaveTextContent("pay $75.00");
+    expect(luxuryTax?.querySelector("[data-space-bottom-label]")).toHaveTextContent("pay $100.00");
     fireEvent.mouseEnter(chance as Element);
     expect(board.querySelector("[data-property-hover]")).toBeNull();
   });
