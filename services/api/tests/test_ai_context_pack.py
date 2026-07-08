@@ -866,6 +866,46 @@ def test_context_pack_rejects_actor_completion_when_property_payment_overpays() 
     assert opportunity["payment_value_over_ceiling"] == 130
 
 
+def test_context_pack_counteroffers_cash_instead_of_overpaying_property_for_completion() -> None:
+    state = _state_with_orange_near_monopoly_and_ai_boardwalk()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="counteroffer",
+        deals=[_boardwalk_for_tennessee_completion_deal()],
+    )
+
+    guidance = pack["counteroffer_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["counteroffer"]
+    template = guidance["counteroffer_templates"][0]
+    payload = template["counteroffer_payload_template"]
+    assert template["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    )
+    assert template["current_payment_value"] == 400
+    assert template["current_cash_amount"] == 0
+    assert template["recommended_cash_amount"] == 270
+    assert payload["message"] == (
+        "I can counter at $270 for Tennessee Avenue to complete Orange without overpaying."
+    )
+    assert payload["terms"]["terms"] == [
+        {
+            "kind": "immediate_cash_transfer",
+            "from_player_id": str(AI_PLAYER_ID),
+            "to_player_id": str(OTHER_PLAYER_ID),
+            "amount": 270,
+        },
+        {
+            "kind": "immediate_property_transfer",
+            "from_player_id": str(OTHER_PLAYER_ID),
+            "to_player_id": str(AI_PLAYER_ID),
+            "property_id": "property_tennessee_avenue",
+        },
+    ]
+    assert "property_boardwalk" not in json.dumps(payload["terms"])
+
+
 def test_context_pack_rejects_mutual_completion_that_gives_opponent_stronger_group() -> None:
     state = _state_with_light_blue_near_set_and_opponent_orange_near_set()
     pack = build_ai_context_pack(

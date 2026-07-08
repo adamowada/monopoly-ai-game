@@ -2274,13 +2274,17 @@ def _counteroffer_template_from_evaluation(
     if sender_player_id is None or property_id is None:
         return None
 
-    current_payment = _int_or_zero(evaluation.get("actor_pays_cash_total"))
-    cash_available = _int_or_zero(opportunity.get("cash_after_payment")) + current_payment
+    current_cash_payment = _int_or_zero(evaluation.get("actor_pays_cash_total"))
+    current_payment_value = _int_or_zero(
+        opportunity.get("total_payment_value")
+    ) or current_cash_payment
+    net_cash_payment = _int_or_zero(opportunity.get("net_cash_payment"))
+    cash_available = _int_or_zero(opportunity.get("cash_after_net_payment")) + net_cash_payment
     cash_limited_ceiling = max(cash_available - GROUP_COMPLETION_PURCHASE_CASH_FLOOR, 0)
     value_ceiling = _int_or_zero(opportunity.get("maximum_cash_value_ceiling"))
     recommended_cash_amount = min(value_ceiling, cash_limited_ceiling)
     property_price = _int_or_zero(opportunity.get("property_price"))
-    if recommended_cash_amount <= 0 or recommended_cash_amount >= current_payment:
+    if recommended_cash_amount <= 0 or recommended_cash_amount >= current_payment_value:
         return None
     if property_price > 0 and recommended_cash_amount < property_price:
         return None
@@ -2315,7 +2319,8 @@ def _counteroffer_template_from_evaluation(
         "target_property_id": property_id,
         "target_property_name": _string_or_none(opportunity.get("property_name")),
         "target_owner_id": sender_player_id,
-        "current_cash_amount": current_payment,
+        "current_cash_amount": current_cash_payment,
+        "current_payment_value": current_payment_value,
         "recommended_cash_amount": recommended_cash_amount,
         "maximum_cash_value_ceiling": value_ceiling,
         "cash_limited_ceiling": cash_limited_ceiling,
