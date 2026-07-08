@@ -745,7 +745,9 @@ def _action_selection_guidance(
             lower_priority_action_types.append("ROLL_DICE")
         turn_guidance.append(
             "BUY_HOUSE is legal on a complete color group; prefer even monopoly "
-            "development before ROLL_DICE when cash_after_cost remains healthy."
+            "development before ROLL_DICE when cash_after_cost remains healthy. "
+            "When multiple groups can develop, choose from the highest "
+            "development_priority_score group first."
         )
 
     if auction_guidance is not None:
@@ -1261,6 +1263,11 @@ def _development_opportunities(
         group = groups_by_id.get(property_data.group)
         if group is None:
             continue
+        group_properties = [
+            properties_by_id[group_property_id]
+            for group_property_id in group.property_ids
+            if group_property_id in properties_by_id
+        ]
         group_ownerships = [
             ownership_by_property_id.get(group_property_id)
             for group_property_id in group.property_ids
@@ -1279,6 +1286,10 @@ def _development_opportunities(
             for ownership in group_ownerships
             if ownership is not None
         }
+        development_priority_score = _street_group_completion_priority_score(
+            group_properties,
+            group.house_cost,
+        )
         opportunities.append(
             {
                 "action_type": "BUY_HOUSE",
@@ -1286,6 +1297,10 @@ def _development_opportunities(
                 "property_name": property_data.name,
                 "group": property_data.group,
                 "group_name": group.name,
+                "development_priority_score": development_priority_score,
+                "development_priority_basis": (
+                    "three_house_group_rent_pressure_minus_one_even_round_development_cost"
+                ),
                 "cost": cost,
                 "cash_before": player.cash,
                 "cash_after_cost": player.cash - cost,
@@ -1298,7 +1313,16 @@ def _development_opportunities(
             }
         )
 
-    return opportunities
+    return [
+        opportunity
+        for _, opportunity in sorted(
+            enumerate(opportunities),
+            key=lambda indexed_opportunity: (
+                -_int_or_zero(indexed_opportunity[1].get("development_priority_score")),
+                indexed_opportunity[0],
+            ),
+        )
+    ]
 
 
 def _negotiation_strategy_guidance(

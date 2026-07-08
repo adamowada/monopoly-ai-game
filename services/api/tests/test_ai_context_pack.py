@@ -243,8 +243,29 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
         "property_new_york_avenue",
     ]
     assert all(opportunity["cash_after_cost"] == 2900 for opportunity in guidance["development_opportunities"])
+    assert all(opportunity["development_priority_score"] > 0 for opportunity in guidance["development_opportunities"])
     assert "complete color group" in guidance["turn_guidance"][0]
     assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
+def test_context_pack_prioritizes_stronger_monopoly_development_group_before_roll() -> None:
+    state = _state_with_brown_and_orange_monopolies()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    opportunities = guidance["development_opportunities"]
+
+    assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
+    assert [opportunity["group"] for opportunity in opportunities[:3]] == ["orange", "orange", "orange"]
+    assert [opportunity["property_id"] for opportunity in opportunities[:3]] == [
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    ]
+    assert {opportunity["group"] for opportunity in opportunities[3:]} == {"brown"}
+    assert opportunities[0]["development_priority_score"] > opportunities[-1]["development_priority_score"]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "highest development_priority_score" in guidance_text
 
 
 def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
@@ -1104,6 +1125,29 @@ def _state_with_orange_monopoly() -> GameState:
             "property_ownership": tuple(
                 ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
                 if ownership.property_id in orange_property_ids
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_brown_and_orange_monopolies() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 3000})
+    owned_property_ids = {
+        "property_mediterranean_avenue",
+        "property_baltic_avenue",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id in owned_property_ids
                 else ownership
                 for ownership in state.property_ownership
             ),

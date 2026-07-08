@@ -49,6 +49,10 @@ ORANGE_PROPERTY_IDS = {
     "property_tennessee_avenue",
     "property_new_york_avenue",
 }
+BROWN_PROPERTY_IDS = {
+    "property_mediterranean_avenue",
+    "property_baltic_avenue",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +176,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             game_id=UUID("00000000-0000-0000-0000-00000000b201"),
             decision_type="action_decision",
             state_factory=_orange_monopoly_state,
+            verifier=_verify_orange_monopoly_development,
+        ),
+        StrategySmokeCase(
+            name="multiple_monopolies_prioritizes_orange_development",
+            game_id=UUID("00000000-0000-0000-0000-00000000b218"),
+            decision_type="action_decision",
+            state_factory=_brown_and_orange_monopolies_state,
             verifier=_verify_orange_monopoly_development,
         ),
         StrategySmokeCase(
@@ -740,6 +751,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "multiple_monopolies_prioritizes_orange_development":
+        return (
+            {
+                "id": "live-strategy-prioritize-orange-development",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace owns both Brown and Orange monopolies "
+                    "with enough cash to build. BUY_HOUSE is legal on both groups, but "
+                    "Orange has the highest development_priority_score and stronger rent "
+                    "pressure. Choose BUY_HOUSE on one of property_st_james_place, "
+                    "property_tennessee_avenue, or property_new_york_avenue before rolling."
+                ),
+            },
+        )
     if case.decision_type == "accept_reject":
         return (
             {
@@ -1131,6 +1156,26 @@ def _orange_monopoly_state(game_id: UUID) -> GameState:
             "hotel": False,
         }
         if item.property_id in ORANGE_PROPERTY_IDS
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _brown_and_orange_monopolies_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-multiple-monopoly-development")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 3000
+    owned_property_ids = BROWN_PROPERTY_IDS | ORANGE_PROPERTY_IDS
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+            "mortgaged": False,
+            "houses": 0,
+            "hotel": False,
+        }
+        if item.property_id in owned_property_ids
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]

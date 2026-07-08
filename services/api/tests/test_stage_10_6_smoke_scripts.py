@@ -92,6 +92,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "auction_pass_to_preserve_cash_reserve" in source
     assert "auction_bid_to_complete_color_group" in source
     assert "orange_monopoly_development" in source
+    assert "multiple_monopolies_prioritizes_orange_development" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "multiple_near_monopolies_prioritizes_orange_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
@@ -119,6 +120,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "cash reserve floor" in source
     assert "buy_property_to_complete_group" in source
     assert "property_group_completion_premium" in source
+    assert "development_priority_score" in source
     assert "property_reading_railroad" in source
     assert "open_negotiation" in source
     assert "deal_proposal" in source
@@ -192,6 +194,25 @@ def test_live_codex_strategy_smoke_debt_cases_have_targeted_legal_actions() -> N
     assert sell_pack["action_selection_guidance"]["debt_resolution_guidance"]["recommendation"] == (
         "sell_improvements_before_mortgage"
     )
+
+
+def test_live_codex_strategy_smoke_prioritizes_stronger_development_group() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["multiple_monopolies_prioritizes_orange_development"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    opportunities = pack["action_selection_guidance"]["development_opportunities"]
+    assert [opportunity["group"] for opportunity in opportunities[:3]] == ["orange", "orange", "orange"]
+    assert opportunities[0]["development_priority_score"] > opportunities[-1]["development_priority_score"]
+    assert "development_priority_score" in pack["action_selection_guidance"]["turn_guidance"][0]
 
 
 def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
