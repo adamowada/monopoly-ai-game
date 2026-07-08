@@ -708,6 +708,7 @@ def _action_selection_guidance(
     auction_guidance = _auction_guidance(state, actor_id, legal_actions)
     mortgage_guidance = _mortgage_guidance(state, actor_id, legal_actions)
     unmortgage_guidance = _unmortgage_guidance(state, actor_id, legal_actions)
+    jail_guidance = _jail_guidance(state, actor_id, legal_actions)
 
     if purchase_guidance is not None:
         recommendation = _string_or_none(purchase_guidance.get("recommendation"))
@@ -780,6 +781,18 @@ def _action_selection_guidance(
                 "before ROLL_DICE when cash_after_cost remains healthy."
             )
 
+    if jail_guidance is not None:
+        recommendation = _string_or_none(jail_guidance.get("recommendation"))
+        if recommendation == "use_card_before_paying_or_rolling":
+            recommended_before_roll.append("USE_GET_OUT_OF_JAIL_CARD")
+            for action_type in ("PAY_JAIL_FINE", "ROLL_DICE"):
+                if action_type in legal_action_types and action_type not in lower_priority_action_types:
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "USE_GET_OUT_OF_JAIL_CARD is legal and costs no cash; prefer it before "
+                "PAY_JAIL_FINE or ROLL_DICE when the plan is to leave jail and keep moving."
+            )
+
     return {
         "recommended_action_types": recommended_action_types,
         "recommended_action_types_before_roll": recommended_before_roll,
@@ -789,6 +802,7 @@ def _action_selection_guidance(
         "auction_guidance": auction_guidance,
         "mortgage_guidance": mortgage_guidance,
         "unmortgage_guidance": unmortgage_guidance,
+        "jail_guidance": jail_guidance,
         "turn_guidance": turn_guidance,
     }
 
@@ -972,6 +986,39 @@ def _unmortgage_guidance(
         "unmortgageable_property_names": unmortgageable_property_names,
         "cheapest_unmortgage_cost": cheapest_cost,
         "cash_after_cheapest_unmortgage": cash_after_cheapest,
+    }
+
+
+def _jail_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    card_actions = [
+        action for action in legal_actions if action.get("type") == "USE_GET_OUT_OF_JAIL_CARD"
+    ]
+    if not card_actions:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None or not player.in_jail:
+        return None
+
+    jail_card_ids: list[str] = []
+    for action in card_actions:
+        payload = _mapping(action.get("payload"))
+        card_id = _string_or_none(payload.get("card_id"))
+        if card_id is not None:
+            jail_card_ids.append(card_id)
+
+    return {
+        "action_available": True,
+        "recommendation": "use_card_before_paying_or_rolling",
+        "cash_available": player.cash,
+        "jail_turns": player.jail_turns,
+        "jail_card_ids": jail_card_ids,
+        "pay_fine_available": any(action.get("type") == "PAY_JAIL_FINE" for action in legal_actions),
+        "roll_dice_available": any(action.get("type") == "ROLL_DICE" for action in legal_actions),
     }
 
 
@@ -1475,6 +1522,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When purchase_guidance recommends BUY_PROPERTY, choose BUY_PROPERTY over START_AUCTION unless cash_after_price, valuation, or blocking risk gives a concrete reason.",
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
+            "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a street group or blocking an opponent's street group.",
             "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",

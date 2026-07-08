@@ -82,6 +82,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "healthy_cash_avoids_mortgage" in source
     assert "active_debt_uses_mortgage" in source
     assert "healthy_cash_unmortgages_rent_property" in source
+    assert "jail_card_used_before_fine_or_roll" in source
     assert "auction_bid_within_valuation" in source
     assert "auction_pass_above_valuation" in source
     assert "auction_bid_to_complete_color_group" in source
@@ -96,9 +97,12 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "ROLL_DICE" in source
     assert "MORTGAGE_PROPERTY" in source
     assert "UNMORTGAGE_PROPERTY" in source
+    assert "USE_GET_OUT_OF_JAIL_CARD" in source
+    assert "PAY_JAIL_FINE" in source
     assert "DECLARE_BANKRUPTCY" in source
     assert "property_b_and_o_railroad" in source
     assert "restore rent" in source
+    assert "card_community_get_out_of_jail" in source
     assert "START_AUCTION" in source
     assert "BID_AUCTION" in source
     assert "PASS_AUCTION" in source

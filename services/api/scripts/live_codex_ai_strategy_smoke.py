@@ -112,6 +112,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_healthy_cash_unmortgages_rent_property,
         ),
         StrategySmokeCase(
+            name="jail_card_used_before_fine_or_roll",
+            game_id=UUID("00000000-0000-0000-0000-00000000b212"),
+            decision_type="action_decision",
+            state_factory=_jail_card_state,
+            verifier=_verify_jail_card_used_before_fine_or_roll,
+        ),
+        StrategySmokeCase(
             name="auction_bid_within_valuation",
             game_id=UUID("00000000-0000-0000-0000-00000000b206"),
             decision_type="action_decision",
@@ -253,6 +260,17 @@ def _verify_healthy_cash_unmortgages_rent_property(parsed: dict[str, Any]) -> No
     assert payload.get("property_id") == "property_b_and_o_railroad"
     if "cost" in payload:
         assert payload.get("cost") == 110
+
+
+def _verify_jail_card_used_before_fine_or_roll(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "USE_GET_OUT_OF_JAIL_CARD", (
+        f"expected USE_GET_OUT_OF_JAIL_CARD, got {action.get('type')}"
+    )
+    assert payload.get("card_id") == "card_community_get_out_of_jail"
 
 
 def _verify_auction_bid_within_valuation(parsed: dict[str, Any]) -> None:
@@ -528,6 +546,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "jail_card_used_before_fine_or_roll":
+        return (
+            {
+                "id": "live-strategy-use-jail-card-before-fine",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace is in jail, has $900, and has "
+                    "card_community_get_out_of_jail. USE_GET_OUT_OF_JAIL_CARD costs no "
+                    "cash and should be chosen before PAY_JAIL_FINE or ROLL_DICE when "
+                    "Grace wants to leave jail and keep moving."
+                ),
+            },
+        )
     if case.name == "healthy_cash_avoids_mortgage":
         return (
             {
@@ -705,6 +736,22 @@ def _healthy_cash_unmortgage_state(game_id: UUID) -> GameState:
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _jail_card_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-jail-card")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0].update(
+        {
+            "cash": 900,
+            "position": 10,
+            "in_jail": True,
+            "jail_turns": 1,
+            "get_out_of_jail_card_ids": ("card_community_get_out_of_jail",),
+        }
+    )
+    ownership = [item.model_dump(mode="python") for item in state.property_ownership]
     return _state_with_debug_values(state, players=players, ownership=ownership)
 
 

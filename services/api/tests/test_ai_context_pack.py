@@ -391,6 +391,35 @@ def test_context_pack_prioritizes_unmortgaging_rent_property_when_cash_stays_hea
     assert any("UNMORTGAGE_PROPERTY" in instruction for instruction in pack["instruction_contract"]["instructions"])
 
 
+def test_context_pack_prioritizes_jail_card_over_fine_and_jail_roll() -> None:
+    state = _state_with_jail_card(cash=900)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    legal_action_types = {action["type"] for action in pack["legal_actions"]}
+    assert {"ROLL_DICE", "PAY_JAIL_FINE", "USE_GET_OUT_OF_JAIL_CARD"}.issubset(legal_action_types)
+    card_action = next(action for action in pack["legal_actions"] if action["type"] == "USE_GET_OUT_OF_JAIL_CARD")
+    assert card_action["payload"]["card_id"] == "card_community_get_out_of_jail"
+
+    guidance = pack["action_selection_guidance"]
+    assert "USE_GET_OUT_OF_JAIL_CARD" in guidance["recommended_action_types_before_roll"]
+    assert "PAY_JAIL_FINE" in guidance["lower_priority_action_types"]
+    assert "ROLL_DICE" in guidance["lower_priority_action_types"]
+    assert guidance["jail_guidance"] == {
+        "action_available": True,
+        "recommendation": "use_card_before_paying_or_rolling",
+        "cash_available": 900,
+        "jail_turns": 1,
+        "jail_card_ids": ["card_community_get_out_of_jail"],
+        "pay_fine_available": True,
+        "roll_dice_available": True,
+    }
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "USE_GET_OUT_OF_JAIL_CARD" in guidance_text
+    assert "PAY_JAIL_FINE" in guidance_text
+    assert "ROLL_DICE" in guidance_text
+    assert any("USE_GET_OUT_OF_JAIL_CARD" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
 def test_context_pack_prefers_buying_landed_property_when_cash_is_healthy() -> None:
     state = _state_landed_on_unowned_reading_railroad(cash=1500)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -1019,6 +1048,20 @@ def _state_with_mortgaged_railroad(*, cash: int) -> GameState:
             ),
         }
     )
+
+
+def _state_with_jail_card(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(
+        update={
+            "cash": cash,
+            "position": 10,
+            "in_jail": True,
+            "jail_turns": 1,
+            "get_out_of_jail_card_ids": ("card_community_get_out_of_jail",),
+        }
+    )
+    return state.model_copy(update={"players": (ai_player, *state.players[1:])})
 
 
 def _state_landed_on_unowned_reading_railroad(*, cash: int) -> GameState:
