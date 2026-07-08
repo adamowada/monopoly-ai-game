@@ -238,12 +238,14 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
     assert guidance["lower_priority_action_types"] == ["ROLL_DICE", "MORTGAGE_PROPERTY"]
     assert [opportunity["property_id"] for opportunity in guidance["development_opportunities"]] == [
+        "property_new_york_avenue",
         "property_st_james_place",
         "property_tennessee_avenue",
-        "property_new_york_avenue",
     ]
+    assert [opportunity["marginal_rent_gain"] for opportunity in guidance["development_opportunities"]] == [64, 56, 56]
     assert all(opportunity["cash_after_cost"] == 2900 for opportunity in guidance["development_opportunities"])
     assert all(opportunity["development_priority_score"] > 0 for opportunity in guidance["development_opportunities"])
+    assert "highest marginal_rent_gain" in guidance["turn_guidance"][0]
     assert "complete color group" in guidance["turn_guidance"][0]
     assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
 
@@ -258,12 +260,13 @@ def test_context_pack_prioritizes_stronger_monopoly_development_group_before_rol
     assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
     assert [opportunity["group"] for opportunity in opportunities[:3]] == ["orange", "orange", "orange"]
     assert [opportunity["property_id"] for opportunity in opportunities[:3]] == [
+        "property_new_york_avenue",
         "property_st_james_place",
         "property_tennessee_avenue",
-        "property_new_york_avenue",
     ]
     assert {opportunity["group"] for opportunity in opportunities[3:]} == {"brown"}
     assert opportunities[0]["development_priority_score"] > opportunities[-1]["development_priority_score"]
+    assert opportunities[0]["marginal_rent_gain"] == 64
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "highest development_priority_score" in guidance_text
 

@@ -121,6 +121,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "buy_property_to_complete_group" in source
     assert "property_group_completion_premium" in source
     assert "development_priority_score" in source
+    assert "marginal_rent_gain" in source
     assert "property_reading_railroad" in source
     assert "open_negotiation" in source
     assert "deal_proposal" in source
@@ -211,7 +212,9 @@ def test_live_codex_strategy_smoke_prioritizes_stronger_development_group() -> N
 
     opportunities = pack["action_selection_guidance"]["development_opportunities"]
     assert [opportunity["group"] for opportunity in opportunities[:3]] == ["orange", "orange", "orange"]
+    assert opportunities[0]["property_id"] == "property_new_york_avenue"
     assert opportunities[0]["development_priority_score"] > opportunities[-1]["development_priority_score"]
+    assert opportunities[0]["marginal_rent_gain"] == 64
     assert "development_priority_score" in pack["action_selection_guidance"]["turn_guidance"][0]
 
 

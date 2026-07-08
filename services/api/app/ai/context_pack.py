@@ -747,7 +747,8 @@ def _action_selection_guidance(
             "BUY_HOUSE is legal on a complete color group; prefer even monopoly "
             "development before ROLL_DICE when cash_after_cost remains healthy. "
             "When multiple groups can develop, choose from the highest "
-            "development_priority_score group first."
+            "development_priority_score group first, then choose the legal property "
+            "with the highest marginal_rent_gain."
         )
 
     if auction_guidance is not None:
@@ -1290,6 +1291,8 @@ def _development_opportunities(
             group_properties,
             group.house_cost,
         )
+        current_improvement_level = group_improvement_levels.get(property_id, 0)
+        marginal_rent_gain = _marginal_rent_gain(property_data, current_improvement_level)
         opportunities.append(
             {
                 "action_type": "BUY_HOUSE",
@@ -1301,14 +1304,17 @@ def _development_opportunities(
                 "development_priority_basis": (
                     "three_house_group_rent_pressure_minus_one_even_round_development_cost"
                 ),
+                "marginal_rent_gain": marginal_rent_gain,
+                "marginal_rent_gain_basis": "rent_after_next_improvement_minus_current_rent",
                 "cost": cost,
                 "cash_before": player.cash,
                 "cash_after_cost": player.cash - cost,
-                "current_improvement_level": group_improvement_levels.get(property_id, 0),
+                "current_improvement_level": current_improvement_level,
                 "group_improvement_levels": group_improvement_levels,
                 "recommendation": (
-                    "Prefer this legal BUY_HOUSE action before rolling unless a "
-                    "specific liquidity risk outweighs development."
+                    "Prefer this legal BUY_HOUSE action before rolling when it has "
+                    "the best available development priority and marginal rent gain "
+                    "unless a specific liquidity risk outweighs development."
                 ),
             }
         )
@@ -1319,6 +1325,7 @@ def _development_opportunities(
             enumerate(opportunities),
             key=lambda indexed_opportunity: (
                 -_int_or_zero(indexed_opportunity[1].get("development_priority_score")),
+                -_int_or_zero(indexed_opportunity[1].get("marginal_rent_gain")),
                 indexed_opportunity[0],
             ),
         )
@@ -1519,6 +1526,15 @@ def _street_group_completion_priority_score(
     )
     development_cost = (house_cost or 0) * len(group_properties)
     return total_three_house_rent - development_cost
+
+
+def _marginal_rent_gain(property_data: Any, current_improvement_level: int) -> int:
+    rents = getattr(property_data, "rents", None)
+    if rents is None:
+        return 0
+    current_index = max(0, min(current_improvement_level, len(rents) - 1))
+    next_index = min(current_index + 1, len(rents) - 1)
+    return max(0, _int_or_zero(rents[next_index]) - _int_or_zero(rents[current_index]))
 
 
 def _active_negotiation_participant_sets(

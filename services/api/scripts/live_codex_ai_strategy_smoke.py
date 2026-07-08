@@ -386,7 +386,7 @@ def _verify_orange_monopoly_development(parsed: dict[str, Any]) -> None:
     payload = _dict(action.get("payload"))
     assert parsed.get("decision_type") == "action_decision"
     assert action.get("type") == "BUY_HOUSE", f"expected BUY_HOUSE, got {action.get('type')}"
-    assert payload.get("property_id") in ORANGE_PROPERTY_IDS
+    assert payload.get("property_id") == "property_new_york_avenue"
     assert payload.get("cost") == 100
 
 
@@ -760,8 +760,9 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "For this action_decision, Grace owns both Brown and Orange monopolies "
                     "with enough cash to build. BUY_HOUSE is legal on both groups, but "
                     "Orange has the highest development_priority_score and stronger rent "
-                    "pressure. Choose BUY_HOUSE on one of property_st_james_place, "
-                    "property_tennessee_avenue, or property_new_york_avenue before rolling."
+                    "pressure. Within Orange, property_new_york_avenue has the highest "
+                    "marginal_rent_gain for the next house. Choose BUY_HOUSE on "
+                    "property_new_york_avenue before rolling."
                 ),
             },
         )
