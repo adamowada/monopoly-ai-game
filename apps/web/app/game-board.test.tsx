@@ -496,12 +496,12 @@ describe("ClassicGameBoard", () => {
     );
     const movementBanner = screen.getByRole("status", { name: "Board movement" });
     expect(movementBanner).toHaveTextContent("Ada moving to Baltic Avenue");
-    expect(movementBanner).toHaveAttribute("data-board-motion-placement", "upper-center");
-    expect(movementBanner).toHaveAttribute("data-board-motion-size", "micro-narrow");
+    expect(movementBanner).toHaveAttribute("data-board-motion-placement", "center-stack");
+    expect(movementBanner).toHaveAttribute("data-board-motion-size", "compact-narrow");
     expect(movementBanner).toHaveAttribute("data-board-motion-layer", "top");
     expect(movementBanner).toHaveAttribute("data-board-motion-overlap", "separate-from-dice");
-    expect(movementBanner).toHaveClass("max-w-[4.25rem]");
-    expect(movementBanner).not.toHaveClass("max-w-[5.25rem]");
+    expect(movementBanner).toHaveClass("max-w-[6rem]");
+    expect(movementBanner).not.toHaveClass("max-w-[4.25rem]");
     expect(movementBanner).not.toHaveClass("max-w-[5.75rem]");
     expect(movementBanner).not.toHaveClass("max-w-[7rem]");
     expect(movementBanner).not.toHaveClass("max-w-[8.25rem]");
@@ -510,10 +510,10 @@ describe("ClassicGameBoard", () => {
     const centerBoard = screen.getByTestId("center-board-art");
     const motionStack = centerBoard.querySelector("[data-center-motion-stack]");
     expect(motionStack).toBeInTheDocument();
-    expect(motionStack).toHaveAttribute("data-center-motion-layout", "split-fixed-lanes");
-    expect(motionStack).toHaveAttribute("data-center-motion-gap", "wide");
-    expect(centerBoard.querySelector("[data-center-motion-lane='movement']")).toHaveClass("top-[23%]");
-    expect(centerBoard.querySelector("[data-center-motion-lane='dice']")).toHaveClass("top-[82%]");
+    expect(motionStack).toHaveAttribute("data-center-motion-layout", "compact-centered-stack");
+    expect(motionStack).toHaveAttribute("data-center-motion-gap", "tight");
+    expect(centerBoard.querySelector("[data-center-motion-lane='movement']")).not.toHaveClass("top-[23%]");
+    expect(centerBoard.querySelector("[data-center-motion-lane='dice']")).not.toHaveClass("top-[82%]");
     const centeredDiceStatus = within(centerBoard).getByRole("status", { name: "Dice roll animation" });
     expect(movementBanner.compareDocumentPosition(centeredDiceStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(centeredDiceStatus).toHaveAttribute(

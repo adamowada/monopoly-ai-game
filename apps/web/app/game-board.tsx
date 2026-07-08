@@ -495,15 +495,15 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-[80] mx-auto w-fit max-w-[4.25rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[80] mx-auto w-fit max-w-[6rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1.5 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-layer="top"
       data-board-motion-overlap="separate-from-dice"
-      data-board-motion-placement="upper-center"
-      data-board-motion-size="micro-narrow"
+      data-board-motion-placement="center-stack"
+      data-board-motion-size="compact-narrow"
       role="status"
     >
-      <div className="break-words text-[8px] font-black leading-none">{message}</div>
+      <div className="break-words text-[9px] font-black leading-[1.05]">{message}</div>
     </div>
   );
 }
@@ -522,29 +522,24 @@ function CenterMotionStack({
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-[65] px-2"
-      data-center-motion-gap="wide"
-      data-center-motion-layout="split-fixed-lanes"
+      className="pointer-events-none absolute inset-0 z-[65] grid place-items-center px-2"
+      data-center-motion-gap="tight"
+      data-center-motion-layout="compact-centered-stack"
       data-center-motion-stack=""
     >
-      {showMotionBanner ? (
-        <div
-          className="absolute left-1/2 top-[23%] z-[80] w-fit max-w-[4.25rem] -translate-x-1/2 -translate-y-1/2"
-          data-center-motion-banner-layer=""
-          data-center-motion-lane="movement"
-        >
-          <BoardMotionBanner motion={motion} />
+      <div className="grid w-fit max-w-[7.5rem] justify-items-center gap-1" data-center-motion-stack-inner="">
+        {showMotionBanner ? (
+          <div
+            className="relative z-[80] w-fit max-w-[6rem]"
+            data-center-motion-banner-layer=""
+            data-center-motion-lane="movement"
+          >
+            <BoardMotionBanner motion={motion} />
+          </div>
+        ) : null}
+        <div className="relative z-30 w-fit max-w-[7.5rem]" data-center-dice-layer="" data-center-motion-lane="dice">
+          <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
         </div>
-      ) : null}
-      <div
-        className={cn(
-          "absolute left-1/2 z-30 w-fit max-w-[7.5rem] -translate-x-1/2 -translate-y-1/2",
-          showMotionBanner ? "top-[82%]" : "top-1/2",
-        )}
-        data-center-dice-layer=""
-        data-center-motion-lane="dice"
-      >
-        <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
       </div>
     </div>
   );
