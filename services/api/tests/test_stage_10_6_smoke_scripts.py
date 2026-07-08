@@ -81,6 +81,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
+    assert "orange_bad_deal_rejection" in source
     assert "FOURTH_PLAYER_ID" in source
     assert 'PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai")' in source
     assert "BUY_HOUSE" in source
@@ -90,6 +91,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "immediate_property_transfer" in source
     assert "property_tennessee_avenue" in source
     assert "participant_player_ids" in source
+    assert "accept_reject" in source
+    assert "expected reject" in source
     assert "treating as pass" not in source
 
 
