@@ -274,9 +274,10 @@ describe("ClassicGameBoard", () => {
       "data-marker-placement",
       "owner-perimeter",
     );
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-anchor", "perimeter-price-edge");
     expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "right");
-    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveClass("right-0.5");
-    expect(boardwalk?.querySelector("[data-owner-marker]")).not.toHaveClass("left-0.5");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveClass("right-0");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).not.toHaveClass("left-0");
     expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute(
       "aria-label",
       "Development marker: Boardwalk has a hotel",
@@ -286,9 +287,13 @@ describe("ClassicGameBoard", () => {
       "data-marker-placement",
       "development-interior",
     );
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "data-marker-anchor",
+      "interior-development-edge",
+    );
     expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "left");
-    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveClass("left-0.5");
-    expect(boardwalk?.querySelector("[data-development-marker]")).not.toHaveClass("right-0.5");
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveClass("left-1");
+    expect(boardwalk?.querySelector("[data-development-marker]")).not.toHaveClass("right-0");
     expect(boardwalk?.querySelector("[data-space-bottom-label]")).toHaveTextContent("$400");
     expect(board.querySelector("[data-property-hover]")).toBeNull();
     fireEvent.mouseEnter(boardwalk as Element);
@@ -305,8 +310,12 @@ describe("ClassicGameBoard", () => {
       "data-marker-placement",
       "owner-perimeter",
     );
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute(
+      "data-marker-anchor",
+      "perimeter-price-edge",
+    );
     expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "bottom");
-    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveClass("bottom-0.5");
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveClass("bottom-0");
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
       "aria-label",
       "Development marker: Mediterranean Avenue has 3 houses",
@@ -319,17 +328,21 @@ describe("ClassicGameBoard", () => {
       "data-marker-placement",
       "development-interior",
     );
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "data-marker-anchor",
+      "interior-development-edge",
+    );
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "top");
-    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveClass("top-0.5");
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveClass("top-1");
 
     expect(illinois?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "top");
-    expect(illinois?.querySelector("[data-owner-marker]")).toHaveClass("top-0.5");
+    expect(illinois?.querySelector("[data-owner-marker]")).toHaveClass("top-0");
     expect(illinois?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "bottom");
-    expect(illinois?.querySelector("[data-development-marker]")).toHaveClass("bottom-0.5");
+    expect(illinois?.querySelector("[data-development-marker]")).toHaveClass("bottom-1");
     expect(states?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "left");
-    expect(states?.querySelector("[data-owner-marker]")).toHaveClass("left-0.5");
+    expect(states?.querySelector("[data-owner-marker]")).toHaveClass("left-0");
     expect(states?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "right");
-    expect(states?.querySelector("[data-development-marker]")).toHaveClass("right-0.5");
+    expect(states?.querySelector("[data-development-marker]")).toHaveClass("right-1");
   });
 
   it("renders non-street board cells with a top name, large logo, and relevant bottom labels", () => {
@@ -456,17 +469,20 @@ describe("ClassicGameBoard", () => {
     );
     const movementBanner = screen.getByRole("status", { name: "Board movement" });
     expect(movementBanner).toHaveTextContent("Ada moving to Baltic Avenue");
-    expect(movementBanner).toHaveAttribute("data-board-motion-placement", "above-dice");
-    expect(movementBanner).toHaveAttribute("data-board-motion-size", "compact");
+    expect(movementBanner).toHaveAttribute("data-board-motion-placement", "upper-center");
+    expect(movementBanner).toHaveAttribute("data-board-motion-size", "narrow");
     expect(movementBanner).toHaveAttribute("data-board-motion-layer", "top");
-    expect(movementBanner).toHaveClass("max-w-[7rem]");
+    expect(movementBanner).toHaveClass("max-w-[5.75rem]");
+    expect(movementBanner).not.toHaveClass("max-w-[7rem]");
     expect(movementBanner).not.toHaveClass("max-w-[8.25rem]");
     expect(movementBanner).not.toHaveClass("max-w-[10rem]");
     expect(movementBanner).not.toHaveClass("w-full");
     const centerBoard = screen.getByTestId("center-board-art");
     const motionStack = centerBoard.querySelector("[data-center-motion-stack]");
     expect(motionStack).toBeInTheDocument();
-    expect(motionStack).toHaveAttribute("data-center-motion-layout", "separate-banner-dice-layers");
+    expect(motionStack).toHaveAttribute("data-center-motion-layout", "upper-banner-centered-dice-lanes");
+    expect(centerBoard.querySelector("[data-center-motion-lane='movement']")).toBeInTheDocument();
+    expect(centerBoard.querySelector("[data-center-motion-lane='dice']")).toBeInTheDocument();
     const centeredDiceStatus = within(centerBoard).getByRole("status", { name: "Dice roll animation" });
     expect(movementBanner.compareDocumentPosition(centeredDiceStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(centeredDiceStatus).toHaveAttribute(

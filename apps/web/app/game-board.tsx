@@ -388,11 +388,18 @@ function oppositeEdge(edge: BoardEdge): BoardEdge {
   }
 }
 
-const markerSideClasses: Record<BoardEdge, string> = {
-  bottom: "bottom-0.5 left-1/2 -translate-x-1/2",
-  left: "left-0.5 top-1/2 -translate-y-1/2",
-  right: "right-0.5 top-1/2 -translate-y-1/2",
-  top: "left-1/2 top-0.5 -translate-x-1/2",
+const ownerMarkerSideClasses: Record<BoardEdge, string> = {
+  bottom: "bottom-0 left-1/2 -translate-x-1/2 translate-y-px rounded-b-none",
+  left: "left-0 top-1/2 -translate-x-px -translate-y-1/2 rounded-l-none",
+  right: "right-0 top-1/2 translate-x-px -translate-y-1/2 rounded-r-none",
+  top: "left-1/2 top-0 -translate-x-1/2 -translate-y-px rounded-t-none",
+};
+
+const developmentMarkerSideClasses: Record<BoardEdge, string> = {
+  bottom: "bottom-1 left-1/2 -translate-x-1/2",
+  left: "left-1 top-1/2 -translate-y-1/2",
+  right: "right-1 top-1/2 -translate-y-1/2",
+  top: "left-1/2 top-1 -translate-x-1/2",
 };
 
 function developmentMarkerAxisClass(edge: BoardEdge): string {
@@ -488,11 +495,11 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-[70] mx-auto w-fit max-w-[7rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-1.5 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[80] mx-auto w-fit max-w-[5.75rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-layer="top"
-      data-board-motion-placement="above-dice"
-      data-board-motion-size="compact"
+      data-board-motion-placement="upper-center"
+      data-board-motion-size="narrow"
       role="status"
     >
       <div className="break-words text-[9px] font-black leading-[1.05]">{message}</div>
@@ -510,20 +517,32 @@ function CenterMotionStack({
   if (!motion && !lastRoll) {
     return null;
   }
+  const showMotionBanner = Boolean(motion && motion.status !== "rolling");
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-[65] grid place-items-center px-2"
-      data-center-motion-layout="separate-banner-dice-layers"
+      className="pointer-events-none absolute inset-0 z-[65] px-2"
+      data-center-motion-layout="upper-banner-centered-dice-lanes"
       data-center-motion-stack=""
     >
-      <div className="grid max-w-[7.5rem] grid-rows-[auto_auto] justify-items-center gap-3">
-        <div className="relative z-[70] -translate-y-1" data-center-motion-banner-layer="">
+      {showMotionBanner ? (
+        <div
+          className="absolute left-1/2 top-[34%] z-[80] w-fit max-w-[5.75rem] -translate-x-1/2 -translate-y-1/2"
+          data-center-motion-banner-layer=""
+          data-center-motion-lane="movement"
+        >
           <BoardMotionBanner motion={motion} />
         </div>
-        <div className="relative z-30 translate-y-1" data-center-dice-layer="">
-          <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
-        </div>
+      ) : null}
+      <div
+        className={cn(
+          "absolute left-1/2 z-30 w-fit max-w-[7.5rem] -translate-x-1/2 -translate-y-1/2",
+          showMotionBanner ? "top-[58%]" : "top-1/2",
+        )}
+        data-center-dice-layer=""
+        data-center-motion-lane="dice"
+      >
+        <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
       </div>
     </div>
   );
@@ -841,8 +860,9 @@ function BoardOwnerMarker({
       aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
       className={cn(
         "absolute z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm",
-        markerSideClasses[perimeterEdge],
+        ownerMarkerSideClasses[perimeterEdge],
       )}
+      data-marker-anchor="perimeter-price-edge"
       data-marker-edge="perimeter"
       data-marker-placement="owner-perimeter"
       data-marker-side={perimeterEdge}
@@ -892,9 +912,10 @@ function DevelopmentMarker({
       className={cn(
         "absolute z-20 flex items-center justify-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm",
         developmentMarkerAxisClass(interiorEdge),
-        markerSideClasses[interiorEdge],
+        developmentMarkerSideClasses[interiorEdge],
       )}
       data-development-marker=""
+      data-marker-anchor="interior-development-edge"
       data-marker-edge="interior"
       data-marker-placement="development-interior"
       data-marker-side={interiorEdge}
