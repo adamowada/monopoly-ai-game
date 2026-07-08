@@ -409,30 +409,51 @@ function eventPayloadBoolean(event: AcceptedEvent | undefined, key: string): boo
   return typeof value === "boolean" ? value : null;
 }
 
+function cashDeltaPlayerId(event: AcceptedEvent): string | null {
+  return eventPayloadString(event, "player_id") ?? event.actor_player_id ?? null;
+}
+
+function pairedCashDeltaEvent(events: AcceptedEvent[], event: AcceptedEvent): AcceptedEvent | null {
+  const playerId = cashDeltaPlayerId(event);
+  const amount = eventPayloadNumber(event, "amount");
+  if (!playerId || amount === null) {
+    return null;
+  }
+
+  return (
+    [...events]
+      .filter((candidate) => {
+        if (
+          candidate.id === event.id ||
+          candidate.event_type !== "PLAYER_CASH_DELTA" ||
+          candidate.actor_player_id !== event.actor_player_id ||
+          Math.abs(candidate.sequence - event.sequence) !== 1 ||
+          eventPayloadNumber(candidate, "amount") !== -amount
+        ) {
+          return false;
+        }
+        const candidatePlayerId = cashDeltaPlayerId(candidate);
+        return candidatePlayerId !== null && candidatePlayerId !== playerId;
+      })
+      .sort((left, right) => Math.abs(left.sequence - event.sequence) - Math.abs(right.sequence - event.sequence))
+      .at(0) ?? null
+  );
+}
+
+function shouldRenderCashDeltaInGameLog(events: AcceptedEvent[], event: AcceptedEvent): boolean {
+  const amount = eventPayloadNumber(event, "amount");
+  return amount === null || amount <= 0 || pairedCashDeltaEvent(events, event) === null;
+}
+
 function cashTransferSummary(game: GameMetadata, events: AcceptedEvent[], event: AcceptedEvent): string {
-  const playerId = eventPayloadString(event, "player_id") ?? event.actor_player_id;
+  const playerId = cashDeltaPlayerId(event);
   const amount = eventPayloadNumber(event, "amount");
   if (!playerId || amount === null) {
     return "Cash changed hands.";
   }
 
-  const pairedEvent = [...events]
-    .filter((candidate) => {
-      if (
-        candidate.id === event.id ||
-        candidate.event_type !== "PLAYER_CASH_DELTA" ||
-        candidate.actor_player_id !== event.actor_player_id ||
-        Math.abs(candidate.sequence - event.sequence) !== 1 ||
-        eventPayloadNumber(candidate, "amount") !== -amount
-      ) {
-        return false;
-      }
-      const candidatePlayerId = eventPayloadString(candidate, "player_id") ?? candidate.actor_player_id;
-      return candidatePlayerId !== playerId;
-    })
-    .sort((left, right) => Math.abs(left.sequence - event.sequence) - Math.abs(right.sequence - event.sequence))
-    .at(0);
-  const pairedPlayerId = pairedEvent ? (eventPayloadString(pairedEvent, "player_id") ?? pairedEvent.actor_player_id) : null;
+  const pairedEvent = pairedCashDeltaEvent(events, event);
+  const pairedPlayerId = pairedEvent ? cashDeltaPlayerId(pairedEvent) : null;
 
   if (pairedPlayerId && amount > 0) {
     return `${playerName(game, pairedPlayerId)} paid ${playerName(game, playerId)} ${money(amount)}.`;
@@ -1011,6 +1032,9 @@ function gameLogEntryFromEvent(event: AcceptedEvent, events: AcceptedEvent[], ga
   }
 
   if (event.event_type === "PLAYER_CASH_DELTA") {
+    if (!shouldRenderCashDeltaInGameLog(events, event)) {
+      return null;
+    }
     return {
       ...base,
       badge: "Cash",

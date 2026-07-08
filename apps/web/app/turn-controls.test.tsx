@@ -1117,6 +1117,39 @@ describe("GamePlaySurface turn controls", () => {
     expect(log).not.toHaveTextContent("Ada paid Grace $200.");
   });
 
+  it("renders each paired player cash transfer once in the running log", async () => {
+    renderSurface(
+      baseFetchMock({
+        events: eventsFixture([
+          {
+            id: "event-rent-payment",
+            game_id: gameId,
+            sequence: 1,
+            actor_player_id: adaId,
+            event_type: "PLAYER_CASH_DELTA",
+            payload: { player_id: adaId, amount: -22 },
+            state_hash: "state-1",
+            created_at: "2026-07-04T00:01:00.000Z",
+          },
+          {
+            id: "event-rent-receipt",
+            game_id: gameId,
+            sequence: 2,
+            actor_player_id: adaId,
+            event_type: "PLAYER_CASH_DELTA",
+            payload: { player_id: graceId, amount: 22 },
+            state_hash: "state-2",
+            created_at: "2026-07-04T00:01:01.000Z",
+          },
+        ]),
+      }),
+    );
+
+    const log = await screen.findByRole("region", { name: "Game log" });
+
+    await waitFor(() => expect(within(log).getAllByText("Ada paid Grace $22.")).toHaveLength(1));
+  });
+
   it("prioritizes active controls, current player holdings, and one dynamic turn context", async () => {
     const fetchMock = baseFetchMock({
       state: holdingsStateFixture(),
