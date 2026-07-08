@@ -593,9 +593,12 @@ def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops
         "current_high_bid_amount": 50,
         "minimum_bid": 51,
         "cash_available": 1500,
+        "cash_reserve_floor": 300,
+        "cash_limited_bid_ceiling": 1200,
         "same_group_owned_property_ids": [],
         "property_group_size": 3,
         "completes_property_group": False,
+        "strategic_valuation_ceiling": 160,
         "valuation_ceiling": 160,
         "valuation_basis": "listed_price",
         "pass_action_available": True,
@@ -618,6 +621,21 @@ def test_context_pack_guides_auction_pass_when_minimum_bid_exceeds_valuation() -
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "PASS_AUCTION" in guidance_text
     assert "above the valuation ceiling" in guidance_text
+
+
+def test_context_pack_guides_auction_pass_when_cash_reserve_would_be_breached() -> None:
+    state = _state_with_active_auction(cash=220)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["auction_guidance"]["minimum_bid"] == 51
+    assert guidance["auction_guidance"]["valuation_ceiling"] == 0
+    assert guidance["auction_guidance"]["cash_reserve_floor"] == 300
+    assert guidance["auction_guidance"]["cash_limited_bid_ceiling"] == 0
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "PASS_AUCTION" in guidance_text
+    assert "cash reserve" in guidance_text
 
 
 def test_context_pack_redacts_profile_seed_source_from_prompt() -> None:
@@ -1300,11 +1318,15 @@ def _state_landed_on_group_completing_tennessee(*, cash: int) -> GameState:
     )
 
 
-def _state_with_active_auction(*, high_bid_amount: int = 50) -> GameState:
+def _state_with_active_auction(*, cash: int = 1500, high_bid_amount: int = 50) -> GameState:
     state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),
+            "players": (ai_player.model_dump(mode="python"), *[
+                player.model_dump(mode="python") for player in state.players[1:]
+            ]),
             "turn": {
                 **state.turn.model_dump(mode="python"),
                 "phase": TurnPhase.PURCHASE_OR_AUCTION,

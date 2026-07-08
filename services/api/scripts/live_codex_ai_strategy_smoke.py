@@ -154,6 +154,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_auction_pass_above_valuation,
         ),
         StrategySmokeCase(
+            name="auction_pass_to_preserve_cash_reserve",
+            game_id=UUID("00000000-0000-0000-0000-00000000b217"),
+            decision_type="action_decision",
+            state_factory=_auction_cash_reserve_pass_state,
+            verifier=_verify_auction_pass_above_valuation,
+        ),
+        StrategySmokeCase(
             name="auction_bid_to_complete_color_group",
             game_id=UUID("00000000-0000-0000-0000-00000000b210"),
             decision_type="action_decision",
@@ -668,6 +675,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "auction_pass_to_preserve_cash_reserve":
+        return (
+            {
+                "id": "live-strategy-pass-auction-to-preserve-cash-reserve",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has only $220 cash in an auction for "
+                    "property_virginia_avenue. The minimum legal BID_AUCTION is $51, but "
+                    "auction_guidance valuation_ceiling is $0 because bidding would breach "
+                    "the $300 cash reserve floor. Choose PASS_AUCTION."
+                ),
+            },
+        )
     if case.name == "auction_bid_within_valuation":
         return (
             {
@@ -1040,6 +1060,28 @@ def _auction_pass_state(game_id: UUID) -> GameState:
                 "property_id": "property_virginia_avenue",
                 "high_bidder_id": str(OTHER_PLAYER_ID),
                 "high_bid_amount": 1000,
+                "passed_player_ids": [],
+            },
+        }
+    )
+
+
+def _auction_cash_reserve_pass_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-auction-cash-reserve-pass")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 220
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+            "active_auction": {
+                "property_id": "property_virginia_avenue",
+                "high_bidder_id": str(OTHER_PLAYER_ID),
+                "high_bid_amount": 50,
                 "passed_player_ids": [],
             },
         }

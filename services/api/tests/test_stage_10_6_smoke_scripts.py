@@ -89,6 +89,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "jail_card_used_before_fine_or_roll" in source
     assert "auction_bid_within_valuation" in source
     assert "auction_pass_above_valuation" in source
+    assert "auction_pass_to_preserve_cash_reserve" in source
     assert "auction_bid_to_complete_color_group" in source
     assert "orange_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
@@ -115,6 +116,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "PASS_AUCTION" in source
     assert "property_virginia_avenue" in source
     assert "above the valuation ceiling" in source
+    assert "cash reserve floor" in source
     assert "buy_property_to_complete_group" in source
     assert "property_group_completion_premium" in source
     assert "property_reading_railroad" in source

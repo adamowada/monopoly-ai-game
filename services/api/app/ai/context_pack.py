@@ -751,18 +751,26 @@ def _action_selection_guidance(
     if auction_guidance is not None:
         minimum_bid = _int_or_zero(auction_guidance.get("minimum_bid"))
         valuation_ceiling = _int_or_zero(auction_guidance.get("valuation_ceiling"))
+        cash_limited_bid_ceiling = _int_or_zero(auction_guidance.get("cash_limited_bid_ceiling"))
         turn_guidance.append(
             "For BID_AUCTION, the payload amount is the minimum legal floor, "
             "not a recommendation. If bidding, choose a deliberate value based "
             "on property price, current high bid, and cash while staying near "
             "the valuation ceiling, or PASS_AUCTION; avoid one-dollar increment loops."
         )
-        if valuation_ceiling > 0 and minimum_bid > valuation_ceiling:
-            turn_guidance.append(
-                "Choose PASS_AUCTION when the minimum BID_AUCTION amount is "
-                "above the valuation ceiling unless a concrete monopoly-completion "
-                "reason justifies the overpay."
-            )
+        if minimum_bid > valuation_ceiling:
+            if minimum_bid > cash_limited_bid_ceiling:
+                turn_guidance.append(
+                    "Choose PASS_AUCTION when the minimum BID_AUCTION amount would breach "
+                    "the cash reserve floor unless a concrete bankruptcy-prevention reason "
+                    "justifies spending below reserve."
+                )
+            else:
+                turn_guidance.append(
+                    "Choose PASS_AUCTION when the minimum BID_AUCTION amount is "
+                    "above the valuation ceiling unless a concrete monopoly-completion "
+                    "reason justifies the overpay."
+                )
 
     if debt_resolution_guidance is not None:
         recommendation = _string_or_none(debt_resolution_guidance.get("recommendation"))
@@ -1185,16 +1193,21 @@ def _auction_guidance(
         and len(same_group_owned_property_ids) == property_group_size - 1
     )
     if completes_property_group:
-        valuation_ceiling = property_data.price * 3 // 2
+        strategic_valuation_ceiling = property_data.price * 3 // 2
         valuation_basis = "property_group_completion_premium"
+        cash_reserve_floor = GROUP_COMPLETION_PURCHASE_CASH_FLOOR
     elif same_group_owned_property_ids:
-        valuation_ceiling = property_data.price * 5 // 4
+        strategic_valuation_ceiling = property_data.price * 5 // 4
         valuation_basis = "same_group_position_premium"
+        cash_reserve_floor = PURCHASE_HEALTHY_CASH_FLOOR
     else:
-        valuation_ceiling = property_data.price
+        strategic_valuation_ceiling = property_data.price
         valuation_basis = "listed_price"
+        cash_reserve_floor = PURCHASE_HEALTHY_CASH_FLOOR
 
     bid_payload = _mapping(bid_action.get("payload"))
+    cash_limited_bid_ceiling = max(player.cash - cash_reserve_floor, 0)
+    valuation_ceiling = min(strategic_valuation_ceiling, cash_limited_bid_ceiling)
     return {
         "property_id": auction.property_id,
         "property_name": property_data.name,
@@ -1204,10 +1217,13 @@ def _auction_guidance(
         "current_high_bid_amount": auction.high_bid_amount,
         "minimum_bid": _int_or_zero(bid_payload.get("amount")),
         "cash_available": player.cash,
+        "cash_reserve_floor": cash_reserve_floor,
+        "cash_limited_bid_ceiling": cash_limited_bid_ceiling,
         "same_group_owned_property_ids": same_group_owned_property_ids,
         "property_group_size": property_group_size,
         "completes_property_group": completes_property_group,
-        "valuation_ceiling": min(player.cash, valuation_ceiling),
+        "strategic_valuation_ceiling": strategic_valuation_ceiling,
+        "valuation_ceiling": valuation_ceiling,
         "valuation_basis": valuation_basis,
         "pass_action_available": any(action.get("type") == "PASS_AUCTION" for action in legal_actions),
         "bid_payload_amount_is_floor": True,
