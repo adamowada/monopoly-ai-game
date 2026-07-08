@@ -80,13 +80,25 @@ type AiNegotiationStepRequest = {
   tradeOpportunity?: AutoTradeOpportunity | null;
 };
 
+type PropertyGroupKind = (typeof PROPERTY_GROUPS)[number]["kind"];
+
 type AutoTradeOpportunity = {
-  kind: "complete_street_group" | "complete_railroad_group" | "complete_utility_group";
+  kind:
+    | "complete_street_group"
+    | "complete_railroad_group"
+    | "complete_utility_group"
+    | "block_opponent_street_group"
+    | "block_opponent_railroad_group"
+    | "block_opponent_utility_group";
   group: string;
   group_name: string;
-  property_group_kind: (typeof PROPERTY_GROUPS)[number]["kind"];
+  property_group_kind: PropertyGroupKind;
   actor_owned_property_ids: string[];
   actor_owned_property_names: string[];
+  opponent_player_id?: string;
+  opponent_player_name?: string;
+  opponent_owned_property_ids?: string[];
+  opponent_owned_property_names?: string[];
   target_property_id: string;
   target_property_name: string;
   target_owner_id: string;
@@ -977,10 +989,68 @@ function autoTradeOpportunityFor(
     };
   }
 
+  for (const group of PROPERTY_GROUPS) {
+    const properties = group.property_ids
+      .map((propertyId) => propertyById(propertyId))
+      .filter((property): property is StaticDataProperty => Boolean(property));
+    if (properties.length === 0) {
+      continue;
+    }
+
+    for (const opponent of game.players) {
+      if (opponent.id === player.id) {
+        continue;
+      }
+
+      const opponentOwned = properties.filter((property) => ownerByPropertyId.get(property.id) === opponent.id);
+      const blockingTargets = properties.filter((property) => ownerByPropertyId.get(property.id) !== opponent.id);
+      if (opponentOwned.length !== properties.length - 1 || blockingTargets.length !== 1) {
+        continue;
+      }
+
+      const targetProperty = blockingTargets[0];
+      const targetOwnerId = ownerByPropertyId.get(targetProperty.id);
+      if (!targetOwnerId || targetOwnerId === player.id || targetOwnerId === opponent.id) {
+        continue;
+      }
+      const targetOwner = game.players.find((candidate) => candidate.id === targetOwnerId);
+      if (!targetOwner || targetOwner.controller_type !== "ai") {
+        continue;
+      }
+      const participants = [player.id, targetOwner.id];
+      if (hasActiveNegotiationBetween(negotiations, participants)) {
+        continue;
+      }
+
+      return {
+        kind: blockingTradeKind(group.kind),
+        group: group.id,
+        group_name: group.name,
+        property_group_kind: group.kind,
+        actor_owned_property_ids: properties
+          .filter((property) => ownerByPropertyId.get(property.id) === player.id)
+          .map((property) => property.id),
+        actor_owned_property_names: properties
+          .filter((property) => ownerByPropertyId.get(property.id) === player.id)
+          .map((property) => property.name),
+        opponent_player_id: opponent.id,
+        opponent_player_name: opponent.name,
+        opponent_owned_property_ids: opponentOwned.map((property) => property.id),
+        opponent_owned_property_names: opponentOwned.map((property) => property.name),
+        target_property_id: targetProperty.id,
+        target_property_name: targetProperty.name,
+        target_owner_id: targetOwner.id,
+        target_owner_name: targetOwner.name,
+        participants,
+        strategic_reason: blockingStrategicReason(group.name, opponent.name, targetProperty.name),
+      };
+    }
+  }
+
   return null;
 }
 
-function completionTradeKind(groupKind: (typeof PROPERTY_GROUPS)[number]["kind"]): AutoTradeOpportunity["kind"] {
+function completionTradeKind(groupKind: PropertyGroupKind): AutoTradeOpportunity["kind"] {
   if (groupKind === "railroad") {
     return "complete_railroad_group";
   }
@@ -990,7 +1060,17 @@ function completionTradeKind(groupKind: (typeof PROPERTY_GROUPS)[number]["kind"]
   return "complete_street_group";
 }
 
-function completionStrategicReason(groupKind: (typeof PROPERTY_GROUPS)[number]["kind"], groupName: string): string {
+function blockingTradeKind(groupKind: PropertyGroupKind): AutoTradeOpportunity["kind"] {
+  if (groupKind === "railroad") {
+    return "block_opponent_railroad_group";
+  }
+  if (groupKind === "utility") {
+    return "block_opponent_utility_group";
+  }
+  return "block_opponent_street_group";
+}
+
+function completionStrategicReason(groupKind: PropertyGroupKind, groupName: string): string {
   if (groupKind === "railroad") {
     return `Completing ${groupName} raises railroad rent tiers and strengthens set leverage.`;
   }
@@ -998,6 +1078,10 @@ function completionStrategicReason(groupKind: (typeof PROPERTY_GROUPS)[number]["
     return `Completing ${groupName} doubles utility rent multipliers and strengthens set leverage.`;
   }
   return `Completing ${groupName} unlocks development and materially raises rent pressure.`;
+}
+
+function blockingStrategicReason(groupName: string, opponentName: string, targetPropertyName: string): string {
+  return `Acquiring ${targetPropertyName} blocks ${opponentName} from completing ${groupName} and preserves set defense.`;
 }
 
 function hasActiveNegotiationBetween(negotiations: Negotiation[], participantIds: string[]): boolean {
