@@ -399,8 +399,16 @@ function propertyMarkerEdgesForPosition(position: number): {
   };
 }
 
-const ownerMarkerCardSlotClass = "bottom-0 left-1/2 -translate-x-1/2 translate-y-px rounded-b-none";
-const developmentMarkerCardSlotClass = "left-1/2 top-0 -translate-x-1/2 -translate-y-px rounded-t-none";
+const markerSideClasses: Record<BoardEdge, string> = {
+  bottom: "bottom-0 left-1/2 -translate-x-1/2 translate-y-px rounded-b-none",
+  left: "left-0 top-1/2 -translate-x-px -translate-y-1/2 rounded-l-none",
+  right: "right-0 top-1/2 translate-x-px -translate-y-1/2 rounded-r-none",
+  top: "left-1/2 top-0 -translate-x-1/2 -translate-y-px rounded-t-none",
+};
+
+function developmentMarkerAxisClass(edge: BoardEdge): string {
+  return edge === "left" || edge === "right" ? "flex-col" : "flex-row";
+}
 
 function orientedContentStyle(rotation: number): CSSProperties {
   const sideways = Math.abs(rotation) === 90;
@@ -491,15 +499,15 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-[80] mx-auto w-fit max-w-[4.5rem] overflow-hidden rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[80] mx-auto w-fit max-w-[6rem] overflow-hidden rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1.5 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-layer="top"
-      data-board-motion-overlap="separate-fixed-lanes"
+      data-board-motion-overlap="stacked-clearance"
       data-board-motion-placement="center-stack"
-      data-board-motion-size="micro-route-chip"
+      data-board-motion-size="compact-route-pill"
       role="status"
     >
-      <div className="break-words text-[8px] font-black leading-[1.05]">{message}</div>
+      <div className="break-words text-[9px] font-black leading-[1.08]">{message}</div>
     </div>
   );
 }
@@ -520,28 +528,28 @@ function CenterMotionStack({
     <div
       className="pointer-events-none absolute inset-0 z-[65]"
       data-center-motion-gap="collision-proof"
-      data-center-motion-layout="separated-fixed-lanes"
+      data-center-motion-layout="stacked-route-and-dice"
       data-center-motion-stack=""
     >
-      <div className="absolute inset-0" data-center-motion-stack-inner="">
+      <div
+        className="absolute left-1/2 top-1/2 grid w-[7rem] max-w-[64%] -translate-x-1/2 -translate-y-1/2 justify-items-center gap-1.5"
+        data-center-motion-stack-inner=""
+      >
         {showMotionBanner ? (
           <div
-            className="absolute left-1/2 top-[24%] z-[80] w-fit max-w-[4.5rem] -translate-x-1/2 -translate-y-1/2"
+            className="relative z-[80] w-full max-w-[6rem]"
             data-center-motion-banner-layer=""
             data-center-motion-lane="movement"
-            data-center-motion-lane-position="above-dice"
+            data-center-motion-lane-position="route-above-dice"
           >
             <BoardMotionBanner motion={motion} />
           </div>
         ) : null}
         <div
-          className={cn(
-            "absolute left-1/2 z-30 w-fit max-w-[7.25rem] -translate-x-1/2 -translate-y-1/2",
-            showMotionBanner ? "top-[76%]" : "top-1/2",
-          )}
+          className="relative z-30 w-fit max-w-[5.75rem]"
           data-center-dice-layer=""
           data-center-motion-lane="dice"
-          data-center-motion-lane-position={showMotionBanner ? "below-movement" : "centered"}
+          data-center-motion-lane-position={showMotionBanner ? "dice-below-route" : "centered"}
         >
           <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
         </div>
@@ -862,11 +870,11 @@ function BoardOwnerMarker({
       aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
       className={cn(
         "absolute z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm",
-        ownerMarkerCardSlotClass,
+        markerSideClasses[ownershipEdge],
       )}
       data-marker-anchor="perimeter-price-edge"
       data-marker-board-zone="perimeter"
-      data-marker-card-slot="bottom"
+      data-marker-card-slot={ownershipEdge}
       data-marker-edge="perimeter"
       data-marker-placement="owner-perimeter"
       data-marker-role="ownership"
@@ -915,13 +923,14 @@ function DevelopmentMarker({
     <span
       aria-label={label}
       className={cn(
-        "absolute z-20 flex flex-row items-center justify-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm",
-        developmentMarkerCardSlotClass,
+        "absolute z-20 flex items-center justify-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm",
+        developmentMarkerAxisClass(developmentEdge),
+        markerSideClasses[developmentEdge],
       )}
       data-development-marker=""
       data-marker-anchor="interior-development-edge"
       data-marker-board-zone="interior"
-      data-marker-card-slot="top"
+      data-marker-card-slot={developmentEdge}
       data-marker-edge="interior"
       data-marker-placement="development-interior"
       data-marker-role="development"
@@ -1345,18 +1354,18 @@ export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissD
                   gridRow: `${coordinates.row} / span ${coordinates.rowSpan}`,
                 }}
               >
+                {property && ownership ? (
+                  <BoardOwnerMarker
+                    game={game}
+                    ownership={ownership}
+                    position={space.position}
+                    property={property}
+                  />
+                ) : null}
+                {property?.kind === "street" && ownership ? (
+                  <DevelopmentMarker ownership={ownership} position={space.position} property={property} />
+                ) : null}
                 <OrientedSpaceContent rotation={contentRotation}>
-                  {property && ownership ? (
-                    <BoardOwnerMarker
-                      game={game}
-                      ownership={ownership}
-                      position={space.position}
-                      property={property}
-                    />
-                  ) : null}
-                  {property?.kind === "street" && ownership ? (
-                    <DevelopmentMarker ownership={ownership} position={space.position} property={property} />
-                  ) : null}
                   {space.id === "space_jail" ? (
                     <JailSpaceCell
                       game={game}
