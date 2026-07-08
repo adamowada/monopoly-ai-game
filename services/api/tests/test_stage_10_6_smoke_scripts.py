@@ -236,6 +236,44 @@ def test_live_codex_strategy_smoke_debt_cases_have_targeted_legal_actions() -> N
     }
 
 
+def test_live_codex_strategy_smoke_utility_actions_have_targeted_legal_actions() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    unmortgage_case = cases["healthy_cash_unmortgages_rent_property"]
+    unmortgage_state = unmortgage_case.state_factory(unmortgage_case.game_id)
+    unmortgage_pack = module.build_ai_context_pack(
+        unmortgage_state,
+        player_id=str(unmortgage_case.actor_player_id),
+        decision_type=unmortgage_case.decision_type,
+    )
+    unmortgage_guidance = unmortgage_pack["action_selection_guidance"][
+        "unmortgage_guidance"
+    ]
+    assert unmortgage_guidance["recommended_unmortgage_action"] == {
+        "type": "UNMORTGAGE_PROPERTY",
+        "payload": {
+            "property_id": "property_b_and_o_railroad",
+            "cost": 110,
+        },
+        "reason_code": "restore_rent_when_cash_healthy",
+    }
+
+    jail_case = cases["jail_card_used_before_fine_or_roll"]
+    jail_state = jail_case.state_factory(jail_case.game_id)
+    jail_pack = module.build_ai_context_pack(
+        jail_state,
+        player_id=str(jail_case.actor_player_id),
+        decision_type=jail_case.decision_type,
+    )
+    jail_guidance = jail_pack["action_selection_guidance"]["jail_guidance"]
+    assert jail_guidance["recommended_jail_action"] == {
+        "type": "USE_GET_OUT_OF_JAIL_CARD",
+        "payload": {"card_id": "card_community_get_out_of_jail"},
+        "reason_code": "use_card_before_paying_or_rolling",
+    }
+
+
 def test_live_codex_strategy_smoke_prioritizes_stronger_development_group() -> None:
     module = _load_live_strategy_smoke_module()
     cases = {case.name: case for case in module._strategy_cases()}

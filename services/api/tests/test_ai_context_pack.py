@@ -1254,6 +1254,14 @@ def test_context_pack_prioritizes_unmortgaging_rent_property_when_cash_stays_hea
     assert "UNMORTGAGE_PROPERTY" in guidance["recommended_action_types_before_roll"]
     assert "ROLL_DICE" in guidance["lower_priority_action_types"]
     assert guidance["unmortgage_guidance"]["recommendation"] == "restore_rent_when_cash_healthy"
+    assert guidance["unmortgage_guidance"]["recommended_unmortgage_action"] == {
+        "type": "UNMORTGAGE_PROPERTY",
+        "payload": {
+            "property_id": "property_b_and_o_railroad",
+            "cost": 110,
+        },
+        "reason_code": "restore_rent_when_cash_healthy",
+    }
     assert guidance["unmortgage_guidance"]["cash_after_cheapest_unmortgage"] == 790
     assert guidance["unmortgage_guidance"]["unmortgageable_property_ids"] == [
         "property_b_and_o_railroad"
@@ -1263,6 +1271,10 @@ def test_context_pack_prioritizes_unmortgaging_rent_property_when_cash_stays_hea
     assert "restore rent" in guidance_text
     assert any(
         "UNMORTGAGE_PROPERTY" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_unmortgage_action" in instruction
         for instruction in pack["instruction_contract"]["instructions"]
     )
 
@@ -1285,6 +1297,11 @@ def test_context_pack_prioritizes_jail_card_over_fine_and_jail_roll() -> None:
     assert guidance["jail_guidance"] == {
         "action_available": True,
         "recommendation": "use_card_before_paying_or_rolling",
+        "recommended_jail_action": {
+            "type": "USE_GET_OUT_OF_JAIL_CARD",
+            "payload": {"card_id": "card_community_get_out_of_jail"},
+            "reason_code": "use_card_before_paying_or_rolling",
+        },
         "cash_available": 900,
         "jail_turns": 1,
         "jail_card_ids": ["card_community_get_out_of_jail"],
@@ -1297,6 +1314,10 @@ def test_context_pack_prioritizes_jail_card_over_fine_and_jail_roll() -> None:
     assert "ROLL_DICE" in guidance_text
     assert any(
         "USE_GET_OUT_OF_JAIL_CARD" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_jail_action" in instruction
         for instruction in pack["instruction_contract"]["instructions"]
     )
 

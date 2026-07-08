@@ -1490,10 +1490,24 @@ def _unmortgage_guidance(
         if cheapest_cost > 0 and cash_after_cheapest >= UNMORTGAGE_HEALTHY_CASH_FLOOR
         else "defer_until_cash_after_cost_is_healthy"
     )
+    recommended_unmortgage_action = None
+    if recommendation == "restore_rent_when_cash_healthy":
+        cheapest_action = min(
+            unmortgage_actions,
+            key=lambda action: (
+                _int_or_zero(_mapping(action.get("payload")).get("cost")),
+                str(_mapping(action.get("payload")).get("property_id", "")),
+            ),
+        )
+        recommended_unmortgage_action = _legal_action_template(
+            cheapest_action,
+            recommendation,
+        )
 
     return {
         "action_available": True,
         "recommendation": recommendation,
+        "recommended_unmortgage_action": recommended_unmortgage_action,
         "cash_available": player.cash,
         "healthy_cash_floor": UNMORTGAGE_HEALTHY_CASH_FLOOR,
         "unmortgageable_property_count": len(unmortgage_actions),
@@ -1525,10 +1539,18 @@ def _jail_guidance(
         card_id = _string_or_none(payload.get("card_id"))
         if card_id is not None:
             jail_card_ids.append(card_id)
+    recommended_jail_action = _legal_action_template(
+        sorted(
+            card_actions,
+            key=lambda action: str(_mapping(action.get("payload")).get("card_id", "")),
+        )[0],
+        "use_card_before_paying_or_rolling",
+    )
 
     return {
         "action_available": True,
         "recommendation": "use_card_before_paying_or_rolling",
+        "recommended_jail_action": recommended_jail_action,
         "cash_available": player.cash,
         "jail_turns": player.jail_turns,
         "jail_card_ids": jail_card_ids,
@@ -3013,7 +3035,9 @@ def _instruction_contract() -> dict[str, Any]:
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance provides recommended_development_action, use that BUY_HOUSE payload for monopoly development unless visible state makes it illegal.",
             "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
+            "When unmortgage_guidance provides recommended_unmortgage_action, use that exact legal action payload unless visible state has changed.",
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
+            "When jail_guidance provides recommended_jail_action, use that exact legal action payload before paying the fine or rolling in jail.",
             "When auction_guidance provides recommended_bid_amount, use that amount for BID_AUCTION instead of blindly submitting the legal minimum payload.",
             "When auction_guidance provides recommended_auction_action, use that action payload for BID_AUCTION or PASS_AUCTION unless visible auction state has changed.",
             "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
