@@ -932,6 +932,51 @@ def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> 
     assert "only enough" in guidance_text
 
 
+def test_context_pack_prefers_mortgaging_non_monopoly_property_for_debt() -> None:
+    state = _state_with_active_debt_orange_monopoly_and_railroad(cash=0, amount_owed=100)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    mortgage_property_ids = [
+        action["payload"]["property_id"]
+        for action in pack["legal_actions"]
+        if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert {
+        "property_b_and_o_railroad",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }.issubset(set(mortgage_property_ids))
+
+    guidance = pack["action_selection_guidance"]
+    mortgage_guidance = guidance["mortgage_guidance"]
+    assert guidance["recommended_action_types"] == ["MORTGAGE_PROPERTY"]
+    assert mortgage_guidance["recommended_mortgage_property_ids"] == [
+        "property_b_and_o_railroad"
+    ]
+    assert mortgage_guidance["ranked_mortgage_options"][0] == {
+        "property_id": "property_b_and_o_railroad",
+        "property_name": "B&O Railroad",
+        "property_kind": "railroad",
+        "group": "railroad",
+        "proceeds": 100,
+        "covers_remaining_debt": True,
+        "liquidation_gap": 0,
+        "breaks_complete_street_group": False,
+        "priority_reason": "covers_debt_without_breaking_complete_street_group",
+    }
+    orange_options = [
+        option
+        for option in mortgage_guidance["ranked_mortgage_options"]
+        if option["group"] == "orange"
+    ]
+    assert orange_options
+    assert all(option["breaks_complete_street_group"] is True for option in orange_options)
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "property_b_and_o_railroad" in guidance_text
+    assert "preserving stronger set leverage" in guidance_text
+
+
 def test_context_pack_prioritizes_cash_settlement_for_active_debt() -> None:
     state = _state_with_active_debt_and_owned_railroad(cash=75, amount_owed=75)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -2084,6 +2129,54 @@ def _state_with_active_debt_and_owned_railroad(*, cash: int, amount_owed: int = 
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": amount_owed,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _state_with_active_debt_orange_monopoly_and_railroad(
+    *,
+    cash: int,
+    amount_owed: int,
+) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    owned_property_ids = {
+        "property_b_and_o_railroad",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                    "mortgaged": False,
+                    "houses": 0,
+                    "hotel": False,
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
             "turn": {
                 **state.turn.model_dump(mode="python"),
                 "phase": TurnPhase.PAYMENT_RESOLUTION,

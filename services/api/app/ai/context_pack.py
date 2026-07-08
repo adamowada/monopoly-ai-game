@@ -855,6 +855,11 @@ def _action_selection_guidance(
         elif recommendation == "mortgage_only_enough_for_debt":
             if "MORTGAGE_PROPERTY" in legal_action_types:
                 recommended_action_types.append("MORTGAGE_PROPERTY")
+            recommended_mortgage_property_ids = _string_list(
+                mortgage_guidance.get("recommended_mortgage_property_ids")
+                if mortgage_guidance is not None
+                else []
+            )
             for action_type in ("DECLARE_BANKRUPTCY",):
                 if (
                     action_type in legal_action_types
@@ -865,6 +870,12 @@ def _action_selection_guidance(
                 "MORTGAGE_PROPERTY may be necessary for the active debt; mortgage only "
                 "enough to cover the remaining amount and avoid DECLARE_BANKRUPTCY."
             )
+            if recommended_mortgage_property_ids:
+                turn_guidance.append(
+                    "Prefer MORTGAGE_PROPERTY on "
+                    f"{', '.join(recommended_mortgage_property_ids)} first because it "
+                    "covers the debt while preserving stronger set leverage."
+                )
 
     if mortgage_guidance is not None:
         recommendation = _string_or_none(mortgage_guidance.get("recommendation"))
@@ -1057,14 +1068,23 @@ def _mortgage_guidance(
             0,
         )
 
-    mortgageable_property_ids: list[str] = []
-    total_available_proceeds = 0
-    for action in mortgage_actions:
-        payload = _mapping(action.get("payload"))
-        property_id = _string_or_none(payload.get("property_id"))
-        if property_id is not None:
-            mortgageable_property_ids.append(property_id)
-        total_available_proceeds += _int_or_zero(payload.get("proceeds"))
+    remaining_after_cash = max(outstanding_debt - player.cash, 0)
+    ranked_mortgage_options = _ranked_mortgage_options(
+        state,
+        actor_id,
+        mortgage_actions,
+        remaining_after_cash=remaining_after_cash,
+    )
+    mortgageable_property_ids = [
+        str(option["property_id"]) for option in ranked_mortgage_options
+    ]
+    total_available_proceeds = sum(
+        _int_or_zero(option.get("proceeds")) for option in ranked_mortgage_options
+    )
+    recommended_mortgage_property_ids = _recommended_mortgage_property_ids(
+        ranked_mortgage_options,
+        remaining_after_cash=remaining_after_cash,
+    )
 
     recommendation = "reserve_for_specific_liquidity_need"
     if has_active_debt:
@@ -1077,12 +1097,117 @@ def _mortgage_guidance(
         "recommendation": recommendation,
         "has_active_debt": has_active_debt,
         "outstanding_debt": outstanding_debt,
+        "remaining_after_cash": remaining_after_cash,
         "cash_available": player.cash,
         "healthy_cash_floor": MORTGAGE_HEALTHY_CASH_FLOOR,
         "mortgageable_property_count": len(mortgage_actions),
         "mortgageable_property_ids": mortgageable_property_ids,
+        "recommended_mortgage_property_ids": recommended_mortgage_property_ids,
+        "ranked_mortgage_options": ranked_mortgage_options,
         "total_available_proceeds": total_available_proceeds,
     }
+
+
+def _ranked_mortgage_options(
+    state: GameState,
+    actor_id: str,
+    mortgage_actions: Sequence[Mapping[str, Any]],
+    *,
+    remaining_after_cash: int,
+) -> list[dict[str, Any]]:
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+
+    options: list[dict[str, Any]] = []
+    for action in mortgage_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is None:
+            continue
+        property_data = properties_by_id.get(property_id)
+        if property_data is None:
+            continue
+        proceeds = _int_or_zero(payload.get("proceeds"))
+        group = groups_by_id.get(property_data.group)
+        breaks_complete_street_group = False
+        if group is not None and group.kind == "street":
+            breaks_complete_street_group = all(
+                ownership_by_property_id.get(group_property_id) is not None
+                and ownership_by_property_id[group_property_id].owner_id == actor_id
+                and not ownership_by_property_id[group_property_id].mortgaged
+                for group_property_id in group.property_ids
+            )
+        covers_remaining_debt = remaining_after_cash <= 0 or proceeds >= remaining_after_cash
+        liquidation_gap = (
+            max(proceeds - remaining_after_cash, 0)
+            if covers_remaining_debt
+            else remaining_after_cash - proceeds
+        )
+        priority_reason = (
+            "covers_debt_without_breaking_complete_street_group"
+            if covers_remaining_debt and not breaks_complete_street_group
+            else "covers_debt_but_breaks_complete_street_group"
+            if covers_remaining_debt
+            else "partial_liquidation_without_breaking_complete_street_group"
+            if not breaks_complete_street_group
+            else "partial_liquidation_breaks_complete_street_group"
+        )
+        options.append(
+            {
+                "property_id": property_data.id,
+                "property_name": property_data.name,
+                "property_kind": property_data.kind,
+                "group": property_data.group,
+                "proceeds": proceeds,
+                "covers_remaining_debt": covers_remaining_debt,
+                "liquidation_gap": liquidation_gap,
+                "breaks_complete_street_group": breaks_complete_street_group,
+                "priority_reason": priority_reason,
+            }
+        )
+
+    return sorted(
+        options,
+        key=lambda option: (
+            bool(option["breaks_complete_street_group"]),
+            not bool(option["covers_remaining_debt"]),
+            _int_or_zero(option.get("liquidation_gap")),
+            _int_or_zero(option.get("proceeds")),
+            str(option["property_id"]),
+        ),
+    )
+
+
+def _recommended_mortgage_property_ids(
+    ranked_mortgage_options: Sequence[Mapping[str, Any]],
+    *,
+    remaining_after_cash: int,
+) -> list[str]:
+    if remaining_after_cash <= 0:
+        return []
+
+    covering_options = [
+        option for option in ranked_mortgage_options if option.get("covers_remaining_debt") is True
+    ]
+    if covering_options:
+        property_id = _string_or_none(covering_options[0].get("property_id"))
+        return [] if property_id is None else [property_id]
+
+    recommended: list[str] = []
+    accumulated = 0
+    for option in ranked_mortgage_options:
+        property_id = _string_or_none(option.get("property_id"))
+        if property_id is None:
+            continue
+        recommended.append(property_id)
+        accumulated += _int_or_zero(option.get("proceeds"))
+        if accumulated >= remaining_after_cash:
+            break
+    return recommended
 
 
 def _debt_resolution_guidance(
