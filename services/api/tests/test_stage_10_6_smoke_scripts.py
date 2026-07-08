@@ -176,6 +176,16 @@ def test_live_codex_strategy_smoke_debt_cases_have_targeted_legal_actions() -> N
     assert settle_pack["action_selection_guidance"]["debt_resolution_guidance"][
         "recommendation"
     ] == ("settle_cash_debt")
+    settle_recommendation = settle_pack["action_selection_guidance"][
+        "debt_resolution_guidance"
+    ]["recommended_debt_action"]
+    assert settle_recommendation["type"] == "SETTLE_DEBT"
+    assert settle_recommendation["payload"]["amount"] == 75
+    assert settle_recommendation["payload"]["creditor_player_id"] == str(module.OTHER_PLAYER_ID)
+    assert settle_recommendation["payload"]["debt_id"].startswith(
+        f"active-debt:{settle_case.game_id}:"
+    )
+    assert settle_recommendation["reason_code"] == "settle_cash_debt"
 
     sell_case = cases["active_debt_sells_house_before_mortgage"]
     sell_state = sell_case.state_factory(sell_case.game_id)
@@ -217,6 +227,13 @@ def test_live_codex_strategy_smoke_debt_cases_have_targeted_legal_actions() -> N
     assert sell_pack["action_selection_guidance"]["debt_resolution_guidance"]["recommendation"] == (
         "sell_improvements_before_mortgage"
     )
+    assert sell_pack["action_selection_guidance"]["debt_resolution_guidance"][
+        "recommended_debt_action"
+    ] == {
+        "type": "SELL_HOUSE",
+        "payload": {"property_id": "property_oriental_avenue", "proceeds": 25},
+        "reason_code": "sell_improvements_before_mortgage",
+    }
 
 
 def test_live_codex_strategy_smoke_prioritizes_stronger_development_group() -> None:

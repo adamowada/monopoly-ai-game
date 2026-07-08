@@ -1097,6 +1097,14 @@ def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> 
         guidance["mortgage_guidance"]["recommendation"] == "liquidate_only_enough_for_active_debt"
     )
     assert guidance["debt_resolution_guidance"]["recommendation"] == "mortgage_only_enough_for_debt"
+    assert guidance["debt_resolution_guidance"]["recommended_debt_action"] == {
+        "type": "MORTGAGE_PROPERTY",
+        "payload": {
+            "property_id": "property_b_and_o_railroad",
+            "proceeds": 100,
+        },
+        "reason_code": "mortgage_only_enough_for_active_debt",
+    }
     assert guidance["mortgage_guidance"]["has_active_debt"] is True
     assert guidance["mortgage_guidance"]["cash_available"] == 0
     guidance_text = " ".join(guidance["turn_guidance"])
@@ -1126,6 +1134,14 @@ def test_context_pack_prefers_mortgaging_non_monopoly_property_for_debt() -> Non
     assert mortgage_guidance["recommended_mortgage_property_ids"] == [
         "property_b_and_o_railroad"
     ]
+    assert guidance["debt_resolution_guidance"]["recommended_debt_action"] == {
+        "type": "MORTGAGE_PROPERTY",
+        "payload": {
+            "property_id": "property_b_and_o_railroad",
+            "proceeds": 100,
+        },
+        "reason_code": "mortgage_only_enough_for_active_debt",
+    }
     assert mortgage_guidance["ranked_mortgage_options"][0] == {
         "property_id": "property_b_and_o_railroad",
         "property_name": "B&O Railroad",
@@ -1161,11 +1177,21 @@ def test_context_pack_prioritizes_cash_settlement_for_active_debt() -> None:
     assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
     assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
     assert guidance["debt_resolution_guidance"]["recommendation"] == "settle_cash_debt"
+    recommended_debt_action = guidance["debt_resolution_guidance"]["recommended_debt_action"]
+    assert recommended_debt_action["type"] == "SETTLE_DEBT"
+    assert recommended_debt_action["payload"]["amount"] == 75
+    assert recommended_debt_action["payload"]["creditor_player_id"] == str(OTHER_PLAYER_ID)
+    assert recommended_debt_action["payload"]["debt_id"].startswith(
+        f"active-debt:{GAME_ID}:"
+    )
+    assert recommended_debt_action["reason_code"] == "settle_cash_debt"
     assert guidance["debt_resolution_guidance"]["settle_amount"] == 75
     assert guidance["debt_resolution_guidance"]["outstanding_debt"] == 75
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "SETTLE_DEBT" in guidance_text
     assert "before liquidation" in guidance_text
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "recommended_debt_action" in instruction_text
 
 
 def test_context_pack_prioritizes_selling_improvements_before_mortgage_for_debt() -> None:
@@ -1196,6 +1222,14 @@ def test_context_pack_prioritizes_selling_improvements_before_mortgage_for_debt(
         guidance["debt_resolution_guidance"]["recommendation"]
         == "sell_improvements_before_mortgage"
     )
+    assert guidance["debt_resolution_guidance"]["recommended_debt_action"] == {
+        "type": "SELL_HOUSE",
+        "payload": {
+            "property_id": "property_oriental_avenue",
+            "proceeds": 25,
+        },
+        "reason_code": "sell_improvements_before_mortgage",
+    }
     assert guidance["debt_resolution_guidance"]["sell_house_property_ids"] == [
         "property_oriental_avenue"
     ]

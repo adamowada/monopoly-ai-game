@@ -1299,12 +1299,23 @@ def _debt_resolution_guidance(
         recommendation = "sell_improvements_before_mortgage"
     elif mortgage_actions:
         recommendation = "mortgage_only_enough_for_debt"
+    recommended_debt_action = _recommended_debt_action_template(
+        state=state,
+        actor_id=actor_id,
+        recommendation=recommendation,
+        settle_actions=settle_actions,
+        sell_house_actions=sell_house_actions,
+        mortgage_actions=mortgage_actions,
+        outstanding_debt=outstanding_debt,
+        remaining_after_cash=remaining_after_cash,
+    )
 
     return {
         "action_available": bool(
             settle_actions or sell_house_actions or mortgage_actions or bankruptcy_available
         ),
         "recommendation": recommendation,
+        "recommended_debt_action": recommended_debt_action,
         "outstanding_debt": outstanding_debt,
         "cash_available": player.cash,
         "remaining_after_cash": remaining_after_cash,
@@ -1317,6 +1328,96 @@ def _debt_resolution_guidance(
         "mortgageable_property_ids": mortgageable_property_ids,
         "mortgage_total_proceeds": mortgage_total_proceeds,
         "bankruptcy_available": bankruptcy_available,
+    }
+
+
+def _recommended_debt_action_template(
+    *,
+    state: GameState,
+    actor_id: str,
+    recommendation: str,
+    settle_actions: Sequence[Mapping[str, Any]],
+    sell_house_actions: Sequence[Mapping[str, Any]],
+    mortgage_actions: Sequence[Mapping[str, Any]],
+    outstanding_debt: int,
+    remaining_after_cash: int,
+) -> dict[str, Any] | None:
+    if recommendation == "settle_cash_debt":
+        candidates = sorted(
+            settle_actions,
+            key=lambda action: (
+                -_int_or_zero(_mapping(action.get("payload")).get("amount")),
+                str(_mapping(action.get("payload")).get("debt_id", "")),
+            ),
+        )
+        return _legal_action_template(candidates[0], "settle_cash_debt") if candidates else None
+
+    if recommendation == "sell_improvements_before_mortgage":
+        candidates = sorted(
+            sell_house_actions,
+            key=lambda action: (
+                _int_or_zero(_mapping(action.get("payload")).get("proceeds"))
+                < remaining_after_cash,
+                abs(
+                    _int_or_zero(_mapping(action.get("payload")).get("proceeds"))
+                    - remaining_after_cash
+                ),
+                _int_or_zero(_mapping(action.get("payload")).get("proceeds")),
+                str(_mapping(action.get("payload")).get("property_id", "")),
+            ),
+        )
+        return (
+            _legal_action_template(candidates[0], "sell_improvements_before_mortgage")
+            if candidates
+            else None
+        )
+
+    if recommendation == "mortgage_only_enough_for_debt":
+        ranked_options = _ranked_mortgage_options(
+            state,
+            actor_id,
+            mortgage_actions,
+            remaining_after_cash=remaining_after_cash,
+        )
+        recommended_property_ids = _recommended_mortgage_property_ids(
+            ranked_options,
+            remaining_after_cash=remaining_after_cash,
+        )
+        for property_id in recommended_property_ids:
+            matching_action = next(
+                (
+                    action
+                    for action in mortgage_actions
+                    if _string_or_none(_mapping(action.get("payload")).get("property_id"))
+                    == property_id
+                ),
+                None,
+            )
+            if matching_action is not None:
+                return _legal_action_template(
+                    matching_action,
+                    "mortgage_only_enough_for_active_debt",
+                )
+        return (
+            _legal_action_template(mortgage_actions[0], "mortgage_only_enough_for_active_debt")
+            if mortgage_actions and outstanding_debt > 0
+            else None
+        )
+
+    return None
+
+
+def _legal_action_template(
+    action: Mapping[str, Any],
+    reason_code: str,
+) -> dict[str, Any] | None:
+    action_type = _string_or_none(action.get("type"))
+    if action_type is None:
+        return None
+    return {
+        "type": action_type,
+        "payload": dict(_mapping(action.get("payload"))),
+        "reason_code": reason_code,
     }
 
 
@@ -2844,6 +2945,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
             "When auction_guidance provides recommended_bid_amount, use that amount for BID_AUCTION instead of blindly submitting the legal minimum payload.",
             "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
+            "When debt_resolution_guidance provides recommended_debt_action, use that exact legal action payload before lower-priority liquidation or bankruptcy actions.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a color group, railroad set, utility set, or blocking an opponent's set.",
             "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",
