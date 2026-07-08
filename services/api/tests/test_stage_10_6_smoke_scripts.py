@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -81,6 +82,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "railroad_purchase_with_healthy_cash" in source
     assert "healthy_cash_avoids_mortgage" in source
     assert "active_debt_uses_mortgage" in source
+    assert "active_debt_settles_cash" in source
+    assert "active_debt_sells_house_before_mortgage" in source
     assert "healthy_cash_unmortgages_rent_property" in source
     assert "jail_card_used_before_fine_or_roll" in source
     assert "auction_bid_within_valuation" in source
@@ -95,6 +98,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "BUY_HOUSE" in source
     assert "BUY_PROPERTY" in source
     assert "ROLL_DICE" in source
+    assert "SETTLE_DEBT" in source
+    assert "SELL_HOUSE" in source
     assert "MORTGAGE_PROPERTY" in source
     assert "UNMORTGAGE_PROPERTY" in source
     assert "USE_GET_OUT_OF_JAIL_CARD" in source
@@ -119,6 +124,68 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "accept_reject" in source
     assert "expected reject" in source
     assert "treating as pass" not in source
+
+
+def test_live_codex_strategy_smoke_debt_cases_have_targeted_legal_actions() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    settle_case = cases["active_debt_settles_cash"]
+    settle_state = settle_case.state_factory(settle_case.game_id)
+    settle_pack = module.build_ai_context_pack(
+        settle_state,
+        player_id=str(settle_case.actor_player_id),
+        decision_type=settle_case.decision_type,
+    )
+    settle_action_types = {action["type"] for action in settle_pack["legal_actions"]}
+    assert {"SETTLE_DEBT", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"}.issubset(
+        settle_action_types
+    )
+    assert settle_pack["action_selection_guidance"]["recommended_action_types"] == ["SETTLE_DEBT"]
+    assert settle_pack["action_selection_guidance"]["debt_resolution_guidance"]["recommendation"] == (
+        "settle_cash_debt"
+    )
+
+    sell_case = cases["active_debt_sells_house_before_mortgage"]
+    sell_state = sell_case.state_factory(sell_case.game_id)
+    sell_pack = module.build_ai_context_pack(
+        sell_state,
+        player_id=str(sell_case.actor_player_id),
+        decision_type=sell_case.decision_type,
+    )
+    sell_house_actions = [
+        action for action in sell_pack["legal_actions"] if action["type"] == "SELL_HOUSE"
+    ]
+    mortgage_actions = [
+        action for action in sell_pack["legal_actions"] if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert sell_house_actions == [
+        {
+            "actor_id": str(module.AI_PLAYER_ID),
+            "type": "SELL_HOUSE",
+            "payload": {"property_id": "property_oriental_avenue", "proceeds": 25},
+            "description": "Sell an improvement from Oriental Avenue.",
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "property_id": {"type": "string", "const": "property_oriental_avenue"},
+                    "proceeds": {"type": "integer", "const": 25},
+                },
+                "required": ["property_id"],
+            },
+            "expected_state_hash": sell_state.state_hash(),
+            "expected_event_sequence": sell_state.event_sequence,
+        }
+    ]
+    assert any(
+        action["payload"]["property_id"] == "property_b_and_o_railroad"
+        for action in mortgage_actions
+    )
+    assert sell_pack["action_selection_guidance"]["recommended_action_types"] == ["SELL_HOUSE"]
+    assert sell_pack["action_selection_guidance"]["debt_resolution_guidance"]["recommendation"] == (
+        "sell_improvements_before_mortgage"
+    )
 
 
 def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,5 +327,15 @@ def _load_product_smoke_module():
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_live_strategy_smoke_module():
+    spec = importlib.util.spec_from_file_location("live_codex_ai_strategy_smoke", LIVE_STRATEGY_SMOKE_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module

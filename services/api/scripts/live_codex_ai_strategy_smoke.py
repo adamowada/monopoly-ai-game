@@ -105,6 +105,20 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_active_debt_uses_mortgage,
         ),
         StrategySmokeCase(
+            name="active_debt_settles_cash",
+            game_id=UUID("00000000-0000-0000-0000-00000000b213"),
+            decision_type="action_decision",
+            state_factory=_active_debt_settlement_state,
+            verifier=_verify_active_debt_settles_cash,
+        ),
+        StrategySmokeCase(
+            name="active_debt_sells_house_before_mortgage",
+            game_id=UUID("00000000-0000-0000-0000-00000000b214"),
+            decision_type="action_decision",
+            state_factory=_active_debt_sell_house_state,
+            verifier=_verify_active_debt_sells_house_before_mortgage,
+        ),
+        StrategySmokeCase(
             name="healthy_cash_unmortgages_rent_property",
             game_id=UUID("00000000-0000-0000-0000-00000000b211"),
             decision_type="action_decision",
@@ -249,6 +263,26 @@ def _verify_active_debt_uses_mortgage(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "action_decision"
     assert action.get("type") == "MORTGAGE_PROPERTY", f"expected MORTGAGE_PROPERTY, got {action.get('type')}"
     assert payload.get("property_id") == "property_b_and_o_railroad"
+
+
+def _verify_active_debt_settles_cash(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "SETTLE_DEBT", f"expected SETTLE_DEBT, got {action.get('type')}"
+    assert payload.get("amount") == 75
+
+
+def _verify_active_debt_sells_house_before_mortgage(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "SELL_HOUSE", f"expected SELL_HOUSE, got {action.get('type')}"
+    assert payload.get("property_id") == "property_oriental_avenue"
+    if "proceeds" in payload:
+        assert payload.get("proceeds") == 25
 
 
 def _verify_healthy_cash_unmortgages_rent_property(parsed: dict[str, Any]) -> None:
@@ -533,6 +567,32 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "active_debt_settles_cash":
+        return (
+            {
+                "id": "live-strategy-settle-cash-debt",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has $75 cash and owes Ada $75. "
+                    "SETTLE_DEBT pays the active debt in full while preserving all property. "
+                    "Choose SETTLE_DEBT before SELL_HOUSE, MORTGAGE_PROPERTY, or DECLARE_BANKRUPTCY."
+                ),
+            },
+        )
+    if case.name == "active_debt_sells_house_before_mortgage":
+        return (
+            {
+                "id": "live-strategy-sell-house-before-mortgage",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has $0 cash, owes Ada $25, owns the "
+                    "Light Blue group with one house on property_oriental_avenue, and owns "
+                    "property_b_and_o_railroad. SELL_HOUSE raises exactly $25 and keeps "
+                    "the railroad unmortgaged. Choose SELL_HOUSE before MORTGAGE_PROPERTY "
+                    "or DECLARE_BANKRUPTCY."
+                ),
+            },
+        )
     if case.name == "healthy_cash_unmortgages_rent_property":
         return (
             {
@@ -781,6 +841,85 @@ def _active_debt_mortgage_state(game_id: UUID) -> GameState:
                 "debtor_id": str(AI_PLAYER_ID),
                 "creditor_id": str(OTHER_PLAYER_ID),
                 "amount_owed": 75,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _active_debt_settlement_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-debt-settlement")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 75
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id == "property_b_and_o_railroad"
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "property_ownership": ownership,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": 75,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _active_debt_sell_house_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-debt-sell-house")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 0
+    owned_property_ids = {
+        "property_oriental_avenue",
+        "property_vermont_avenue",
+        "property_connecticut_avenue",
+        "property_b_and_o_railroad",
+    }
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+            "houses": 1 if item.property_id == "property_oriental_avenue" else 0,
+        }
+        if item.property_id in owned_property_ids
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "property_ownership": ownership,
+            "bank_inventory": {
+                **state.bank_inventory.model_dump(mode="python"),
+                "houses": 31,
+            },
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": 25,
                 "amount_paid": 0,
                 "reason": "rent",
                 "negotiation_allowed": False,
