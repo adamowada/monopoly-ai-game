@@ -3,7 +3,7 @@
 Set RUN_LIVE_CODEX_AI=1 to run real Codex AI strategy probes. The command uses
 `codex exec --json`, `--model gpt-5.4-mini`, `--output-schema`, and
 model_reasoning_effort="low", then validates that the live model makes
-strategically useful Monopoly decisions in debug-style game states.
+strategically useful Monopoly decisions in four-AI debug-style game states.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ LIVE_CODEX_ENV_VAR = "RUN_LIVE_CODEX_AI"
 AI_PLAYER_ID = UUID("00000000-0000-0000-0000-00000000b102")
 OTHER_PLAYER_ID = UUID("00000000-0000-0000-0000-00000000b103")
 THIRD_PLAYER_ID = UUID("00000000-0000-0000-0000-00000000b104")
+FOURTH_PLAYER_ID = UUID("00000000-0000-0000-0000-00000000b105")
 NEGOTIATION_ID = UUID("00000000-0000-0000-0000-00000000b301")
 ORANGE_PROPERTY_IDS = {
     "property_st_james_place",
@@ -384,6 +385,7 @@ def _base_state(game_id: UUID, *, seed: str) -> GameState:
             PlayerSetup(id=str(AI_PLAYER_ID), name="Grace", kind="ai"),
             PlayerSetup(id=str(OTHER_PLAYER_ID), name="Ada", kind="ai"),
             PlayerSetup(id=str(THIRD_PLAYER_ID), name="Linus", kind="ai"),
+            PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai"),
         ),
     )
 

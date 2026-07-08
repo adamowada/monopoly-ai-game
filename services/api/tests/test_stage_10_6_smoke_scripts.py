@@ -81,6 +81,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
+    assert "FOURTH_PLAYER_ID" in source
+    assert 'PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai")' in source
     assert "BUY_HOUSE" in source
     assert "open_negotiation" in source
     assert "deal_proposal" in source
