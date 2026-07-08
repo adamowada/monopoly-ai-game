@@ -1994,11 +1994,25 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     if (typeof window === "undefined" || typeof window.scrollTo !== "function") {
       return;
     }
-    if (window.scrollX === 0 && window.scrollY === 0) {
-      return;
-    }
 
-    window.scrollTo({ behavior: "auto", left: 0, top: 0 });
+    const resetPageScroll = () => {
+      if (window.scrollX === 0 && window.scrollY === 0) {
+        return;
+      }
+      window.scrollTo({ behavior: "auto", left: 0, top: 0 });
+    };
+
+    resetPageScroll();
+    const frameId =
+      typeof window.requestAnimationFrame === "function" ? window.requestAnimationFrame(resetPageScroll) : null;
+    const timeoutId = window.setTimeout(resetPageScroll, 100);
+
+    return () => {
+      if (frameId !== null && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(frameId);
+      }
+      window.clearTimeout(timeoutId);
+    };
   }, [gameId]);
 
   const gameQuery = useQuery({

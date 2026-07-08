@@ -1472,6 +1472,48 @@ describe("GamePlaySurface turn controls", () => {
     }
   });
 
+  it("resets browser-restored setup scroll after the game surface paints", async () => {
+    const originalScrollXDescriptor = Object.getOwnPropertyDescriptor(window, "scrollX");
+    const originalScrollYDescriptor = Object.getOwnPropertyDescriptor(window, "scrollY");
+    const scrollTo = vi.fn();
+    let simulatedScrollY = 0;
+    vi.stubGlobal("scrollTo", scrollTo);
+    Object.defineProperty(window, "scrollX", {
+      configurable: true,
+      get: () => 0,
+    });
+    Object.defineProperty(window, "scrollY", {
+      configurable: true,
+      get: () => simulatedScrollY,
+    });
+
+    try {
+      renderSurface(baseFetchMock());
+
+      await screen.findByRole("region", { name: "Game log" });
+      expect(scrollTo).not.toHaveBeenCalled();
+      simulatedScrollY = 679;
+      await waitFor(() =>
+        expect(scrollTo).toHaveBeenCalledWith({
+          behavior: "auto",
+          left: 0,
+          top: 0,
+        }),
+      );
+    } finally {
+      if (originalScrollXDescriptor) {
+        Object.defineProperty(window, "scrollX", originalScrollXDescriptor);
+      } else {
+        Reflect.deleteProperty(window, "scrollX");
+      }
+      if (originalScrollYDescriptor) {
+        Object.defineProperty(window, "scrollY", originalScrollYDescriptor);
+      } else {
+        Reflect.deleteProperty(window, "scrollY");
+      }
+    }
+  });
+
   it("renders backend die_1 and die_2 dice payloads as pips and total instead of placeholders", async () => {
     let accepted = false;
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
