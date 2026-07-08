@@ -705,6 +705,11 @@ def _action_selection_guidance(
         for opportunity in development_opportunities
         if not bool(opportunity.get("cash_after_cost_is_healthy"))
     ]
+    recommended_development_action = (
+        _development_action_template(recommended_development_opportunities[0])
+        if recommended_development_opportunities
+        else None
+    )
     recommended_action_types: list[str] = []
     recommended_before_roll: list[str] = []
     lower_priority_action_types: list[str] = []
@@ -929,6 +934,7 @@ def _action_selection_guidance(
         "purchase_guidance": purchase_guidance,
         "development_opportunities": development_opportunities,
         "recommended_development_opportunities": recommended_development_opportunities,
+        "recommended_development_action": recommended_development_action,
         "deferred_development_opportunities": deferred_development_opportunities,
         "auction_guidance": auction_guidance,
         "debt_resolution_guidance": debt_resolution_guidance,
@@ -936,6 +942,29 @@ def _action_selection_guidance(
         "unmortgage_guidance": unmortgage_guidance,
         "jail_guidance": jail_guidance,
         "turn_guidance": turn_guidance,
+    }
+
+
+def _development_action_template(opportunity: Mapping[str, Any]) -> dict[str, Any] | None:
+    property_id = _string_or_none(opportunity.get("property_id"))
+    if property_id is None:
+        return None
+    cost = _int_or_zero(opportunity.get("cost"))
+    return {
+        "type": "BUY_HOUSE",
+        "payload": {
+            "property_id": property_id,
+            "cost": cost,
+        },
+        "reason_code": "highest_priority_even_monopoly_development",
+        "property_id": property_id,
+        "property_name": _string_or_none(opportunity.get("property_name")),
+        "group": _string_or_none(opportunity.get("group")),
+        "group_name": _string_or_none(opportunity.get("group_name")),
+        "development_priority_score": _int_or_zero(
+            opportunity.get("development_priority_score")
+        ),
+        "marginal_rent_gain": _int_or_zero(opportunity.get("marginal_rent_gain")),
     }
 
 
@@ -2810,6 +2839,7 @@ def _instruction_contract() -> dict[str, Any]:
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
             "When purchase_guidance recommends BUY_PROPERTY, choose BUY_PROPERTY over START_AUCTION unless cash_after_price, valuation, or blocking risk gives a concrete reason.",
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
+            "When action_selection_guidance provides recommended_development_action, use that BUY_HOUSE payload for monopoly development unless visible state makes it illegal.",
             "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
             "When auction_guidance provides recommended_bid_amount, use that amount for BID_AUCTION instead of blindly submitting the legal minimum payload.",

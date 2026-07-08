@@ -242,6 +242,20 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     guidance = pack["action_selection_guidance"]
     assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
     assert guidance["lower_priority_action_types"] == ["ROLL_DICE", "MORTGAGE_PROPERTY"]
+    assert guidance["recommended_development_action"] == {
+        "type": "BUY_HOUSE",
+        "payload": {
+            "property_id": "property_new_york_avenue",
+            "cost": 100,
+        },
+        "reason_code": "highest_priority_even_monopoly_development",
+        "property_id": "property_new_york_avenue",
+        "property_name": "New York Avenue",
+        "group": "orange",
+        "group_name": "Orange",
+        "development_priority_score": 1400,
+        "marginal_rent_gain": 64,
+    }
     assert [
         opportunity["property_id"] for opportunity in guidance["development_opportunities"]
     ] == [
@@ -264,6 +278,10 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     assert "complete color group" in guidance["turn_guidance"][0]
     assert any(
         "BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_development_action" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
     )
 
 
@@ -301,6 +319,7 @@ def test_context_pack_defers_monopoly_development_when_cash_after_cost_breaches_
 
     guidance = pack["action_selection_guidance"]
     assert "BUY_HOUSE" not in guidance["recommended_action_types_before_roll"]
+    assert guidance["recommended_development_action"] is None
     assert "ROLL_DICE" not in guidance["lower_priority_action_types"]
     assert "BUY_HOUSE" in guidance["lower_priority_action_types"]
     assert [

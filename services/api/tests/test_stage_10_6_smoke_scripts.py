@@ -244,6 +244,20 @@ def test_live_codex_strategy_smoke_prioritizes_stronger_development_group() -> N
         > opportunities[-1]["development_priority_score"]
     )
     assert opportunities[0]["marginal_rent_gain"] == 64
+    assert pack["action_selection_guidance"]["recommended_development_action"] == {
+        "type": "BUY_HOUSE",
+        "payload": {
+            "property_id": "property_new_york_avenue",
+            "cost": 100,
+        },
+        "reason_code": "highest_priority_even_monopoly_development",
+        "property_id": "property_new_york_avenue",
+        "property_name": "New York Avenue",
+        "group": "orange",
+        "group_name": "Orange",
+        "development_priority_score": opportunities[0]["development_priority_score"],
+        "marginal_rent_gain": 64,
+    }
     assert "development_priority_score" in pack["action_selection_guidance"]["turn_guidance"][0]
 
 
@@ -263,6 +277,7 @@ def test_live_codex_strategy_smoke_defers_low_cash_development() -> None:
     guidance = pack["action_selection_guidance"]
     assert "BUY_HOUSE" in {action["type"] for action in pack["legal_actions"]}
     assert "BUY_HOUSE" not in guidance["recommended_action_types_before_roll"]
+    assert guidance["recommended_development_action"] is None
     assert "BUY_HOUSE" in guidance["lower_priority_action_types"]
     assert guidance["recommended_development_opportunities"] == []
     assert len(guidance["deferred_development_opportunities"]) == 3
