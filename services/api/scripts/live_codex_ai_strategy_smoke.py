@@ -98,6 +98,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_healthy_cash_avoids_mortgage,
         ),
         StrategySmokeCase(
+            name="active_debt_uses_mortgage",
+            game_id=UUID("00000000-0000-0000-0000-00000000b209"),
+            decision_type="action_decision",
+            state_factory=_active_debt_mortgage_state,
+            verifier=_verify_active_debt_uses_mortgage,
+        ),
+        StrategySmokeCase(
             name="auction_bid_within_valuation",
             game_id=UUID("00000000-0000-0000-0000-00000000b206"),
             decision_type="action_decision",
@@ -212,6 +219,15 @@ def _verify_healthy_cash_avoids_mortgage(parsed: dict[str, Any]) -> None:
 
     assert parsed.get("decision_type") == "action_decision"
     assert action.get("type") == "ROLL_DICE", f"expected ROLL_DICE, got {action.get('type')}"
+
+
+def _verify_active_debt_uses_mortgage(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "MORTGAGE_PROPERTY", f"expected MORTGAGE_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_b_and_o_railroad"
 
 
 def _verify_auction_bid_within_valuation(parsed: dict[str, Any]) -> None:
@@ -438,6 +454,18 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
 
 
 def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ...]:
+    if case.name == "active_debt_uses_mortgage":
+        return (
+            {
+                "id": "live-strategy-mortgage-for-active-debt",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has $0 cash, owes Ada $75, and owns "
+                    "property_b_and_o_railroad. MORTGAGE_PROPERTY raises $100 and avoids "
+                    "DECLARE_BANKRUPTCY. Choose MORTGAGE_PROPERTY for property_b_and_o_railroad."
+                ),
+            },
+        )
     if case.name == "healthy_cash_avoids_mortgage":
         return (
             {
@@ -599,6 +627,40 @@ def _healthy_cash_mortgage_state(game_id: UUID) -> GameState:
         for item in state.property_ownership
     ]
     return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _active_debt_mortgage_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-debt-mortgage")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 0
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id == "property_b_and_o_railroad"
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "property_ownership": ownership,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": 75,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
 
 
 def _auction_bid_state(game_id: UUID) -> GameState:

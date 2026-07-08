@@ -80,6 +80,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "low" in source
     assert "railroad_purchase_with_healthy_cash" in source
     assert "healthy_cash_avoids_mortgage" in source
+    assert "active_debt_uses_mortgage" in source
     assert "auction_bid_within_valuation" in source
     assert "auction_pass_above_valuation" in source
     assert "orange_monopoly_development" in source
@@ -92,6 +93,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "BUY_PROPERTY" in source
     assert "ROLL_DICE" in source
     assert "MORTGAGE_PROPERTY" in source
+    assert "DECLARE_BANKRUPTCY" in source
     assert "property_b_and_o_railroad" in source
     assert "START_AUCTION" in source
     assert "BID_AUCTION" in source
