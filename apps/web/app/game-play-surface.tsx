@@ -417,9 +417,21 @@ function cashTransferSummary(game: GameMetadata, events: AcceptedEvent[], event:
   }
 
   const pairedEvent = [...events]
-    .filter((candidate) => candidate.id !== event.id && candidate.event_type === "PLAYER_CASH_DELTA")
+    .filter((candidate) => {
+      if (
+        candidate.id === event.id ||
+        candidate.event_type !== "PLAYER_CASH_DELTA" ||
+        candidate.actor_player_id !== event.actor_player_id ||
+        Math.abs(candidate.sequence - event.sequence) !== 1 ||
+        eventPayloadNumber(candidate, "amount") !== -amount
+      ) {
+        return false;
+      }
+      const candidatePlayerId = eventPayloadString(candidate, "player_id") ?? candidate.actor_player_id;
+      return candidatePlayerId !== playerId;
+    })
     .sort((left, right) => Math.abs(left.sequence - event.sequence) - Math.abs(right.sequence - event.sequence))
-    .find((candidate) => eventPayloadNumber(candidate, "amount") === -amount);
+    .at(0);
   const pairedPlayerId = pairedEvent ? (eventPayloadString(pairedEvent, "player_id") ?? pairedEvent.actor_player_id) : null;
 
   if (pairedPlayerId && amount > 0) {

@@ -1072,6 +1072,51 @@ describe("GamePlaySurface turn controls", () => {
     expect(await screen.findByRole("region", { name: "AI audit" })).toBeVisible();
   });
 
+  it("does not pair unrelated bank payments with nearby cash receipts in the running log", async () => {
+    renderSurface(
+      baseFetchMock({
+        events: eventsFixture([
+          {
+            id: "event-bank-payment",
+            game_id: gameId,
+            sequence: 1,
+            actor_player_id: adaId,
+            event_type: "PLAYER_CASH_DELTA",
+            payload: { player_id: adaId, amount: -200 },
+            state_hash: "state-1",
+            created_at: "2026-07-04T00:01:00.000Z",
+          },
+          {
+            id: "event-deed",
+            game_id: gameId,
+            sequence: 2,
+            actor_player_id: adaId,
+            event_type: "PROPERTY_OWNER_SET",
+            payload: { owner_id: adaId, property_id: "property_pennsylvania_railroad" },
+            state_hash: "state-2",
+            created_at: "2026-07-04T00:01:01.000Z",
+          },
+          {
+            id: "event-go-salary",
+            game_id: gameId,
+            sequence: 3,
+            actor_player_id: graceId,
+            event_type: "PLAYER_CASH_DELTA",
+            payload: { player_id: graceId, amount: 200 },
+            state_hash: "state-3",
+            created_at: "2026-07-04T00:01:02.000Z",
+          },
+        ]),
+      }),
+    );
+
+    const log = await screen.findByRole("region", { name: "Game log" });
+
+    await waitFor(() => expect(log).toHaveTextContent("Ada paid $200."));
+    expect(log).toHaveTextContent("Grace received $200.");
+    expect(log).not.toHaveTextContent("Ada paid Grace $200.");
+  });
+
   it("prioritizes active controls, current player holdings, and one dynamic turn context", async () => {
     const fetchMock = baseFetchMock({
       state: holdingsStateFixture(),
