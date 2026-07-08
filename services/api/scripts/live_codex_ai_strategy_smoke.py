@@ -225,6 +225,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_near_monopoly_negotiation,
         ),
         StrategySmokeCase(
+            name="railroad_near_set_negotiation",
+            game_id=UUID("00000000-0000-0000-0000-00000000b228"),
+            decision_type="open_negotiation",
+            state_factory=_railroad_near_set_state,
+            verifier=_verify_railroad_near_set_negotiation,
+        ),
+        StrategySmokeCase(
             name="multiple_near_monopolies_prioritizes_orange_negotiation",
             game_id=UUID("00000000-0000-0000-0000-00000000b216"),
             decision_type="open_negotiation",
@@ -515,6 +522,18 @@ def _verify_orange_near_monopoly_negotiation(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "open_negotiation"
     assert participant_player_ids == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
     assert context.get("target_property_id") == "property_tennessee_avenue"
+    assert context.get("target_owner_id") == str(OTHER_PLAYER_ID)
+
+
+def _verify_railroad_near_set_negotiation(parsed: dict[str, Any]) -> None:
+    negotiation = _dict(parsed.get("negotiation"))
+    participant_player_ids = [
+        str(player_id) for player_id in negotiation.get("participant_player_ids", [])
+    ]
+    context = _dict(negotiation.get("context"))
+    assert parsed.get("decision_type") == "open_negotiation"
+    assert participant_player_ids == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert context.get("target_property_id") == "property_short_line_railroad"
     assert context.get("target_owner_id") == str(OTHER_PLAYER_ID)
 
 
@@ -1053,6 +1072,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "completion trades: Connecticut Avenue for Light Blue and Tennessee Avenue "
                     "for Orange. Prioritize Tennessee Avenue because Orange has stronger "
                     "developed-rent pressure. Open negotiation with Ada for property_tennessee_avenue."
+                ),
+            },
+        )
+    if case.name == "railroad_near_set_negotiation":
+        return (
+            {
+                "id": "live-strategy-railroad-near-set-negotiation",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this open_negotiation decision, Grace owns Reading Railroad, "
+                    "Pennsylvania Railroad, and B&O Railroad while Ada owns "
+                    "property_short_line_railroad. Open negotiation with Ada for "
+                    "property_short_line_railroad to complete all four railroads."
                 ),
             },
         )
@@ -1737,6 +1769,32 @@ def _orange_near_monopoly_state(game_id: UUID) -> GameState:
         "property_st_james_place": str(AI_PLAYER_ID),
         "property_new_york_avenue": str(AI_PLAYER_ID),
         "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": owner_by_property_id[item.property_id],
+            "mortgaged": False,
+            "houses": 0,
+            "hotel": False,
+        }
+        if item.property_id in owner_by_property_id
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _railroad_near_set_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-railroad-near-set")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 1500
+    players[1]["cash"] = 1500
+    owner_by_property_id = {
+        "property_reading_railroad": str(AI_PLAYER_ID),
+        "property_pennsylvania_railroad": str(AI_PLAYER_ID),
+        "property_b_and_o_railroad": str(AI_PLAYER_ID),
+        "property_short_line_railroad": str(OTHER_PLAYER_ID),
     }
     ownership = [
         {

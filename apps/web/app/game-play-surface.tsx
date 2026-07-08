@@ -81,9 +81,10 @@ type AiNegotiationStepRequest = {
 };
 
 type AutoTradeOpportunity = {
-  kind: "complete_street_group";
+  kind: "complete_street_group" | "complete_railroad_group" | "complete_utility_group";
   group: string;
   group_name: string;
+  property_group_kind: (typeof PROPERTY_GROUPS)[number]["kind"];
   actor_owned_property_ids: string[];
   actor_owned_property_names: string[];
   target_property_id: string;
@@ -939,7 +940,7 @@ function autoTradeOpportunityFor(
     const properties = group.property_ids
       .map((propertyId) => propertyById(propertyId))
       .filter((property): property is StaticDataProperty => Boolean(property));
-    if (properties.length === 0 || properties.some((property) => property.kind !== "street")) {
+    if (properties.length === 0) {
       continue;
     }
 
@@ -961,9 +962,10 @@ function autoTradeOpportunityFor(
     }
 
     return {
-      kind: "complete_street_group",
+      kind: completionTradeKind(group.kind),
       group: group.id,
       group_name: group.name,
+      property_group_kind: group.kind,
       actor_owned_property_ids: actorOwned.map((property) => property.id),
       actor_owned_property_names: actorOwned.map((property) => property.name),
       target_property_id: targetProperty.id,
@@ -971,11 +973,31 @@ function autoTradeOpportunityFor(
       target_owner_id: targetOwner.id,
       target_owner_name: targetOwner.name,
       participants,
-      strategic_reason: `Completing ${group.name} unlocks development and materially raises rent pressure.`,
+      strategic_reason: completionStrategicReason(group.kind, group.name),
     };
   }
 
   return null;
+}
+
+function completionTradeKind(groupKind: (typeof PROPERTY_GROUPS)[number]["kind"]): AutoTradeOpportunity["kind"] {
+  if (groupKind === "railroad") {
+    return "complete_railroad_group";
+  }
+  if (groupKind === "utility") {
+    return "complete_utility_group";
+  }
+  return "complete_street_group";
+}
+
+function completionStrategicReason(groupKind: (typeof PROPERTY_GROUPS)[number]["kind"], groupName: string): string {
+  if (groupKind === "railroad") {
+    return `Completing ${groupName} raises railroad rent tiers and strengthens set leverage.`;
+  }
+  if (groupKind === "utility") {
+    return `Completing ${groupName} doubles utility rent multipliers and strengthens set leverage.`;
+  }
+  return `Completing ${groupName} unlocks development and materially raises rent pressure.`;
 }
 
 function hasActiveNegotiationBetween(negotiations: Negotiation[], participantIds: string[]): boolean {

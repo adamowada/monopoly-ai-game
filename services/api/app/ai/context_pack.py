@@ -1440,7 +1440,7 @@ def _negotiation_strategy_guidance(
     actor_id: str,
     negotiations: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    trade_opportunities, deferred_trade_opportunities = _street_group_trade_opportunities(
+    trade_opportunities, deferred_trade_opportunities = _property_group_trade_opportunities(
         state,
         actor_id,
         negotiations,
@@ -1489,7 +1489,7 @@ def _open_negotiation_payload_template(opportunity: Mapping[str, Any]) -> dict[s
     group_name = _string_or_none(opportunity.get("group_name")) or "property group"
     opponent_player_name = _string_or_none(opportunity.get("opponent_player_name"))
     if (
-        opportunity.get("kind") == "block_opponent_street_group"
+        str(opportunity.get("kind", "")).startswith("block_opponent_")
         and opponent_player_name is not None
     ):
         topic = f"Trade for {target_property_name} to block {opponent_player_name}'s {group_name} monopoly"
@@ -1790,7 +1790,7 @@ def _deal_completion_evaluation(
     return None
 
 
-def _street_group_trade_opportunities(
+def _property_group_trade_opportunities(
     state: GameState,
     actor_id: str,
     negotiations: Sequence[Mapping[str, Any]],
@@ -1812,10 +1812,9 @@ def _street_group_trade_opportunities(
             for property_id in group.property_ids
             if property_id in properties_by_id
         ]
-        if not group_properties or any(
-            property_data.kind != "street" for property_data in group_properties
-        ):
+        if not group_properties:
             continue
+        group_kind = group.kind
 
         actor_owned_property_ids: list[str] = []
         target_ownerships = []
@@ -1843,58 +1842,62 @@ def _street_group_trade_opportunities(
                 )
                 if frozenset(participants) not in active_participant_sets:
                     if cash_budget_ceiling < target_property.price:
-                        deferred_opportunities.append(
-                            {
-                                "kind": "complete_street_group",
-                                "priority": "deferred_until_cash_offer_is_credible",
-                                "group": group.id,
-                                "group_name": group.name,
-                                "target_property_id": target_property.id,
-                                "target_property_name": target_property.name,
-                                "target_owner_id": target_owner_id,
-                                "target_owner_name": player_name_by_id.get(
-                                    target_owner_id, "Unknown player"
-                                ),
+                        deferred = {
+                            "kind": _completion_trade_kind(group_kind),
+                            "priority": "deferred_until_cash_offer_is_credible",
+                            "group": group.id,
+                            "group_name": group.name,
+                            "target_property_id": target_property.id,
+                            "target_property_name": target_property.name,
+                            "target_owner_id": target_owner_id,
+                            "target_owner_name": player_name_by_id.get(
+                                target_owner_id, "Unknown player"
+                            ),
+                            "cash_budget_floor": target_property.price,
+                            "cash_budget_ceiling": cash_budget_ceiling,
+                            "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                            "reason": (
+                                "Available cash above the healthy reserve cannot cover the target property list price."
+                            ),
+                        }
+                        if group_kind != "street":
+                            deferred["property_group_kind"] = group_kind
+                        deferred_opportunities.append(deferred)
+                    else:
+                        opportunity = {
+                            "kind": _completion_trade_kind(group_kind),
+                            "priority": "high",
+                            "group": group.id,
+                            "group_name": group.name,
+                            "actor_owned_property_ids": actor_owned_property_ids,
+                            "actor_owned_property_names": [
+                                properties_by_id[property_id].name
+                                for property_id in actor_owned_property_ids
+                            ],
+                            "target_property_id": target_property.id,
+                            "target_property_name": target_property.name,
+                            "target_owner_id": target_owner_id,
+                            "target_owner_name": player_name_by_id.get(
+                                target_owner_id, "Unknown player"
+                            ),
+                            "participants": participants,
+                            "strategic_reason": _completion_strategic_reason(
+                                group_kind, group.name
+                            ),
+                            "suggested_offer": {
                                 "cash_budget_floor": target_property.price,
                                 "cash_budget_ceiling": cash_budget_ceiling,
-                                "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
-                                "reason": (
-                                    "Available cash above the healthy reserve cannot cover the target property list price."
-                                ),
-                            }
-                        )
-                    else:
+                                "avoid_trading_away_group_property_ids": actor_owned_property_ids,
+                            },
+                        }
+                        if group_kind != "street":
+                            opportunity["property_group_kind"] = group_kind
                         opportunities.append(
                             (
-                                _street_group_completion_priority_score(
-                                    group_properties, group.house_cost
+                                _property_group_completion_priority_score(
+                                    group_kind, group_properties, group.house_cost
                                 ),
-                                {
-                                    "kind": "complete_street_group",
-                                    "priority": "high",
-                                    "group": group.id,
-                                    "group_name": group.name,
-                                    "actor_owned_property_ids": actor_owned_property_ids,
-                                    "actor_owned_property_names": [
-                                        properties_by_id[property_id].name
-                                        for property_id in actor_owned_property_ids
-                                    ],
-                                    "target_property_id": target_property.id,
-                                    "target_property_name": target_property.name,
-                                    "target_owner_id": target_owner_id,
-                                    "target_owner_name": player_name_by_id.get(
-                                        target_owner_id, "Unknown player"
-                                    ),
-                                    "participants": participants,
-                                    "strategic_reason": (
-                                        f"Completing {group.name} unlocks BUY_HOUSE development and materially raises rent pressure."
-                                    ),
-                                    "suggested_offer": {
-                                        "cash_budget_floor": target_property.price,
-                                        "cash_budget_ceiling": cash_budget_ceiling,
-                                        "avoid_trading_away_group_property_ids": actor_owned_property_ids,
-                                    },
-                                },
+                                opportunity,
                             )
                         )
 
@@ -1936,10 +1939,11 @@ def _street_group_trade_opportunities(
             if cash_budget_ceiling < target_property.price:
                 deferred_opportunities.append(
                     {
-                        "kind": "block_opponent_street_group",
+                        "kind": _blocking_trade_kind(group_kind),
                         "priority": "deferred_until_cash_offer_is_credible",
                         "group": group.id,
                         "group_name": group.name,
+                        **({"property_group_kind": group_kind} if group_kind != "street" else {}),
                         "opponent_player_id": opponent_id,
                         "opponent_player_name": player_name_by_id.get(
                             opponent_id, "Unknown player"
@@ -1962,12 +1966,18 @@ def _street_group_trade_opportunities(
 
             opportunities.append(
                 (
-                    _street_group_completion_priority_score(group_properties, group.house_cost) - 1,
+                    _property_group_completion_priority_score(
+                        group_kind,
+                        group_properties,
+                        group.house_cost,
+                    )
+                    - 1,
                     {
-                        "kind": "block_opponent_street_group",
+                        "kind": _blocking_trade_kind(group_kind),
                         "priority": "medium",
                         "group": group.id,
                         "group_name": group.name,
+                        **({"property_group_kind": group_kind} if group_kind != "street" else {}),
                         "opponent_player_id": opponent_id,
                         "opponent_player_name": player_name_by_id.get(
                             opponent_id, "Unknown player"
@@ -1987,7 +1997,7 @@ def _street_group_trade_opportunities(
                         "strategic_reason": (
                             f"Acquiring {target_property.name} blocks "
                             f"{player_name_by_id.get(opponent_id, 'Unknown player')} from completing "
-                            f"{group.name} and preserves monopoly defense."
+                            f"{group.name} and preserves set defense."
                         ),
                         "suggested_offer": {
                             "cash_budget_floor": target_property.price,
@@ -2013,6 +2023,64 @@ def _street_group_trade_opportunities(
         )
     ]
     return sorted_opportunities, sorted(deferred_opportunities, key=sort_key)
+
+
+def _completion_trade_kind(group_kind: str) -> str:
+    if group_kind == "railroad":
+        return "complete_railroad_group"
+    if group_kind == "utility":
+        return "complete_utility_group"
+    return "complete_street_group"
+
+
+def _blocking_trade_kind(group_kind: str) -> str:
+    if group_kind == "railroad":
+        return "block_opponent_railroad_group"
+    if group_kind == "utility":
+        return "block_opponent_utility_group"
+    return "block_opponent_street_group"
+
+
+def _completion_strategic_reason(group_kind: str, group_name: str) -> str:
+    if group_kind == "railroad":
+        return f"Completing {group_name} raises railroad rent tiers and strengthens set leverage."
+    if group_kind == "utility":
+        return f"Completing {group_name} doubles utility rent multipliers and strengthens set leverage."
+    return f"Completing {group_name} unlocks BUY_HOUSE development and materially raises rent pressure."
+
+
+def _property_group_completion_priority_score(
+    group_kind: str,
+    group_properties: Sequence[Any],
+    house_cost: int | None,
+) -> int:
+    if group_kind == "railroad":
+        return max(
+            (
+                max(
+                    (_int_or_zero(rent) for rent in (property_data.rent_by_owned_count or ())),
+                    default=0,
+                )
+                for property_data in group_properties
+            ),
+            default=0,
+        )
+    if group_kind == "utility":
+        return max(
+            (
+                max(
+                    (
+                        _int_or_zero(multiplier)
+                        for multiplier in (property_data.rent_multipliers or ())
+                    ),
+                    default=0,
+                )
+                * property_data.price
+                for property_data in group_properties
+            ),
+            default=0,
+        )
+    return _street_group_completion_priority_score(group_properties, house_cost)
 
 
 def _street_group_completion_priority_score(
@@ -2252,7 +2320,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
             "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
-            "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a street group or blocking an opponent's street group.",
+            "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a color group, railroad set, utility set, or blocking an opponent's set.",
             "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",
             "For open_negotiation, open_negotiation.negotiation.context must be a JSON object encoded as a JSON string, not prose text.",
             "For deal_proposal, deal_proposal.deal.terms must be a valid JSON object string. Do not prefix the string with labels such as structured_deal:.",

@@ -404,6 +404,100 @@ def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
     assert "open_negotiation.negotiation.context must be a JSON object" in instruction_text
 
 
+def test_context_pack_surfaces_near_railroad_set_trade_opportunities() -> None:
+    state = _state_with_railroad_near_set()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"] == {
+        "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "context": {
+            "topic": "Trade for Short Line Railroad to complete Railroads",
+            "target_property_id": "property_short_line_railroad",
+            "target_property_name": "Short Line Railroad",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "strategic_reason": (
+                "Completing Railroads raises railroad rent tiers and strengthens set leverage."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 200,
+                "cash_budget_ceiling": 300,
+                "avoid_trading_away_group_property_ids": [
+                    "property_reading_railroad",
+                    "property_pennsylvania_railroad",
+                    "property_b_and_o_railroad",
+                ],
+            },
+        },
+    }
+    assert guidance["trade_opportunities"] == [
+        {
+            "kind": "complete_railroad_group",
+            "priority": "high",
+            "group": "railroad",
+            "group_name": "Railroads",
+            "property_group_kind": "railroad",
+            "actor_owned_property_ids": [
+                "property_reading_railroad",
+                "property_pennsylvania_railroad",
+                "property_b_and_o_railroad",
+            ],
+            "actor_owned_property_names": [
+                "Reading Railroad",
+                "Pennsylvania Railroad",
+                "B&O Railroad",
+            ],
+            "target_property_id": "property_short_line_railroad",
+            "target_property_name": "Short Line Railroad",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "strategic_reason": (
+                "Completing Railroads raises railroad rent tiers and strengthens set leverage."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 200,
+                "cash_budget_ceiling": 300,
+                "avoid_trading_away_group_property_ids": [
+                    "property_reading_railroad",
+                    "property_pennsylvania_railroad",
+                    "property_b_and_o_railroad",
+                ],
+            },
+        }
+    ]
+
+
+def test_context_pack_surfaces_near_utility_set_trade_opportunities() -> None:
+    state = _state_with_utility_near_set()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"]["context"] == {
+        "topic": "Trade for Water Works to complete Utilities",
+        "target_property_id": "property_water_works",
+        "target_property_name": "Water Works",
+        "target_owner_id": str(OTHER_PLAYER_ID),
+        "target_owner_name": "Ada",
+        "strategic_reason": (
+            "Completing Utilities doubles utility rent multipliers and strengthens set leverage."
+        ),
+        "suggested_offer": {
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 225,
+            "avoid_trading_away_group_property_ids": ["property_electric_company"],
+        },
+    }
+    assert guidance["trade_opportunities"][0]["kind"] == "complete_utility_group"
+    assert guidance["trade_opportunities"][0]["property_group_kind"] == "utility"
+    assert guidance["trade_opportunities"][0]["target_property_id"] == "property_water_works"
+
+
 def test_context_pack_prioritizes_stronger_near_monopoly_trade_opportunity() -> None:
     state = _state_with_multiple_near_monopolies()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
@@ -468,7 +562,7 @@ def test_context_pack_surfaces_blocking_opponent_near_monopoly_trade_opportunity
             "opponent_player_id": str(OTHER_PLAYER_ID),
             "opponent_player_name": "Ada",
             "strategic_reason": (
-                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves monopoly defense."
+                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves set defense."
             ),
             "suggested_offer": {
                 "cash_budget_floor": 180,
@@ -499,7 +593,7 @@ def test_context_pack_surfaces_blocking_opponent_near_monopoly_trade_opportunity
             "target_owner_name": "Lin",
             "participants": [str(AI_PLAYER_ID), str(THIRD_PLAYER_ID)],
             "strategic_reason": (
-                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves monopoly defense."
+                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves set defense."
             ),
             "suggested_offer": {
                 "cash_budget_floor": 180,
@@ -1683,6 +1777,54 @@ def _state_with_orange_near_monopoly(*, ai_cash: int = 1500) -> GameState:
         "property_st_james_place": str(AI_PLAYER_ID),
         "property_new_york_avenue": str(AI_PLAYER_ID),
         "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_railroad_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_reading_railroad": str(AI_PLAYER_ID),
+        "property_pennsylvania_railroad": str(AI_PLAYER_ID),
+        "property_b_and_o_railroad": str(AI_PLAYER_ID),
+        "property_short_line_railroad": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_utility_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_electric_company": str(AI_PLAYER_ID),
+        "property_water_works": str(OTHER_PLAYER_ID),
     }
     return state.model_copy(
         update={
