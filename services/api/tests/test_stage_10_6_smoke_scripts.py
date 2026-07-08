@@ -11,7 +11,9 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCT_SMOKE_PATH = REPO_ROOT / "scripts" / "product_smoke.py"
 LIVE_SMOKE_PATH = REPO_ROOT / "services" / "api" / "scripts" / "live_codex_ai_smoke.py"
-LIVE_STRATEGY_SMOKE_PATH = REPO_ROOT / "services" / "api" / "scripts" / "live_codex_ai_strategy_smoke.py"
+LIVE_STRATEGY_SMOKE_PATH = (
+    REPO_ROOT / "services" / "api" / "scripts" / "live_codex_ai_strategy_smoke.py"
+)
 API_DOCKERFILE_PATH = REPO_ROOT / "services" / "api" / "Dockerfile"
 
 
@@ -80,6 +82,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "model_reasoning_effort" in source
     assert "low" in source
     assert "railroad_purchase_with_healthy_cash" in source
+    assert "railroad_purchase_completes_set_with_thin_cash" in source
     assert "purchase_completes_color_group_with_thin_cash" in source
     assert "purchase_blocks_opponent_color_group_with_thin_cash" in source
     assert "healthy_cash_avoids_mortgage" in source
@@ -134,6 +137,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "marginal_rent_gain" in source
     assert "cash reserve floor" in source
     assert "property_reading_railroad" in source
+    assert "property_short_line_railroad" in source
+    assert "property_pennsylvania_railroad" in source
     assert "open_negotiation" in source
     assert "deal_proposal" in source
     assert "immediate_cash_transfer" in source
@@ -163,13 +168,11 @@ def test_live_codex_strategy_smoke_debt_cases_have_targeted_legal_actions() -> N
         decision_type=settle_case.decision_type,
     )
     settle_action_types = {action["type"] for action in settle_pack["legal_actions"]}
-    assert {"SETTLE_DEBT", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"}.issubset(
-        settle_action_types
-    )
+    assert {"SETTLE_DEBT", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"}.issubset(settle_action_types)
     assert settle_pack["action_selection_guidance"]["recommended_action_types"] == ["SETTLE_DEBT"]
-    assert settle_pack["action_selection_guidance"]["debt_resolution_guidance"]["recommendation"] == (
-        "settle_cash_debt"
-    )
+    assert settle_pack["action_selection_guidance"]["debt_resolution_guidance"][
+        "recommendation"
+    ] == ("settle_cash_debt")
 
     sell_case = cases["active_debt_sells_house_before_mortgage"]
     sell_state = sell_case.state_factory(sell_case.game_id)
@@ -227,9 +230,16 @@ def test_live_codex_strategy_smoke_prioritizes_stronger_development_group() -> N
     )
 
     opportunities = pack["action_selection_guidance"]["development_opportunities"]
-    assert [opportunity["group"] for opportunity in opportunities[:3]] == ["orange", "orange", "orange"]
+    assert [opportunity["group"] for opportunity in opportunities[:3]] == [
+        "orange",
+        "orange",
+        "orange",
+    ]
     assert opportunities[0]["property_id"] == "property_new_york_avenue"
-    assert opportunities[0]["development_priority_score"] > opportunities[-1]["development_priority_score"]
+    assert (
+        opportunities[0]["development_priority_score"]
+        > opportunities[-1]["development_priority_score"]
+    )
     assert opportunities[0]["marginal_rent_gain"] == 64
     assert "development_priority_score" in pack["action_selection_guidance"]["turn_guidance"][0]
 
@@ -313,6 +323,32 @@ def test_live_codex_strategy_smoke_purchase_blocks_opponent_group_completion() -
     ]
 
 
+def test_live_codex_strategy_smoke_purchase_completes_railroad_set() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["railroad_purchase_completes_set_with_thin_cash"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["action_selection_guidance"]["purchase_guidance"]
+    assert guidance["property_id"] == "property_short_line_railroad"
+    assert guidance["property_kind"] == "railroad"
+    assert guidance["recommendation"] == "buy_property_to_complete_group"
+    assert guidance["cash_after_price"] == 200
+    assert guidance["completes_property_group"] is True
+    assert guidance["same_group_owned_property_ids"] == [
+        "property_b_and_o_railroad",
+        "property_pennsylvania_railroad",
+        "property_reading_railroad",
+    ]
+
+
 def test_live_codex_strategy_smoke_blocks_opponent_near_monopoly() -> None:
     module = _load_live_strategy_smoke_module()
     cases = {case.name: case for case in module._strategy_cases()}
@@ -356,9 +392,7 @@ def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance(
     )
 
     guidance = pack["deal_evaluation_guidance"]
-    assert guidance["recommended_accept_reject_by_deal_id"] == {
-        str(module.BAD_DEAL_ID): "reject"
-    }
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(module.BAD_DEAL_ID): "reject"}
     assert guidance["deal_evaluations"][0]["risk"]["property_id"] == "property_tennessee_avenue"
     assert guidance["deal_evaluations"][0]["risk"]["minimum_cash_value_floor"] == 270
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 269
@@ -381,9 +415,7 @@ def test_live_codex_strategy_smoke_good_deal_has_context_pack_acceptance_guidanc
     )
 
     guidance = pack["deal_evaluation_guidance"]
-    assert guidance["recommended_accept_reject_by_deal_id"] == {
-        str(module.GOOD_DEAL_ID): "accept"
-    }
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(module.GOOD_DEAL_ID): "accept"}
     assert guidance["deal_evaluations"][0]["opportunity"]["property_id"] == (
         "property_tennessee_avenue"
     )
@@ -413,7 +445,9 @@ def test_live_codex_strategy_smoke_bad_completion_deals_have_rejection_guidance(
     assert overpriced_guidance["deal_evaluations"][0]["reason_code"] == (
         "receives_property_that_completes_actor_street_group_above_value_ceiling"
     )
-    assert overpriced_guidance["deal_evaluations"][0]["opportunity"]["cash_over_value_ceiling"] == 130
+    assert (
+        overpriced_guidance["deal_evaluations"][0]["opportunity"]["cash_over_value_ceiling"] == 130
+    )
 
     draining_case = cases["orange_cash_draining_deal_rejection"]
     draining_state = draining_case.state_factory(draining_case.game_id)
@@ -464,7 +498,9 @@ def test_live_codex_strategy_smoke_monopoly_breakup_deal_has_rejection_guidance(
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 240
 
 
-def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _load_product_smoke_module()
     fake_api = _FakeScriptedSmokeApi(rotates_turns=False)
     monkeypatch.setattr(module, "create_game", fake_api.create_game)
@@ -505,7 +541,9 @@ class _FakeScriptedSmokeApi:
     def create_game(self, *args: object, **kwargs: object) -> dict[str, object]:
         return {
             "id": "game-1",
-            "players": [{"id": player_id, "controller_type": "human"} for player_id in self.player_ids],
+            "players": [
+                {"id": player_id, "controller_type": "human"} for player_id in self.player_ids
+            ],
         }
 
     def http_json(
@@ -546,7 +584,9 @@ class _FakeScriptedSmokeApi:
         state = self._state_response()
         return {
             "actor_id": self.current_player_id,
-            "type": "END_TURN" if self.rotates_turns and self.phase != "START_TURN" else "ROLL_DICE",
+            "type": "END_TURN"
+            if self.rotates_turns and self.phase != "START_TURN"
+            else "ROLL_DICE",
             "payload": {},
             "expected_state_hash": state["state_hash"],
             "expected_event_sequence": state["event_sequence"],
@@ -608,7 +648,9 @@ def _load_product_smoke_module():
 
 
 def _load_live_strategy_smoke_module():
-    spec = importlib.util.spec_from_file_location("live_codex_ai_strategy_smoke", LIVE_STRATEGY_SMOKE_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "live_codex_ai_strategy_smoke", LIVE_STRATEGY_SMOKE_PATH
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)

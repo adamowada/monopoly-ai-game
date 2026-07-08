@@ -77,7 +77,11 @@ def main() -> int:
             parsed = _run_strategy_case(case)
             case.verifier(parsed)
         except (AssertionError, CodexExecTimeoutError, ValueError) as exc:
-            print(json.dumps({"case": case.name, "status": "failed", "message": str(exc)}, sort_keys=True))
+            print(
+                json.dumps(
+                    {"case": case.name, "status": "failed", "message": str(exc)}, sort_keys=True
+                )
+            )
             return 1
         results.append(_case_summary(case, parsed))
 
@@ -93,6 +97,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             decision_type="action_decision",
             state_factory=_railroad_purchase_state,
             verifier=_verify_railroad_purchase_with_healthy_cash,
+        ),
+        StrategySmokeCase(
+            name="railroad_purchase_completes_set_with_thin_cash",
+            game_id=UUID("00000000-0000-0000-0000-00000000b227"),
+            decision_type="action_decision",
+            state_factory=_railroad_purchase_completes_set_state,
+            verifier=_verify_railroad_purchase_completes_set_with_thin_cash,
         ),
         StrategySmokeCase(
             name="purchase_completes_color_group_with_thin_cash",
@@ -289,7 +300,9 @@ def _run_strategy_case(case: StrategySmokeCase) -> dict[str, Any]:
         game_id=case.game_id,
         player_id=case.actor_player_id,
         decision_type=case.decision_type,
-        negotiation_id=NEGOTIATION_ID if case.decision_type in {"deal_proposal", "accept_reject"} else None,
+        negotiation_id=NEGOTIATION_ID
+        if case.decision_type in {"deal_proposal", "accept_reject"}
+        else None,
         phase=state.turn.phase.value,
         state_hash=state.state_hash(),
         prompt_context=pack,
@@ -320,7 +333,9 @@ def _run_strategy_case(case: StrategySmokeCase) -> dict[str, Any]:
             raise ValueError(f"codex exec returned {process.returncode}: {process.stderr[-1000:]}")
 
         parsed_events = parse_codex_jsonl_events(process.stdout)
-        final_output = _read_last_message(output_last_message_path) or parsed_events.final_assistant_output
+        final_output = (
+            _read_last_message(output_last_message_path) or parsed_events.final_assistant_output
+        )
         if final_output is None:
             raise ValueError("codex exec did not produce a final assistant output")
         return validate_ai_decision_output(final_output).root.model_dump(mode="json")
@@ -333,6 +348,17 @@ def _verify_railroad_purchase_with_healthy_cash(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "action_decision"
     assert action.get("type") == "BUY_PROPERTY", f"expected BUY_PROPERTY, got {action.get('type')}"
     assert payload.get("property_id") == "property_reading_railroad"
+    if "price" in payload:
+        assert payload.get("price") == 200
+
+
+def _verify_railroad_purchase_completes_set_with_thin_cash(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BUY_PROPERTY", f"expected BUY_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_short_line_railroad"
     if "price" in payload:
         assert payload.get("price") == 200
 
@@ -371,7 +397,9 @@ def _verify_active_debt_uses_mortgage(parsed: dict[str, Any]) -> None:
     payload = _dict(action.get("payload"))
 
     assert parsed.get("decision_type") == "action_decision"
-    assert action.get("type") == "MORTGAGE_PROPERTY", f"expected MORTGAGE_PROPERTY, got {action.get('type')}"
+    assert action.get("type") == "MORTGAGE_PROPERTY", (
+        f"expected MORTGAGE_PROPERTY, got {action.get('type')}"
+    )
     assert payload.get("property_id") == "property_b_and_o_railroad"
 
 
@@ -400,7 +428,9 @@ def _verify_healthy_cash_unmortgages_rent_property(parsed: dict[str, Any]) -> No
     payload = _dict(action.get("payload"))
 
     assert parsed.get("decision_type") == "action_decision"
-    assert action.get("type") == "UNMORTGAGE_PROPERTY", f"expected UNMORTGAGE_PROPERTY, got {action.get('type')}"
+    assert action.get("type") == "UNMORTGAGE_PROPERTY", (
+        f"expected UNMORTGAGE_PROPERTY, got {action.get('type')}"
+    )
     assert payload.get("property_id") == "property_b_and_o_railroad"
     if "cost" in payload:
         assert payload.get("cost") == 110
@@ -425,7 +455,9 @@ def _verify_auction_bid_within_valuation(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "action_decision"
     assert action.get("type") == "BID_AUCTION", f"expected BID_AUCTION, got {action.get('type')}"
     assert payload.get("property_id") == "property_virginia_avenue"
-    assert 52 <= amount <= 160, f"expected a deliberate bid above floor and within valuation, got {amount}"
+    assert 52 <= amount <= 160, (
+        f"expected a deliberate bid above floor and within valuation, got {amount}"
+    )
 
 
 def _verify_auction_pass_above_valuation(parsed: dict[str, Any]) -> None:
@@ -476,7 +508,9 @@ def _verify_low_cash_defers_monopoly_development(parsed: dict[str, Any]) -> None
 
 def _verify_orange_near_monopoly_negotiation(parsed: dict[str, Any]) -> None:
     negotiation = _dict(parsed.get("negotiation"))
-    participant_player_ids = [str(player_id) for player_id in negotiation.get("participant_player_ids", [])]
+    participant_player_ids = [
+        str(player_id) for player_id in negotiation.get("participant_player_ids", [])
+    ]
     context = _dict(negotiation.get("context"))
     assert parsed.get("decision_type") == "open_negotiation"
     assert participant_player_ids == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
@@ -486,7 +520,9 @@ def _verify_orange_near_monopoly_negotiation(parsed: dict[str, Any]) -> None:
 
 def _verify_block_opponent_orange_near_monopoly_negotiation(parsed: dict[str, Any]) -> None:
     negotiation = _dict(parsed.get("negotiation"))
-    participant_player_ids = [str(player_id) for player_id in negotiation.get("participant_player_ids", [])]
+    participant_player_ids = [
+        str(player_id) for player_id in negotiation.get("participant_player_ids", [])
+    ]
     context = _dict(negotiation.get("context"))
     assert parsed.get("decision_type") == "open_negotiation"
     assert participant_player_ids == [str(AI_PLAYER_ID), str(THIRD_PLAYER_ID)]
@@ -500,7 +536,9 @@ def _verify_orange_near_monopoly_deal_proposal(parsed: dict[str, Any]) -> None:
     terms = _dict(deal.get("terms"))
     instruments = [_dict(term) for term in terms.get("terms", [])]
     cash_terms = [term for term in instruments if term.get("kind") == "immediate_cash_transfer"]
-    property_terms = [term for term in instruments if term.get("kind") == "immediate_property_transfer"]
+    property_terms = [
+        term for term in instruments if term.get("kind") == "immediate_property_transfer"
+    ]
 
     assert parsed.get("decision_type") == "deal_proposal"
     assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
@@ -530,7 +568,9 @@ def _verify_orange_bad_deal_rejection(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "accept_reject"
     assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
     assert accept_reject.get("deal_id") == str(BAD_DEAL_ID)
-    assert accept_reject.get("decision") == "reject", f"expected reject, got {accept_reject.get('decision')}"
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
 
 
 def _verify_orange_good_deal_acceptance(parsed: dict[str, Any]) -> None:
@@ -539,7 +579,9 @@ def _verify_orange_good_deal_acceptance(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "accept_reject"
     assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
     assert accept_reject.get("deal_id") == str(GOOD_DEAL_ID)
-    assert accept_reject.get("decision") == "accept", f"expected accept, got {accept_reject.get('decision')}"
+    assert accept_reject.get("decision") == "accept", (
+        f"expected accept, got {accept_reject.get('decision')}"
+    )
 
 
 def _verify_orange_overpriced_deal_rejection(parsed: dict[str, Any]) -> None:
@@ -548,7 +590,9 @@ def _verify_orange_overpriced_deal_rejection(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "accept_reject"
     assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
     assert accept_reject.get("deal_id") == str(OVERPRICED_DEAL_ID)
-    assert accept_reject.get("decision") == "reject", f"expected reject, got {accept_reject.get('decision')}"
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
 
 
 def _verify_orange_cash_draining_deal_rejection(parsed: dict[str, Any]) -> None:
@@ -557,7 +601,9 @@ def _verify_orange_cash_draining_deal_rejection(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "accept_reject"
     assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
     assert accept_reject.get("deal_id") == str(CASH_DRAINING_DEAL_ID)
-    assert accept_reject.get("decision") == "reject", f"expected reject, got {accept_reject.get('decision')}"
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
 
 
 def _verify_orange_monopoly_breakup_deal_rejection(parsed: dict[str, Any]) -> None:
@@ -566,7 +612,9 @@ def _verify_orange_monopoly_breakup_deal_rejection(parsed: dict[str, Any]) -> No
     assert parsed.get("decision_type") == "accept_reject"
     assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
     assert accept_reject.get("deal_id") == str(BREAKUP_DEAL_ID)
-    assert accept_reject.get("decision") == "reject", f"expected reject, got {accept_reject.get('decision')}"
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
 
 
 def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -585,7 +633,9 @@ def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, 
             "case": case.name,
             "status": "ok",
             "decision_type": parsed.get("decision_type"),
-            "term_kinds": [term.get("kind") for term in terms.get("terms", []) if isinstance(term, dict)],
+            "term_kinds": [
+                term.get("kind") for term in terms.get("terms", []) if isinstance(term, dict)
+            ],
         }
     if case.decision_type == "accept_reject":
         accept_reject = _dict(parsed.get("accept_reject"))
@@ -950,6 +1000,21 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "railroad_purchase_completes_set_with_thin_cash":
+        return (
+            {
+                "id": "live-strategy-buy-railroad-to-complete-set",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace owns Reading Railroad, Pennsylvania "
+                    "Railroad, and B&O Railroad, has $400, and landed on unowned "
+                    "property_short_line_railroad. Buying Short Line for $200 leaves $200 "
+                    "and completes all four railroads. purchase_guidance recommendation is "
+                    "buy_property_to_complete_group. Choose BUY_PROPERTY rather than "
+                    "START_AUCTION."
+                ),
+            },
+        )
     if case.name == "purchase_completes_color_group_with_thin_cash":
         return (
             {
@@ -1227,6 +1292,38 @@ def _railroad_purchase_state(game_id: UUID) -> GameState:
         {
             **state.model_dump(mode="python"),
             "players": players,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _railroad_purchase_completes_set_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-railroad-purchase-completes-set")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 400
+    players[0]["position"] = 35
+    owned_property_ids = {
+        "property_reading_railroad",
+        "property_pennsylvania_railroad",
+        "property_b_and_o_railroad",
+    }
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id in owned_property_ids
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "property_ownership": ownership,
             "turn": {
                 **state.turn.model_dump(mode="python"),
                 "phase": TurnPhase.PURCHASE_OR_AUCTION,

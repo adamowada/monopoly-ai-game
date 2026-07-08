@@ -30,7 +30,12 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.ai.context_pack import build_ai_context_pack, build_ai_context_pack_from_db
 from app.ai.orchestrator import (
@@ -237,17 +242,29 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     guidance = pack["action_selection_guidance"]
     assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
     assert guidance["lower_priority_action_types"] == ["ROLL_DICE", "MORTGAGE_PROPERTY"]
-    assert [opportunity["property_id"] for opportunity in guidance["development_opportunities"]] == [
+    assert [
+        opportunity["property_id"] for opportunity in guidance["development_opportunities"]
+    ] == [
         "property_new_york_avenue",
         "property_st_james_place",
         "property_tennessee_avenue",
     ]
-    assert [opportunity["marginal_rent_gain"] for opportunity in guidance["development_opportunities"]] == [64, 56, 56]
-    assert all(opportunity["cash_after_cost"] == 2900 for opportunity in guidance["development_opportunities"])
-    assert all(opportunity["development_priority_score"] > 0 for opportunity in guidance["development_opportunities"])
+    assert [
+        opportunity["marginal_rent_gain"] for opportunity in guidance["development_opportunities"]
+    ] == [64, 56, 56]
+    assert all(
+        opportunity["cash_after_cost"] == 2900
+        for opportunity in guidance["development_opportunities"]
+    )
+    assert all(
+        opportunity["development_priority_score"] > 0
+        for opportunity in guidance["development_opportunities"]
+    )
     assert "highest marginal_rent_gain" in guidance["turn_guidance"][0]
     assert "complete color group" in guidance["turn_guidance"][0]
-    assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
+    assert any(
+        "BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"]
+    )
 
 
 def test_context_pack_defers_monopoly_development_when_cash_after_cost_breaches_reserve() -> None:
@@ -261,13 +278,18 @@ def test_context_pack_defers_monopoly_development_when_cash_after_cost_breaches_
     assert "BUY_HOUSE" not in guidance["recommended_action_types_before_roll"]
     assert "ROLL_DICE" not in guidance["lower_priority_action_types"]
     assert "BUY_HOUSE" in guidance["lower_priority_action_types"]
-    assert [opportunity["property_id"] for opportunity in guidance["development_opportunities"]] == [
+    assert [
+        opportunity["property_id"] for opportunity in guidance["development_opportunities"]
+    ] == [
         "property_new_york_avenue",
         "property_st_james_place",
         "property_tennessee_avenue",
     ]
     assert guidance["recommended_development_opportunities"] == []
-    assert [opportunity["cash_after_cost"] for opportunity in guidance["deferred_development_opportunities"]] == [
+    assert [
+        opportunity["cash_after_cost"]
+        for opportunity in guidance["deferred_development_opportunities"]
+    ] == [
         250,
         250,
         250,
@@ -293,14 +315,21 @@ def test_context_pack_prioritizes_stronger_monopoly_development_group_before_rol
     opportunities = guidance["development_opportunities"]
 
     assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
-    assert [opportunity["group"] for opportunity in opportunities[:3]] == ["orange", "orange", "orange"]
+    assert [opportunity["group"] for opportunity in opportunities[:3]] == [
+        "orange",
+        "orange",
+        "orange",
+    ]
     assert [opportunity["property_id"] for opportunity in opportunities[:3]] == [
         "property_new_york_avenue",
         "property_st_james_place",
         "property_tennessee_avenue",
     ]
     assert {opportunity["group"] for opportunity in opportunities[3:]} == {"brown"}
-    assert opportunities[0]["development_priority_score"] > opportunities[-1]["development_priority_score"]
+    assert (
+        opportunities[0]["development_priority_score"]
+        > opportunities[-1]["development_priority_score"]
+    )
     assert opportunities[0]["marginal_rent_gain"] == 64
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "highest development_priority_score" in guidance_text
@@ -368,7 +397,10 @@ def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
     ]
     instruction_text = " ".join(pack["instruction_contract"]["instructions"])
     assert "open_negotiation" in instruction_text
-    assert "participant_player_ids must include both this AI player and the target owner" in instruction_text
+    assert (
+        "participant_player_ids must include both this AI player and the target owner"
+        in instruction_text
+    )
     assert "open_negotiation.negotiation.context must be a JSON object" in instruction_text
 
 
@@ -382,7 +414,9 @@ def test_context_pack_prioritizes_stronger_near_monopoly_trade_opportunity() -> 
     assert guidance["open_negotiation_payload_template"]["context"]["target_property_id"] == (
         "property_tennessee_avenue"
     )
-    assert [opportunity["target_property_id"] for opportunity in guidance["trade_opportunities"]] == [
+    assert [
+        opportunity["target_property_id"] for opportunity in guidance["trade_opportunities"]
+    ] == [
         "property_tennessee_avenue",
         "property_connecticut_avenue",
     ]
@@ -668,13 +702,18 @@ def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt()
 
     guidance = pack["action_selection_guidance"]
     assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
-    assert guidance["mortgage_guidance"]["recommendation"] == "avoid_unless_debt_or_liquidity_pressure"
+    assert (
+        guidance["mortgage_guidance"]["recommendation"] == "avoid_unless_debt_or_liquidity_pressure"
+    )
     assert guidance["mortgage_guidance"]["has_active_debt"] is False
     assert guidance["mortgage_guidance"]["cash_available"] == 900
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "Avoid MORTGAGE_PROPERTY" in guidance_text
     assert "active debt" in guidance_text
-    assert any("MORTGAGE_PROPERTY" in instruction for instruction in pack["instruction_contract"]["instructions"])
+    assert any(
+        "MORTGAGE_PROPERTY" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
 
 
 def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> None:
@@ -688,7 +727,9 @@ def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> 
 
     guidance = pack["action_selection_guidance"]
     assert "MORTGAGE_PROPERTY" not in guidance["lower_priority_action_types"]
-    assert guidance["mortgage_guidance"]["recommendation"] == "liquidate_only_enough_for_active_debt"
+    assert (
+        guidance["mortgage_guidance"]["recommendation"] == "liquidate_only_enough_for_active_debt"
+    )
     assert guidance["mortgage_guidance"]["has_active_debt"] is True
     assert guidance["mortgage_guidance"]["cash_available"] == 0
     guidance_text = " ".join(guidance["turn_guidance"])
@@ -739,7 +780,10 @@ def test_context_pack_prioritizes_selling_improvements_before_mortgage_for_debt(
     assert guidance["recommended_action_types"] == ["SELL_HOUSE"]
     assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
     assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
-    assert guidance["debt_resolution_guidance"]["recommendation"] == "sell_improvements_before_mortgage"
+    assert (
+        guidance["debt_resolution_guidance"]["recommendation"]
+        == "sell_improvements_before_mortgage"
+    )
     assert guidance["debt_resolution_guidance"]["sell_house_property_ids"] == [
         "property_oriental_avenue"
     ]
@@ -771,7 +815,10 @@ def test_context_pack_prioritizes_unmortgaging_rent_property_when_cash_stays_hea
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "UNMORTGAGE_PROPERTY" in guidance_text
     assert "restore rent" in guidance_text
-    assert any("UNMORTGAGE_PROPERTY" in instruction for instruction in pack["instruction_contract"]["instructions"])
+    assert any(
+        "UNMORTGAGE_PROPERTY" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
 
 
 def test_context_pack_prioritizes_jail_card_over_fine_and_jail_roll() -> None:
@@ -780,7 +827,9 @@ def test_context_pack_prioritizes_jail_card_over_fine_and_jail_roll() -> None:
 
     legal_action_types = {action["type"] for action in pack["legal_actions"]}
     assert {"ROLL_DICE", "PAY_JAIL_FINE", "USE_GET_OUT_OF_JAIL_CARD"}.issubset(legal_action_types)
-    card_action = next(action for action in pack["legal_actions"] if action["type"] == "USE_GET_OUT_OF_JAIL_CARD")
+    card_action = next(
+        action for action in pack["legal_actions"] if action["type"] == "USE_GET_OUT_OF_JAIL_CARD"
+    )
     assert card_action["payload"]["card_id"] == "card_community_get_out_of_jail"
 
     guidance = pack["action_selection_guidance"]
@@ -800,7 +849,10 @@ def test_context_pack_prioritizes_jail_card_over_fine_and_jail_roll() -> None:
     assert "USE_GET_OUT_OF_JAIL_CARD" in guidance_text
     assert "PAY_JAIL_FINE" in guidance_text
     assert "ROLL_DICE" in guidance_text
-    assert any("USE_GET_OUT_OF_JAIL_CARD" in instruction for instruction in pack["instruction_contract"]["instructions"])
+    assert any(
+        "USE_GET_OUT_OF_JAIL_CARD" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
 
 
 def test_context_pack_prefers_buying_landed_property_when_cash_is_healthy() -> None:
@@ -856,6 +908,50 @@ def test_context_pack_prefers_buying_property_that_completes_group_with_thin_cas
     ]
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "complete the color group" in guidance_text
+    assert "START_AUCTION" in guidance_text
+
+
+def test_context_pack_prefers_buying_railroad_that_completes_set_with_thin_cash() -> None:
+    state = _state_landed_on_group_completing_short_line(cash=400)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_to_complete_group"
+    assert guidance["purchase_guidance"]["property_id"] == "property_short_line_railroad"
+    assert guidance["purchase_guidance"]["property_kind"] == "railroad"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 200
+    assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
+        "property_b_and_o_railroad",
+        "property_pennsylvania_railroad",
+        "property_reading_railroad",
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "railroad set" in guidance_text
+    assert "START_AUCTION" in guidance_text
+
+
+def test_context_pack_prefers_buying_utility_that_completes_set_with_thin_cash() -> None:
+    state = _state_landed_on_group_completing_water_works(cash=300)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_to_complete_group"
+    assert guidance["purchase_guidance"]["property_id"] == "property_water_works"
+    assert guidance["purchase_guidance"]["property_kind"] == "utility"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 150
+    assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
+        "property_electric_company",
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "utility set" in guidance_text
     assert "START_AUCTION" in guidance_text
 
 
@@ -959,7 +1055,9 @@ def test_context_pack_guides_auction_premium_to_block_opponent_group_completion(
     guidance = pack["action_selection_guidance"]
 
     assert guidance["auction_guidance"]["property_id"] == "property_virginia_avenue"
-    assert guidance["auction_guidance"]["valuation_basis"] == "block_opponent_group_completion_premium"
+    assert (
+        guidance["auction_guidance"]["valuation_basis"] == "block_opponent_group_completion_premium"
+    )
     assert guidance["auction_guidance"]["strategic_valuation_ceiling"] == 240
     assert guidance["auction_guidance"]["valuation_ceiling"] == 240
     assert guidance["auction_guidance"]["opponent_group_completion_threats"] == [
@@ -1058,25 +1156,18 @@ async def test_context_pack_includes_only_negotiation_messages_visible_to_acting
             )
 
         messages_by_body = {
-            message["body"]: message
-            for message in pack["negotiation_context"]["public_messages"]
+            message["body"]: message for message in pack["negotiation_context"]["public_messages"]
         }
 
-        public_message = messages_by_body[
-            "I can trade cash now for future consideration."
-        ]
+        public_message = messages_by_body["I can trade cash now for future consideration."]
         assert public_message["sender_player_id"] == str(AI_PLAYER_ID)
         assert public_message["recipient_player_id"] is None
 
-        sent_by_ai_message = messages_by_body[
-            "Grace privately offers Ada a side payment."
-        ]
+        sent_by_ai_message = messages_by_body["Grace privately offers Ada a side payment."]
         assert sent_by_ai_message["sender_player_id"] == str(AI_PLAYER_ID)
         assert sent_by_ai_message["recipient_player_id"] == str(OTHER_PLAYER_ID)
 
-        addressed_to_ai_message = messages_by_body[
-            "Ada privately asks Grace to sweeten the deal."
-        ]
+        addressed_to_ai_message = messages_by_body["Ada privately asks Grace to sweeten the deal."]
         assert addressed_to_ai_message["sender_player_id"] == str(OTHER_PLAYER_ID)
         assert addressed_to_ai_message["recipient_player_id"] == str(AI_PLAYER_ID)
 
@@ -1135,8 +1226,7 @@ async def test_context_pack_persists_as_orchestrator_prompt_context_without_muta
         assert stored_context == pack
         assert rows[0]["prompt_context_hash"] == result.prompt_context_hash
         stored_message_bodies = {
-            message["body"]
-            for message in stored_context["negotiation_context"]["public_messages"]
+            message["body"] for message in stored_context["negotiation_context"]["public_messages"]
         }
         assert "I can trade cash now for future consideration." in stored_message_bodies
         assert stored_context["negotiation_context"]["public_deals"][0]["id"] == str(DEAL_ID)
@@ -1179,7 +1269,9 @@ async def test_stage_8_2_memory_later_context_pack_includes_prior_memory_without
             "strategic_belief",
             "deal_history",
         }
-        own_memory = next(snippet for snippet in snippets if snippet["content"] == "Own private valuation memory.")
+        own_memory = next(
+            snippet for snippet in snippets if snippet["content"] == "Own private valuation memory."
+        )
         assert own_memory["source_decision_id"] == str(OWN_MEMORY_DECISION_ID)
     finally:
         await _delete_game(session_factory)
@@ -1596,7 +1688,9 @@ def _state_with_orange_near_monopoly(*, ai_cash: int = 1500) -> GameState:
         update={
             "players": (ai_player, other_player, *state.players[2:]),
             "property_ownership": tuple(
-                ownership.model_copy(update={"owner_id": owner_by_property_id[ownership.property_id]})
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
                 if ownership.property_id in owner_by_property_id
                 else ownership
                 for ownership in state.property_ownership
@@ -1621,7 +1715,9 @@ def _state_with_multiple_near_monopolies() -> GameState:
         update={
             "players": (ai_player, other_player, *state.players[2:]),
             "property_ownership": tuple(
-                ownership.model_copy(update={"owner_id": owner_by_property_id[ownership.property_id]})
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
                 if ownership.property_id in owner_by_property_id
                 else ownership
                 for ownership in state.property_ownership
@@ -1644,7 +1740,9 @@ def _state_with_opponent_orange_near_monopoly() -> GameState:
         update={
             "players": (ai_player, other_player, third_player),
             "property_ownership": tuple(
-                ownership.model_copy(update={"owner_id": owner_by_property_id[ownership.property_id]})
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
                 if ownership.property_id in owner_by_property_id
                 else ownership
                 for ownership in state.property_ownership
@@ -1706,9 +1804,10 @@ def _state_with_active_debt_sellable_house_and_railroad(
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),
-            "players": (ai_player.model_dump(mode="python"), *[
-                player.model_dump(mode="python") for player in state.players[1:]
-            ]),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
             "property_ownership": [
                 {
                     **ownership.model_dump(mode="python"),
@@ -1775,9 +1874,10 @@ def _state_landed_on_unowned_reading_railroad(*, cash: int) -> GameState:
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),
-            "players": (ai_player.model_dump(mode="python"), *[
-                player.model_dump(mode="python") for player in state.players[1:]
-            ]),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
             "turn": {
                 **state.turn.model_dump(mode="python"),
                 "phase": TurnPhase.PURCHASE_OR_AUCTION,
@@ -1793,15 +1893,75 @@ def _state_landed_on_group_completing_tennessee(*, cash: int) -> GameState:
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),
-            "players": (ai_player.model_dump(mode="python"), *[
-                player.model_dump(mode="python") for player in state.players[1:]
-            ]),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
             "property_ownership": [
                 {
                     **ownership.model_dump(mode="python"),
                     "owner_id": str(AI_PLAYER_ID),
                 }
                 if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_landed_on_group_completing_short_line(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 35})
+    owned_property_ids = {
+        "property_reading_railroad",
+        "property_pennsylvania_railroad",
+        "property_b_and_o_railroad",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_landed_on_group_completing_water_works(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 28})
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                }
+                if ownership.property_id == "property_electric_company"
                 else ownership.model_dump(mode="python")
                 for ownership in state.property_ownership
             ],
@@ -1820,9 +1980,10 @@ def _state_landed_on_opponent_group_completing_virginia(*, cash: int) -> GameSta
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),
-            "players": (ai_player.model_dump(mode="python"), *[
-                player.model_dump(mode="python") for player in state.players[1:]
-            ]),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
             "property_ownership": [
                 {
                     **ownership.model_dump(mode="python"),
@@ -1846,9 +2007,10 @@ def _state_with_active_auction(*, cash: int = 1500, high_bid_amount: int = 50) -
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),
-            "players": (ai_player.model_dump(mode="python"), *[
-                player.model_dump(mode="python") for player in state.players[1:]
-            ]),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
             "turn": {
                 **state.turn.model_dump(mode="python"),
                 "phase": TurnPhase.PURCHASE_OR_AUCTION,
@@ -1901,7 +2063,9 @@ async def _fetch_ai_decision_rows(session_factory: async_sessionmaker) -> list[d
 async def _count_events(session_factory: async_sessionmaker) -> int:
     async with session_factory() as session:
         result = await session.execute(
-            sa.select(sa.func.count()).select_from(game_events).where(game_events.c.game_id == GAME_ID)
+            sa.select(sa.func.count())
+            .select_from(game_events)
+            .where(game_events.c.game_id == GAME_ID)
         )
         return int(result.scalar_one())
 
