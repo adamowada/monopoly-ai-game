@@ -1186,6 +1186,8 @@ def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops
 
     guidance = pack["action_selection_guidance"]
     assert guidance["recommended_action_types"] == ["BID_AUCTION"]
+    assert "PASS_AUCTION" in guidance["lower_priority_action_types"]
+    assert "BID_AUCTION" not in guidance["lower_priority_action_types"]
     assert guidance["auction_guidance"] == {
         "property_id": "property_virginia_avenue",
         "property_name": "Virginia Avenue",
@@ -1226,6 +1228,9 @@ def test_context_pack_guides_auction_pass_when_minimum_bid_exceeds_valuation() -
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
 
     guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["PASS_AUCTION"]
+    assert "BID_AUCTION" in guidance["lower_priority_action_types"]
+    assert "PASS_AUCTION" not in guidance["lower_priority_action_types"]
     assert guidance["auction_guidance"]["minimum_bid"] == 1001
     assert guidance["auction_guidance"]["valuation_ceiling"] == 160
     assert guidance["auction_guidance"]["recommended_auction_action_type"] == "PASS_AUCTION"
@@ -1242,6 +1247,9 @@ def test_context_pack_guides_auction_pass_when_cash_reserve_would_be_breached() 
 
     guidance = pack["action_selection_guidance"]
 
+    assert guidance["recommended_action_types"] == ["PASS_AUCTION"]
+    assert "BID_AUCTION" in guidance["lower_priority_action_types"]
+    assert "PASS_AUCTION" not in guidance["lower_priority_action_types"]
     assert guidance["auction_guidance"]["minimum_bid"] == 51
     assert guidance["auction_guidance"]["valuation_ceiling"] == 0
     assert guidance["auction_guidance"]["cash_reserve_floor"] == 300
@@ -1264,6 +1272,7 @@ def test_context_pack_guides_auction_premium_to_block_opponent_group_completion(
         guidance["auction_guidance"]["valuation_basis"] == "block_opponent_group_completion_premium"
     )
     assert guidance["recommended_action_types"] == ["BID_AUCTION"]
+    assert "PASS_AUCTION" in guidance["lower_priority_action_types"]
     assert guidance["auction_guidance"]["strategic_valuation_ceiling"] == 240
     assert guidance["auction_guidance"]["valuation_ceiling"] == 240
     assert guidance["auction_guidance"]["recommended_bid_amount"] == 160

@@ -785,6 +785,14 @@ def _action_selection_guidance(
             and recommended_auction_action_type not in recommended_action_types
         ):
             recommended_action_types.append(recommended_auction_action_type)
+        auction_alternative_action_type = (
+            "PASS_AUCTION" if recommended_auction_action_type == "BID_AUCTION" else "BID_AUCTION"
+        )
+        if (
+            auction_alternative_action_type in legal_action_types
+            and auction_alternative_action_type not in lower_priority_action_types
+        ):
+            lower_priority_action_types.append(auction_alternative_action_type)
         turn_guidance.append(
             "For BID_AUCTION, the payload amount is the minimum legal floor, "
             "not a recommendation. If bidding, choose a deliberate value based "

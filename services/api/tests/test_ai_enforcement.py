@@ -537,6 +537,44 @@ async def test_ai_auction_bid_canonicalizes_exact_current_legal_action_state_met
         await delete_game(session_factory)
 
 
+def test_ai_auction_metadata_repair_preserves_deliberate_bid_amount() -> None:
+    state = _active_auction_state(
+        create_initial_game_state(
+            seed="ai-auction-deliberate-bid",
+            game_id=str(GAME_ID),
+            players=(
+                PlayerSetup(id=str(AI_PLAYER_ID), name="Grace", kind="ai"),
+                PlayerSetup(id=str(HUMAN_PLAYER_ID), name="Ada", kind="human"),
+            ),
+        )
+    )
+    legal_bid = next(
+        action
+        for action in list_legal_actions(state, str(AI_PLAYER_ID))
+        if action.type == "BID_AUCTION"
+    )
+    deliberate_bid_amount = 160
+    action = GameAction(
+        actor_id=str(AI_PLAYER_ID),
+        type="BID_AUCTION",
+        payload={
+            "property_id": legal_bid.payload["property_id"],
+            "amount": deliberate_bid_amount,
+        },
+        expected_state_hash=f"{state.state_hash()}-stale",
+        expected_event_sequence=state.event_sequence,
+    )
+
+    repaired = enforcement_module._canonicalize_current_legal_action_metadata(state, action)
+    execution = execute_action(state, repaired, "ai-deliberate-auction-bid")
+
+    assert repaired.expected_state_hash == state.state_hash()
+    assert repaired.payload["amount"] == deliberate_bid_amount
+    assert execution.state.active_auction is not None
+    assert execution.state.active_auction.high_bidder_id == str(AI_PLAYER_ID)
+    assert execution.state.active_auction.high_bid_amount == deliberate_bid_amount
+
+
 @pytest.mark.asyncio
 async def test_request_once_forwards_codex_home_to_codex_decision_request(
     monkeypatch: pytest.MonkeyPatch,
