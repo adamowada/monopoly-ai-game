@@ -162,6 +162,19 @@ def _state() -> GameState:
     )
 
 
+def _state_in_phase(phase: TurnPhase) -> GameState:
+    state = _state()
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": phase,
+            },
+        }
+    )
+
+
 def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> None:
     state = _state()
     pack = build_ai_context_pack(
@@ -230,6 +243,36 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
     assert "Keep cash available for early auctions." in memory_text
     assert "Ada publicly rejected a railroad package." in memory_text
     assert "Ada secretly wants the orange group." not in memory_text
+
+
+def test_context_pack_recommends_roll_when_no_management_action_is_better() -> None:
+    state = _state()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["ROLL_DICE"]
+    assert guidance["recommended_turn_flow_action"] == {
+        "type": "ROLL_DICE",
+        "payload": {},
+        "reason_code": "roll_when_no_higher_priority_action",
+    }
+    assert "ROLL_DICE advances the turn" in " ".join(guidance["turn_guidance"])
+
+
+def test_context_pack_recommends_end_turn_when_post_roll_management_is_done() -> None:
+    state = _state_in_phase(TurnPhase.POST_ROLL_MANAGEMENT)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["END_TURN"]
+    assert guidance["recommended_turn_flow_action"] == {
+        "type": "END_TURN",
+        "payload": {},
+        "reason_code": "end_turn_when_no_higher_priority_action",
+    }
+    assert "END_TURN advances play" in " ".join(guidance["turn_guidance"])
 
 
 def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> None:

@@ -163,6 +163,19 @@ def test_live_codex_strategy_smoke_debt_cases_have_targeted_legal_actions() -> N
     module = _load_live_strategy_smoke_module()
     cases = {case.name: case for case in module._strategy_cases()}
 
+    healthy_case = cases["healthy_cash_avoids_mortgage"]
+    healthy_state = healthy_case.state_factory(healthy_case.game_id)
+    healthy_pack = module.build_ai_context_pack(
+        healthy_state,
+        player_id=str(healthy_case.actor_player_id),
+        decision_type=healthy_case.decision_type,
+    )
+    assert healthy_pack["action_selection_guidance"]["recommended_turn_flow_action"] == {
+        "type": "ROLL_DICE",
+        "payload": {},
+        "reason_code": "roll_when_no_higher_priority_action",
+    }
+
     settle_case = cases["active_debt_settles_cash"]
     settle_state = settle_case.state_factory(settle_case.game_id)
     settle_pack = module.build_ai_context_pack(

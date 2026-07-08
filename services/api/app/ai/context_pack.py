@@ -714,6 +714,7 @@ def _action_selection_guidance(
     recommended_before_roll: list[str] = []
     lower_priority_action_types: list[str] = []
     turn_guidance: list[str] = []
+    recommended_turn_flow_action: dict[str, Any] | None = None
     purchase_guidance = _purchase_guidance(state, actor_id, legal_actions)
     auction_guidance = _auction_guidance(state, actor_id, legal_actions)
     debt_resolution_guidance = _debt_resolution_guidance(state, actor_id, legal_actions)
@@ -931,10 +932,48 @@ def _action_selection_guidance(
                 "PAY_JAIL_FINE or ROLL_DICE when the plan is to leave jail and keep moving."
             )
 
+    has_higher_priority_recommendation = bool(
+        recommended_action_types or recommended_before_roll
+    )
+    if not has_higher_priority_recommendation:
+        if state.turn.phase in {
+            TurnPhase.START_TURN,
+            TurnPhase.PRE_ROLL_MANAGEMENT,
+            TurnPhase.ROLL_REQUIRED,
+        }:
+            recommended_turn_flow_action = _legal_action_template_for_type(
+                legal_actions,
+                "ROLL_DICE",
+                "roll_when_no_higher_priority_action",
+            )
+            if recommended_turn_flow_action is not None:
+                recommended_action_types.append("ROLL_DICE")
+                turn_guidance.append(
+                    "ROLL_DICE advances the turn when no legal development, unmortgage, "
+                    "jail, purchase, auction, debt, or liquidity action has higher priority."
+                )
+        elif state.turn.phase in {
+            TurnPhase.POST_ROLL_MANAGEMENT,
+            TurnPhase.NEGOTIATION_WINDOW,
+            TurnPhase.END_TURN,
+        }:
+            recommended_turn_flow_action = _legal_action_template_for_type(
+                legal_actions,
+                "END_TURN",
+                "end_turn_when_no_higher_priority_action",
+            )
+            if recommended_turn_flow_action is not None:
+                recommended_action_types.append("END_TURN")
+                turn_guidance.append(
+                    "END_TURN advances play when no legal purchase, auction, debt, "
+                    "development, unmortgage, jail, or liquidity action has higher priority."
+                )
+
     return {
         "recommended_action_types": recommended_action_types,
         "recommended_action_types_before_roll": recommended_before_roll,
         "lower_priority_action_types": lower_priority_action_types,
+        "recommended_turn_flow_action": recommended_turn_flow_action,
         "purchase_guidance": purchase_guidance,
         "development_opportunities": development_opportunities,
         "recommended_development_opportunities": recommended_development_opportunities,
@@ -1450,6 +1489,18 @@ def _legal_action_template(
         "payload": dict(_mapping(action.get("payload"))),
         "reason_code": reason_code,
     }
+
+
+def _legal_action_template_for_type(
+    legal_actions: Sequence[Mapping[str, Any]],
+    action_type: str,
+    reason_code: str,
+) -> dict[str, Any] | None:
+    action = next(
+        (candidate for candidate in legal_actions if candidate.get("type") == action_type),
+        None,
+    )
+    return _legal_action_template(action, reason_code) if action is not None else None
 
 
 def _unmortgage_guidance(
@@ -3080,6 +3131,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When unmortgage_guidance provides recommended_unmortgage_action, use that exact legal action payload unless visible state has changed.",
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
             "When jail_guidance provides recommended_jail_action, use that exact legal action payload before paying the fine or rolling in jail.",
+            "When action_selection_guidance provides recommended_turn_flow_action, use that exact legal action payload for ordinary ROLL_DICE or END_TURN flow unless visible state has changed.",
             "When auction_guidance provides recommended_bid_amount, use that amount for BID_AUCTION instead of blindly submitting the legal minimum payload.",
             "When auction_guidance provides recommended_auction_action, use that action payload for BID_AUCTION or PASS_AUCTION unless visible auction state has changed.",
             "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
