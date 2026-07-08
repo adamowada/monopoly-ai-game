@@ -278,6 +278,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_near_monopoly_deal_proposal,
         ),
         StrategySmokeCase(
+            name="dark_blue_near_monopoly_deal_proposal",
+            game_id=UUID("00000000-0000-0000-0000-00000000b22e"),
+            decision_type="deal_proposal",
+            state_factory=_dark_blue_near_monopoly_state,
+            verifier=_verify_dark_blue_near_monopoly_deal_proposal,
+        ),
+        StrategySmokeCase(
             name="orange_bad_deal_rejection",
             game_id=UUID("00000000-0000-0000-0000-00000000b204"),
             decision_type="accept_reject",
@@ -652,6 +659,35 @@ def _verify_orange_near_monopoly_deal_proposal(parsed: dict[str, Any]) -> None:
     )
 
 
+def _verify_dark_blue_near_monopoly_deal_proposal(parsed: dict[str, Any]) -> None:
+    deal = _dict(parsed.get("deal"))
+    terms = _dict(deal.get("terms"))
+    instruments = [_dict(term) for term in terms.get("terms", [])]
+    cash_terms = [term for term in instruments if term.get("kind") == "immediate_cash_transfer"]
+    property_terms = [
+        term for term in instruments if term.get("kind") == "immediate_property_transfer"
+    ]
+
+    assert parsed.get("decision_type") == "deal_proposal"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert deal.get("recipient_player_ids") == [str(OTHER_PLAYER_ID)]
+    assert terms.get("kind") == "structured_deal"
+    assert terms.get("deal_schema_version") == 1
+    assert terms.get("participants") == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert any(
+        term.get("from_player_id") == str(AI_PLAYER_ID)
+        and term.get("to_player_id") == str(OTHER_PLAYER_ID)
+        and 350 <= int(term.get("amount", 0)) <= 525
+        for term in cash_terms
+    )
+    assert any(
+        term.get("from_player_id") == str(OTHER_PLAYER_ID)
+        and term.get("to_player_id") == str(AI_PLAYER_ID)
+        and term.get("property_id") == "property_park_place"
+        for term in property_terms
+    )
+
+
 def _verify_orange_bad_deal_rejection(parsed: dict[str, Any]) -> None:
     accept_reject = _dict(parsed.get("accept_reject"))
 
@@ -849,6 +885,12 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
             "deal_id": str(deal_id),
             "requested_decision": requested_decision,
         }
+    if case.name == "dark_blue_near_monopoly_deal_proposal":
+        return {
+            "mode": "live_strategy_smoke",
+            "negotiation_id": str(NEGOTIATION_ID),
+            "requested_decision": "Propose a structured deal to acquire Park Place.",
+        }
     return {
         "mode": "live_strategy_smoke",
         "negotiation_id": str(NEGOTIATION_ID),
@@ -870,6 +912,35 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         current_deal_id = str(CASH_DRAINING_DEAL_ID)
     elif case.name == "orange_monopoly_breakup_deal_rejection":
         current_deal_id = str(BREAKUP_DEAL_ID)
+    if case.name == "dark_blue_near_monopoly_deal_proposal":
+        return (
+            {
+                "id": str(NEGOTIATION_ID),
+                "opened_by_player_id": str(AI_PLAYER_ID),
+                "status": "active",
+                "phase": "START_TURN",
+                "round_number": 1,
+                "context": {
+                    "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+                    "current_deal_id": current_deal_id,
+                    "context": {
+                        "topic": "Trade for Park Place to complete Dark Blue",
+                        "target_property_id": "property_park_place",
+                        "target_property_name": "Park Place",
+                        "target_owner_id": str(OTHER_PLAYER_ID),
+                        "target_owner_name": "Ada",
+                        "suggested_offer": {
+                            "cash_budget_floor": 350,
+                            "cash_budget_ceiling": 525,
+                            "avoid_trading_away_group_property_ids": [
+                                "property_boardwalk"
+                            ],
+                        },
+                    },
+                },
+                "created_at": "2026-07-08T00:00:00Z",
+            },
+        )
     return (
         {
             "id": str(NEGOTIATION_ID),
@@ -965,6 +1036,19 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
         )
     if case.decision_type != "deal_proposal":
         return ()
+    if case.name == "dark_blue_near_monopoly_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-dark-blue-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(AI_PLAYER_ID),
+                "recipient_player_id": str(OTHER_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I want Park Place to complete Dark Blue and can offer fair cash now.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:01Z",
+            },
+        )
     return (
         {
             "id": "live-strategy-message-1",
@@ -1399,6 +1483,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
         )
     if case.decision_type != "deal_proposal":
         return ()
+    if case.name == "dark_blue_near_monopoly_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-dark-blue-deal-shape",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this deal_proposal, propose structured_deal terms containing "
+                    "immediate_cash_transfer from Grace to Ada and immediate_property_transfer "
+                    "of property_park_place from Ada to Grace. Offer cash between $350 and $525. "
+                    "Use deal_proposal_guidance.deal_payload_template as the base proposal. "
+                    "Do not trade away property_boardwalk."
+                ),
+            },
+        )
     return (
         {
             "id": "live-strategy-deal-shape",

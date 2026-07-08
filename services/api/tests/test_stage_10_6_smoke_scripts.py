@@ -107,6 +107,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "multiple_near_monopolies_prioritizes_orange_negotiation" in source
     assert "block_opponent_orange_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
+    assert "dark_blue_near_monopoly_deal_proposal" in source
     assert "orange_bad_deal_rejection" in source
     assert "orange_good_deal_acceptance" in source
     assert "orange_overpriced_deal_rejection" in source
@@ -672,6 +673,51 @@ def test_live_codex_strategy_smoke_deal_proposal_uses_context_pack_template() ->
     ] == [
         "immediate_cash_transfer",
         "immediate_property_transfer",
+    ]
+
+
+def test_live_codex_strategy_smoke_dark_blue_deal_proposal_uses_context_pack_template() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["dark_blue_near_monopoly_deal_proposal"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == ["deal_proposal"]
+    template = guidance["proposal_templates"][0]
+    assert template["target_property_id"] == "property_park_place"
+    assert template["target_property_name"] == "Park Place"
+    assert template["cash_budget_floor"] == 350
+    assert template["cash_budget_ceiling"] == 525
+    assert template["recommended_cash_offer"] == 437
+    assert template["avoid_trading_away_group_property_ids"] == ["property_boardwalk"]
+    deal_payload = template["deal_payload_template"]
+    assert deal_payload["recipient_player_ids"] == [str(module.OTHER_PLAYER_ID)]
+    assert deal_payload["terms"]["participants"] == [
+        str(module.AI_PLAYER_ID),
+        str(module.OTHER_PLAYER_ID),
+    ]
+    assert deal_payload["terms"]["terms"] == [
+        {
+            "kind": "immediate_cash_transfer",
+            "from_player_id": str(module.AI_PLAYER_ID),
+            "to_player_id": str(module.OTHER_PLAYER_ID),
+            "amount": 437,
+        },
+        {
+            "kind": "immediate_property_transfer",
+            "from_player_id": str(module.OTHER_PLAYER_ID),
+            "to_player_id": str(module.AI_PLAYER_ID),
+            "property_id": "property_park_place",
+        },
     ]
 
 
