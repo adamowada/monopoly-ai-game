@@ -207,6 +207,44 @@ describe("GameSetupPanel", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created"));
   });
 
+  it("sends optional debug cash and property allocations before navigating", async () => {
+    createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
+    render(<GameSetupPanel />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), {
+      target: { value: "Ada" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 2 name" }), {
+      target: { value: "Grace" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enable debug setup" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Player 1 starting cash" }), {
+      target: { value: "2200" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Mediterranean Avenue owner" }), {
+      target: { value: "0" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create game" }));
+
+    await waitFor(() => {
+      expect(createGameMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            debug_allocations: {
+              player_cash: [
+                { seat_order: 0, cash: 2200 },
+                { seat_order: 1, cash: 1500 },
+              ],
+              property_owners: [{ property_id: "property_mediterranean_avenue", seat_order: 0 }],
+            },
+          }),
+        }),
+      );
+    });
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created"));
+  });
+
   it("auto-generates common names when seats become AI players", () => {
     render(<GameSetupPanel />);
 

@@ -155,6 +155,37 @@ class PlayerCreateRequest(BaseModel):
     kind: Literal["human", "ai"]
 
 
+class DebugPlayerCashAllocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seat_order: int = Field(ge=0, le=4)
+    cash: int = Field(ge=0, le=100_000)
+
+
+class DebugPropertyOwnerAllocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    property_id: str = Field(min_length=1)
+    seat_order: int | None = Field(default=None, ge=0, le=4)
+
+
+class DebugAllocations(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_cash: list[DebugPlayerCashAllocation] = Field(default_factory=list)
+    property_owners: list[DebugPropertyOwnerAllocation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entries(self) -> "DebugAllocations":
+        cash_seats = [entry.seat_order for entry in self.player_cash]
+        if len(set(cash_seats)) != len(cash_seats):
+            raise ValueError("debug player_cash seat_order values must be unique")
+        property_ids = [entry.property_id for entry in self.property_owners]
+        if len(set(property_ids)) != len(property_ids):
+            raise ValueError("debug property_owners property_id values must be unique")
+        return self
+
+
 class CreateGameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -168,6 +199,42 @@ class CreateGameRequest(BaseModel):
         if len(set(names)) != len(names):
             raise ValueError("player names must be unique within a game")
         return self
+
+
+def _debug_initial_state_overrides(
+    settings: Mapping[str, Any],
+    player_ids: Sequence[UUID],
+) -> tuple[dict[str, int], dict[str, str | None]]:
+    raw_debug_allocations = settings.get("debug_allocations")
+    if raw_debug_allocations is None:
+        return {}, {}
+    try:
+        allocations = DebugAllocations.model_validate(raw_debug_allocations)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+
+    cash_by_player_id: dict[str, int] = {}
+    for allocation in allocations.player_cash:
+        if allocation.seat_order >= len(player_ids):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"debug player_cash seat_order {allocation.seat_order} does not reference a player",
+            )
+        cash_by_player_id[str(player_ids[allocation.seat_order])] = allocation.cash
+
+    owner_by_property_id: dict[str, str | None] = {}
+    for allocation in allocations.property_owners:
+        if allocation.seat_order is None:
+            owner_by_property_id[allocation.property_id] = None
+            continue
+        if allocation.seat_order >= len(player_ids):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"debug property_owners seat_order {allocation.seat_order} does not reference a player",
+            )
+        owner_by_property_id[allocation.property_id] = str(player_ids[allocation.seat_order])
+
+    return cash_by_player_id, owner_by_property_id
 
 
 class PlayerRecordResponse(BaseModel):
@@ -710,12 +777,25 @@ async def create_game(request: Request, payload: CreateGameRequest) -> GameMetad
     game_id = uuid4()
     seed = payload.seed or f"game-{game_id}"
     player_ids = [uuid4() for _ in payload.players]
+    settings = dict(payload.settings)
+    initial_cash_by_player_id, initial_property_owner_by_property_id = _debug_initial_state_overrides(
+        settings,
+        player_ids,
+    )
     player_setups = tuple(
         PlayerSetup(id=str(player_id), name=player.name, kind=player.kind)
         for player_id, player in zip(player_ids, payload.players, strict=True)
     )
-    initial_state = create_initial_game_state(seed=seed, players=player_setups, game_id=str(game_id))
-    settings = dict(payload.settings)
+    try:
+        initial_state = create_initial_game_state(
+            seed=seed,
+            players=player_setups,
+            game_id=str(game_id),
+            initial_cash_by_player_id=initial_cash_by_player_id,
+            initial_property_owner_by_property_id=initial_property_owner_by_property_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     async with session_factory() as session:
         async with session.begin():

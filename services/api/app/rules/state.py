@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -237,17 +237,36 @@ def create_initial_game_state(
     seed: str,
     players: Sequence[PlayerSetup],
     game_id: str,
+    initial_cash_by_player_id: Mapping[str, int] | None = None,
+    initial_property_owner_by_property_id: Mapping[str, str | None] | None = None,
 ) -> GameState:
     player_setups = tuple(PlayerSetup.model_validate(player) for player in players)
     _validate_player_count_and_ids(player_setups)
+    player_ids = {player.id for player in player_setups}
+    cash_overrides = dict(initial_cash_by_player_id or {})
+    property_owner_overrides = dict(initial_property_owner_by_property_id or {})
+    unknown_cash_player_ids = set(cash_overrides) - player_ids
+    if unknown_cash_player_ids:
+        raise ValueError(f"unknown initial cash player {sorted(unknown_cash_player_ids)[0]}")
+    for player_id, cash in cash_overrides.items():
+        if not isinstance(cash, int) or cash < 0:
+            raise ValueError(f"initial cash for {player_id} must be a non-negative integer")
 
     data = load_classic_monopoly_data()
+    property_ids = {property_data.id for property_data in data.properties}
+    unknown_property_ids = set(property_owner_overrides) - property_ids
+    if unknown_property_ids:
+        raise ValueError(f"unknown initial property {sorted(unknown_property_ids)[0]}")
+    unknown_owner_ids = {owner_id for owner_id in property_owner_overrides.values() if owner_id is not None} - player_ids
+    if unknown_owner_ids:
+        raise ValueError(f"unknown initial property owner {sorted(unknown_owner_ids)[0]}")
+
     player_states = tuple(
         PlayerState(
             id=player.id,
             name=player.name,
             kind=player.kind,
-            cash=INITIAL_PLAYER_CASH,
+            cash=cash_overrides.get(player.id, INITIAL_PLAYER_CASH),
             position=0,
             in_jail=False,
             jail_turns=0,
@@ -258,7 +277,10 @@ def create_initial_game_state(
     )
 
     property_ownership = tuple(
-        PropertyOwnershipState(property_id=property_data.id)
+        PropertyOwnershipState(
+            property_id=property_data.id,
+            owner_id=property_owner_overrides.get(property_data.id),
+        )
         for property_data in data.properties
     )
     chance_card_ids = tuple(card.id for card in data.decks.chance)

@@ -560,7 +560,7 @@ function DiceMotionStatus({ lastRoll, motion }: Readonly<{ lastRoll?: LastRollVi
       aria-live="polite"
       className={cn(
         "dice-motion-panel absolute z-40 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]",
-        motion ? "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" : "right-3 top-3",
+        "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
       )}
       data-dice-motion={motion?.status ?? "last-roll"}
       role="status"

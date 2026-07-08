@@ -127,6 +127,21 @@ function stateFixture(position = 0, eventSequence = 0) {
   };
 }
 
+function nextTurnStateFixture(position = 0, eventSequence = 0) {
+  const base = stateFixture(position, eventSequence);
+  return {
+    ...base,
+    state: {
+      ...base.state,
+      turn: {
+        phase: "START_TURN",
+        current_player_index: 1,
+        current_player_id: graceId,
+      },
+    },
+  };
+}
+
 function debtStateFixture(eventSequence = 0) {
   const state = stateFixture(4, eventSequence);
   return {
@@ -370,6 +385,29 @@ function acceptedReadingRailroadRollResponse() {
   };
 }
 
+function acceptedEndTurnResponse() {
+  const nextState = nextTurnStateFixture(5, 3);
+  return {
+    status: "accepted",
+    game_id: gameId,
+    accepted_events: [
+      {
+        id: "event-end-turn-3",
+        game_id: gameId,
+        sequence: 3,
+        actor_player_id: adaId,
+        event_type: "TURN_ENDED",
+        payload: { player_id: adaId, next_player_id: graceId },
+        state_hash: "state-3",
+        created_at: "2026-07-04T00:01:02.000Z",
+      },
+    ],
+    state: nextState.state,
+    state_hash: nextState.state_hash,
+    event_sequence: nextState.event_sequence,
+  };
+}
+
 function acceptedAiDiceStepResponse() {
   return aiStepResponse("done", {
     accepted_events: [
@@ -395,6 +433,34 @@ function acceptedAiDiceStepResponse() {
       },
     ],
     accepted_event_id: "event-ai-2",
+  });
+}
+
+function acceptedAiReadingRailroadStepResponse() {
+  return aiStepResponse("done", {
+    accepted_events: [
+      {
+        id: "event-ai-short-1",
+        game_id: gameId,
+        sequence: 1,
+        actor_player_id: graceId,
+        event_type: "DICE_ROLLED",
+        payload: { player_id: graceId, die_1: 2, die_2: 3, total: 5, is_doubles: false, roll_counter: 1 },
+        state_hash: "ai-state-1",
+        created_at: "2026-07-04T00:01:00.000Z",
+      },
+      {
+        id: "event-ai-short-2",
+        game_id: gameId,
+        sequence: 2,
+        actor_player_id: graceId,
+        event_type: "PLAYER_POSITION_SET",
+        payload: { player_id: graceId, position: 5 },
+        state_hash: "ai-state-2",
+        created_at: "2026-07-04T00:01:01.000Z",
+      },
+    ],
+    accepted_event_id: "event-ai-short-2",
   });
 }
 
@@ -847,11 +913,14 @@ describe("GamePlaySurface turn controls", () => {
     expect(routerMock.push).toHaveBeenCalledWith("/");
   });
 
-  it("keeps secondary table systems behind game-view tabs during normal play", async () => {
+  it("keeps a running log beside the board and secondary systems below the player trays", async () => {
     renderSurface(baseFetchMock());
 
     const views = await screen.findByRole("tablist", { name: "Table views" });
+    expect(within(views).queryByRole("tab", { name: "Game log" })).not.toBeInTheDocument();
     expect(within(views).getByRole("tab", { name: "Properties" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("running-log-panel")).toContainElement(screen.getByRole("region", { name: "Game log" }));
+    expect(screen.getByTestId("secondary-table-panel")).toContainElement(views);
     expect(await screen.findByRole("region", { name: "Property management" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Negotiation inbox" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Contracts obligations panel" })).not.toBeInTheDocument();
@@ -1097,10 +1166,13 @@ describe("GamePlaySurface turn controls", () => {
     const activePlayer = screen.getByRole("region", { name: "Active player" });
     expect(within(activePlayer).getByText("Space")).toBeInTheDocument();
     expect(within(activePlayer).getByText("Chance")).toBeInTheDocument();
+    const log = screen.getByRole("region", { name: "Game log" });
+    expect(within(log).getByText(/rolled 3 \+ 4 = 7/)).toBeInTheDocument();
+    expect(within(log).getByText(/moved to Chance/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Contracts" }));
-    const log = await screen.findByRole("region", { name: "Game log" });
-    expect(within(log).getByText(/DICE_ROLLED/)).toBeInTheDocument();
-    expect(within(log).getByText(/PLAYER_POSITION_SET/)).toBeInTheDocument();
+    const eventHistory = await screen.findByRole("region", { name: "Contract event history" });
+    expect(within(eventHistory).getByText(/DICE_ROLLED/)).toBeInTheDocument();
+    expect(within(eventHistory).getByText(/PLAYER_POSITION_SET/)).toBeInTheDocument();
   }, 18_000);
 
   it("pins the game log to the latest entry like a chat room", async () => {
@@ -1170,7 +1242,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(diceStatus.querySelectorAll("[data-dice-pip]")).toHaveLength(7);
   });
 
-  it("moves a player token square by square and clears dice after landing", async () => {
+  it("moves a player token square by square and keeps dice centered until end of turn", async () => {
     let accepted = false;
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
@@ -1227,12 +1299,87 @@ describe("GamePlaySurface turn controls", () => {
       { timeout: 3_000 },
     );
     await waitFor(
-      () => expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute("data-dice-motion", "last-roll"),
+      () => expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute("data-dice-motion", "settled"),
       {
         timeout: 5_000,
       },
     );
-    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("Ada rolled to Reading Railroad");
+    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("2 + 3 = 5");
+    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveClass("left-1/2");
+  }, 14_000);
+
+  it("clears the centered dice result once the next player's turn starts", async () => {
+    let stage: "fresh" | "rolled" | "ended" = "fresh";
+    const endTurnEvents = [
+      ...acceptedReadingRailroadRollResponse().accepted_events,
+      ...acceptedEndTurnResponse().accepted_events,
+    ];
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(stage === "fresh" ? gameFixture(0) : gameFixture(5));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        if (stage === "ended") {
+          return Response.json(nextTurnStateFixture(5, 3));
+        }
+        return Response.json(stage === "rolled" ? stateFixture(5, 2) : stateFixture(0, 0));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: stage === "rolled" ? [legalAction("END_TURN", {}, "state-2", 2)] : [legalAction("ROLL_DICE")],
+          state_hash: stage === "rolled" ? "state-2" : "state-0",
+          event_sequence: stage === "rolled" ? 2 : 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [aiLegalAction("ROLL_DICE", {}, "state-3", 3)],
+          state_hash: "state-3",
+          event_sequence: 3,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        if (stage === "ended") {
+          return Response.json(eventsFixture(endTurnEvents));
+        }
+        return Response.json(stage === "rolled" ? eventsFixture(acceptedReadingRailroadRollResponse().accepted_events) : eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/actions` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        if (body.type === "ROLL_DICE") {
+          stage = "rolled";
+          return Response.json(acceptedReadingRailroadRollResponse());
+        }
+        if (body.type === "END_TURN") {
+          stage = "ended";
+          return Response.json(acceptedEndTurnResponse());
+        }
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Roll dice" }));
+    const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
+    await waitFor(
+      () => expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute("data-dice-motion", "settled"),
+      { timeout: 5_000 },
+    );
+    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("2 + 3 = 5");
+
+    fireEvent.click(await screen.findByRole("button", { name: "End turn" }));
+
+    await waitFor(() => expect(screen.getByRole("region", { name: "Active player" })).toHaveTextContent("Grace"));
+    await waitFor(() => expect(within(board).queryByRole("status", { name: "Dice roll animation" })).not.toBeInTheDocument());
   }, 14_000);
 
   it("shows chance and community chest draws as a modal over the board", async () => {
@@ -1600,6 +1747,67 @@ describe("GamePlaySurface turn controls", () => {
     expect(diceStatus.querySelector("[data-dice-value='2']")).toBeInTheDocument();
     expect(diceStatus.querySelectorAll("[data-dice-pip]")).toHaveLength(7);
   });
+
+  it("moves an AI token square by square and keeps the AI dice result centered", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStateFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [],
+          state_hash: "ai-state-0",
+          event_sequence: 0,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(acceptedAiReadingRailroadStepResponse());
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    const stepButton = await screen.findByRole("button", { name: "Step AI" });
+    await waitFor(() => expect(stepButton).toBeEnabled());
+    fireEvent.click(stepButton);
+
+    const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
+    const expectedSteps = [
+      "Grace token at Mediterranean Avenue, position 1",
+      "Grace token at Community Chest, position 2",
+      "Grace token at Baltic Avenue, position 3",
+      "Grace token at Income Tax, position 4",
+      "Grace token at Reading Railroad, position 5",
+    ];
+    for (const stepLabel of expectedSteps) {
+      expect(await within(board).findByLabelText(stepLabel, {}, { timeout: 3_000 })).toBeVisible();
+    }
+    await waitFor(
+      () =>
+        expect(within(board).getByRole("status", { name: "Board landing" })).toHaveTextContent(
+          "Grace landed on Reading Railroad",
+        ),
+      { timeout: 3_000 },
+    );
+    const diceStatus = within(board).getByRole("status", { name: "Dice roll animation" });
+    expect(diceStatus).toHaveTextContent("2 + 3 = 5");
+    expect(diceStatus).toHaveAttribute("data-dice-motion", "settled");
+    expect(diceStatus).toHaveClass("left-1/2");
+    expect(diceStatus).not.toHaveClass("right-3");
+  }, 14_000);
 
   it("refetches AI audit records after a successful Manual AI step", async () => {
     let resolveAiStep: (response: Response) => void = () => {};

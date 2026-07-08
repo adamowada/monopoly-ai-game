@@ -692,10 +692,14 @@ function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game
   }
 
   return (
-    <section id="game-log" aria-label="Game log" className="rounded-md border border-neutral-200 bg-white p-4">
+    <section
+      id="contract-event-history"
+      aria-label="Contract event history"
+      className="rounded-md border border-neutral-200 bg-white p-4"
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-neutral-950">Full game log</h2>
+          <h2 className="text-sm font-semibold text-neutral-950">Event history</h2>
         </div>
         <div className="flex items-center gap-2 text-xs text-neutral-500">
           <ListFilter aria-hidden="true" className="size-3.5" />

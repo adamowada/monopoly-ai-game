@@ -368,8 +368,8 @@ describe("ContractsPanel", () => {
     expect(upcomingObligation).toHaveTextContent("contract_id contract-1");
     expect(upcomingObligation).toHaveTextContent("due_turn 6");
 
-    const log = within(panel).getByRole("region", { name: "Game log" });
-    expect(log).toHaveTextContent("Full game log");
+    const log = within(panel).getByRole("region", { name: "Contract event history" });
+    expect(log).toHaveTextContent("Event history");
     expect(log).toHaveTextContent("Actions");
     expect(log).toHaveTextContent("Deals");
     expect(log).toHaveTextContent("AI decisions");
@@ -387,7 +387,7 @@ describe("ContractsPanel", () => {
   it("filters full game log entries while keeping rejections separate from accepted events", async () => {
     renderPanel(createContractsFetchMock());
 
-    const log = await screen.findByRole("region", { name: "Game log" });
+    const log = await screen.findByRole("region", { name: "Contract event history" });
     await within(log).findByText("Deal deal-1");
     expect(log).toHaveTextContent("DICE_ROLLED");
     expect(log).toHaveTextContent("Deal deal-1");
@@ -428,7 +428,7 @@ describe("ContractsPanel", () => {
     }));
     renderPanel(createContractsFetchMock({ deals: [] }), longEvents);
 
-    const log = await screen.findByRole("region", { name: "Game log" });
+    const log = await screen.findByRole("region", { name: "Contract event history" });
     await within(log).findByText("Long session event 320");
 
     expect(log).toHaveTextContent("200 of 321 shown");

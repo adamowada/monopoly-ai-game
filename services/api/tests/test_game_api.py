@@ -144,6 +144,74 @@ async def test_create_and_load_game_metadata_and_state(
 
 
 @pytest.mark.asyncio
+async def test_create_game_applies_debug_cash_and_property_allocations(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "debug-allocation-game",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [
+                        {"seat_order": 0, "cash": 2200},
+                        {"seat_order": 1, "cash": 900},
+                    ],
+                    "property_owners": [
+                        {"property_id": "property_mediterranean_avenue", "seat_order": 0}
+                    ],
+                }
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    try:
+        state_response = await client.get(f"/games/{game_id}/state")
+        assert state_response.status_code == 200
+        state = state_response.json()["state"]
+        assert state["players"][0]["cash"] == 2200
+        assert state["players"][1]["cash"] == 900
+        mediterranean = next(
+            ownership
+            for ownership in state["property_ownership"]
+            if ownership["property_id"] == "property_mediterranean_avenue"
+        )
+        assert mediterranean["owner_id"] == created["players"][0]["id"]
+        assert created["players"][0]["state"]["cash"] == 2200
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_create_game_rejects_invalid_debug_allocations(client: httpx.AsyncClient) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "bad-debug-allocation-game",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [{"seat_order": 9, "cash": 2200}],
+                    "property_owners": [],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_game_rejects_malformed_player_setup(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/games",

@@ -117,10 +117,9 @@ type TurnResultSummary = {
   detail: string;
 };
 
-type TableView = "game-log" | "properties" | "deals" | "contracts" | "ai-notebook";
+type TableView = "properties" | "deals" | "contracts" | "ai-notebook";
 
 const tableViews: Array<{ id: TableView; label: string }> = [
-  { id: "game-log", label: "Game log" },
   { id: "properties", label: "Properties" },
   { id: "deals", label: "Deals" },
   { id: "contracts", label: "Contracts" },
@@ -155,7 +154,6 @@ const propertyGroupById = new Map<string, (typeof PROPERTY_GROUPS)[number]>(PROP
 const diceRevealDelayMs = 700;
 const tokenStepDelayMs = 440;
 const tokenSettleDelayMs = 480;
-const motionClearDelayMs = 1200;
 const cardRevealDelayMs = 320;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1850,9 +1848,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const router = useRouter();
   const queryClient = useQueryClient();
   const baseUrl = backendBaseUrl(apiBaseUrl);
-  const [activeTableView, setActiveTableView] = useState<TableView>(() =>
-    initialGame.players.some((player) => player.controller_type === "human") ? "properties" : "game-log",
-  );
+  const [activeTableView, setActiveTableView] = useState<TableView>("properties");
   const [localRejectedAction, setLocalRejectedAction] = useState<ActionRejectedResponse | null>(null);
   const [acceptedEvents, setAcceptedEvents] = useState<AcceptedEvent[]>([]);
   const [pendingActionType, setPendingActionType] = useState<string | null>(null);
@@ -1928,6 +1924,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     () => latestRollFromEvents(visibleEvents, playersById),
     [playersById, visibleEvents],
   );
+  const displayedLastRoll = phase === "START_TURN" && !boardMotion ? null : latestRoll;
   const latestDrawnCardEventId = latestDrawnCard?.eventId ?? null;
 
   const endGameMutation = useMutation({
@@ -2016,12 +2013,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       return () => window.clearTimeout(moveTimer);
     }
 
-    if (boardMotion.status === "settled") {
-      const clearTimer = window.setTimeout(() => {
-        setBoardMotion((current) => (current?.motionKey === boardMotion.motionKey ? null : current));
-      }, motionClearDelayMs);
-      return () => window.clearTimeout(clearTimer);
-    }
+    return undefined;
   }, [boardMotion, queuedBoardMotion]);
 
   useEffect(() => {
@@ -2342,8 +2334,21 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
 
   const hasAuctionContext = Boolean(activeAuction) || auctionLegalActions.length > 0;
   const turnResultSummary = lastTurnResultFromEvents(visibleEvents, game);
+  const runningLogPanel = (
+    <section
+      aria-label="Running log panel"
+      className="grid min-h-0 gap-3 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_14px_30px_rgba(47,36,24,0.12)]"
+      data-testid="running-log-panel"
+    >
+      <GameLogChatPanel events={visibleEvents} game={game} />
+    </section>
+  );
   const tableViewPanel = (
-    <section aria-label="Table workspace" className="grid min-h-0 gap-3 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_14px_30px_rgba(47,36,24,0.12)]">
+    <section
+      aria-label="Table workspace"
+      className="grid min-h-0 gap-3 rounded-md border-2 border-[#2f2418]/30 bg-[#fff8e8] p-3 shadow-[0_14px_30px_rgba(47,36,24,0.12)]"
+      data-testid="secondary-table-panel"
+    >
       <TableViewTabs activeView={activeTableView} onChange={setActiveTableView} />
       <div
         aria-labelledby={`${activeTableView}-tab`}
@@ -2351,7 +2356,6 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         id={`${activeTableView}-panel`}
         role="tabpanel"
       >
-        {activeTableView === "game-log" ? <GameLogChatPanel events={visibleEvents} game={game} /> : null}
         {activeTableView === "properties" ? (
           <div id="properties">
             <PropertyManagementPanel
@@ -2500,9 +2504,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         showLoadGames={showLoadGames}
         status={formatGameStatus(game.status)}
       />
-      <div className="grid gap-4 xl:grid-cols-[380px_minmax(0,1fr)_320px] xl:items-start">
+      <div className="grid gap-4 xl:grid-cols-[minmax(420px,500px)_minmax(0,1fr)] xl:items-start">
         <aside className="order-4 min-h-0 xl:sticky xl:top-4 xl:order-1 xl:row-span-2 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
-          {tableViewPanel}
+          {runningLogPanel}
         </aside>
 
         <main className="order-1 grid content-start gap-3 xl:order-2">
@@ -2510,7 +2514,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
             <ClassicGameBoard
               drawnCard={visibleDrawnCard}
               game={game}
-              lastRoll={latestRoll}
+              lastRoll={displayedLastRoll}
               motion={boardMotion ?? undefined}
               onDismissDrawnCard={() => setDismissedCardEventId(visibleDrawnCard?.eventId ?? null)}
               snapshot={stateQuery.data}
@@ -2518,40 +2522,42 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
           </div>
         </main>
 
-        <aside className="order-2 grid content-start gap-4 xl:sticky xl:top-4 xl:order-3 xl:row-span-2 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
-          {turnControlsPanel}
-          <ActivePlayerPanel player={currentPlayer} phase={phase} />
-          <section aria-label="Turn context" className="grid content-start gap-4">
-          {hasAuctionContext ? (
-            <AuctionPanel
-              controlsDisabled={auctionControlsDisabled}
-              events={visibleEvents}
-              game={game}
-              activeAiPlayerId={turnAiPlayer?.id ?? null}
-              aiStepDisabled={aiStepStateBlocked}
-              aiStepPending={aiStep.isPending}
-              isActionDisabled={isAuctionActionDisabled}
-              legalActions={auctionLegalActions}
-              onStepAiBidder={(playerId) => handleAiStep("auction_ai_bidder", playerId)}
-              onSubmit={handleSubmit}
-              pendingActionType={pendingActionType}
-              snapshot={stateQuery.data}
-            />
-          ) : phase === "NEGOTIATION_WINDOW" ? (
-            <TradeContextPanel player={currentPlayer} />
-          ) : (
-            <LastTurnResultPanel summary={turnResultSummary} />
-          )}
-          </section>
-        </aside>
-
-        <div className="order-3 xl:order-4 xl:col-start-2">
+        <div className="order-2 grid gap-4 xl:order-3 xl:col-start-2">
           <PlayerTrayRail
             currentPlayerId={currentPlayer?.id ?? null}
             events={visibleEvents}
             game={game}
             snapshot={stateQuery.data}
           />
+          <div className="grid gap-4">
+            {turnControlsPanel}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <ActivePlayerPanel player={currentPlayer} phase={phase} />
+              <section aria-label="Turn context" className="grid content-start gap-4">
+                {hasAuctionContext ? (
+                  <AuctionPanel
+                    controlsDisabled={auctionControlsDisabled}
+                    events={visibleEvents}
+                    game={game}
+                    activeAiPlayerId={turnAiPlayer?.id ?? null}
+                    aiStepDisabled={aiStepStateBlocked}
+                    aiStepPending={aiStep.isPending}
+                    isActionDisabled={isAuctionActionDisabled}
+                    legalActions={auctionLegalActions}
+                    onStepAiBidder={(playerId) => handleAiStep("auction_ai_bidder", playerId)}
+                    onSubmit={handleSubmit}
+                    pendingActionType={pendingActionType}
+                    snapshot={stateQuery.data}
+                  />
+                ) : phase === "NEGOTIATION_WINDOW" ? (
+                  <TradeContextPanel player={currentPlayer} />
+                ) : (
+                  <LastTurnResultPanel summary={turnResultSummary} />
+                )}
+              </section>
+            </div>
+            {tableViewPanel}
+          </div>
         </div>
       </div>
 

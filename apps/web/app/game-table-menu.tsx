@@ -32,7 +32,7 @@ type SavedGameRecord = {
   savedAt: string;
 };
 
-type TableViewTarget = "game-log" | "properties" | "deals" | "contracts" | "ai-notebook";
+type TableViewTarget = "properties" | "deals" | "contracts" | "ai-notebook";
 
 type GameTableMenuProps = {
   bankruptcyAction?: LegalAction | null;
@@ -60,7 +60,7 @@ const navigationItems = [
   { label: "Deals", href: "#deals", icon: Handshake, tableView: "deals" },
   { label: "Contracts", href: "#contracts", icon: FileText, tableView: "contracts" },
   { label: "AI notebook", href: "#ai-notebook", icon: Brain, tableView: "ai-notebook" },
-  { label: "Game log", href: "#game-log", icon: ScrollText, tableView: "game-log" },
+  { label: "Game log", href: "#game-log", icon: ScrollText },
 ] as const;
 
 function formatSavedStatus(status: string): string {

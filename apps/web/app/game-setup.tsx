@@ -1,5 +1,6 @@
 "use client";
 
+import { BOARD_SPACES, PROPERTIES_BY_ID } from "@monopoly-ai-game/schemas";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -21,6 +22,15 @@ type SetupPlayer = {
 
 const playerColors = ["#0f766e", "#2563eb", "#7c3aed", "#dc2626", "#ca8a04"];
 const hexColorPattern = /^#[0-9a-fA-F]{6}$/;
+const defaultStartingCash = "1500";
+const maxDebugStartingCash = 100_000;
+const debugPropertyOptions = BOARD_SPACES.flatMap((space) => {
+  if (!space.property_id) {
+    return [];
+  }
+  const property = PROPERTIES_BY_ID[space.property_id];
+  return property ? [{ id: property.id, name: property.name }] : [];
+});
 
 export const AI_PLAYER_NAMES = [
   "Emma",
@@ -79,6 +89,14 @@ function parsePositiveInteger(value: string): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+function parseNonNegativeInteger(value: string): number | null {
+  if (!/^\d+$/.test(value.trim())) {
+    return null;
+  }
+  const parsed = Number.parseInt(value, 10);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 function normalizeColor(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -109,7 +127,14 @@ function generatedAiName(players: SetupPlayer[], targetIndex: number): string {
   return `AI ${targetIndex + 1}`;
 }
 
-function validateSetup(players: SetupPlayer[], maxRounds: string, proposalLimit: string): string[] {
+function validateSetup(
+  players: SetupPlayer[],
+  maxRounds: string,
+  proposalLimit: string,
+  debugEnabled: boolean,
+  debugCash: Record<string, string>,
+  debugPropertyOwners: Record<string, string>,
+): string[] {
   const messages: string[] = [];
   const names = players.map((player) => player.name.trim());
   const lowerNames = names.map((name) => name.toLowerCase());
@@ -147,6 +172,21 @@ function validateSetup(players: SetupPlayer[], maxRounds: string, proposalLimit:
   } else if (proposalLimitValue > 50) {
     messages.push("Proposal limit per player must be 50 or less");
   }
+  if (debugEnabled) {
+    for (const player of players) {
+      const cash = parseNonNegativeInteger(debugCash[player.id] ?? defaultStartingCash);
+      if (cash === null || cash > maxDebugStartingCash) {
+        messages.push(`${player.name.trim() || "Player"} starting cash must be between 0 and ${maxDebugStartingCash}`);
+      }
+    }
+    const validSeatValues = new Set(players.map((_, index) => String(index)));
+    for (const ownerValue of Object.values(debugPropertyOwners)) {
+      if (ownerValue !== "" && !validSeatValues.has(ownerValue)) {
+        messages.push("Debug property owners must reference a configured seat");
+        break;
+      }
+    }
+  }
 
   return messages;
 }
@@ -157,6 +197,9 @@ export function GameSetupPanel() {
   const [players, setPlayers] = useState<SetupPlayer[]>(() => [defaultPlayer(0), defaultPlayer(1)]);
   const [maxRounds, setMaxRounds] = useState("3");
   const [proposalLimit, setProposalLimit] = useState("4");
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugCash, setDebugCash] = useState<Record<string, string>>({});
+  const [debugPropertyOwners, setDebugPropertyOwners] = useState<Record<string, string>>({});
   const [messages, setMessages] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -201,9 +244,49 @@ export function GameSetupPanel() {
     setPlayers((current) => current.filter((_, playerIndex) => playerIndex !== index));
   }
 
+  function debugStartingCash(player: SetupPlayer): string {
+    return debugCash[player.id] ?? defaultStartingCash;
+  }
+
+  function setDebugStartingCash(playerId: string, cash: string) {
+    setDebugCash((current) => ({ ...current, [playerId]: cash }));
+  }
+
+  function setDebugPropertyOwner(propertyId: string, seatOrder: string) {
+    setDebugPropertyOwners((current) => ({ ...current, [propertyId]: seatOrder }));
+  }
+
+  function debugAllocationSettings() {
+    if (!debugEnabled) {
+      return {};
+    }
+    const validSeatValues = new Set(players.map((_, index) => String(index)));
+    return {
+      debug_allocations: {
+        player_cash: players.map((player, seatOrder) => ({
+          seat_order: seatOrder,
+          cash: parseNonNegativeInteger(debugStartingCash(player)) ?? Number(defaultStartingCash),
+        })),
+        property_owners: Object.entries(debugPropertyOwners)
+          .filter(([, seatOrder]) => seatOrder !== "" && validSeatValues.has(seatOrder))
+          .map(([propertyId, seatOrder]) => ({
+            property_id: propertyId,
+            seat_order: Number.parseInt(seatOrder, 10),
+          })),
+      },
+    };
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const validationMessages = validateSetup(players, maxRounds, proposalLimit);
+    const validationMessages = validateSetup(
+      players,
+      maxRounds,
+      proposalLimit,
+      debugEnabled,
+      debugCash,
+      debugPropertyOwners,
+    );
     if (validationMessages.length > 0) {
       setMessages(validationMessages);
       return;
@@ -227,6 +310,7 @@ export function GameSetupPanel() {
           seat_order: seatOrder,
           icon: player.icon,
         })),
+        ...debugAllocationSettings(),
         negotiation_cutoffs: {
           max_rounds: maxRoundsValue,
           max_proposals_per_player: proposalLimitValue,
@@ -416,6 +500,67 @@ export function GameSetupPanel() {
                   className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
                 />
               </label>
+            </fieldset>
+
+            <fieldset className="grid gap-3 rounded-md border border-[#b99768]/70 bg-white/60 p-3">
+              <legend className="px-1 text-sm font-black text-[#2f2418]">Debug setup</legend>
+              <label className="flex items-center gap-2 text-sm font-bold text-[#2f2418]">
+                <input
+                  aria-label="Enable debug setup"
+                  checked={debugEnabled}
+                  className="size-4 accent-[#0f766e]"
+                  disabled={isSubmitting}
+                  onChange={(event) => setDebugEnabled(event.target.checked)}
+                  type="checkbox"
+                />
+                Enable debug setup
+              </label>
+
+              {debugEnabled ? (
+                <div className="grid gap-4">
+                  <div className="grid gap-2">
+                    <div className="text-xs font-black uppercase text-[#6f604c]">Starting cash</div>
+                    {players.map((player, index) => (
+                      <label key={player.id} className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                        {player.name.trim() || `Player ${index + 1}`}
+                        <input
+                          aria-label={`Player ${index + 1} starting cash`}
+                          max={maxDebugStartingCash}
+                          min={0}
+                          onChange={(event) => setDebugStartingCash(player.id, event.target.value)}
+                          type="number"
+                          value={debugStartingCash(player)}
+                          className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                        />
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-2">
+                    <div className="text-xs font-black uppercase text-[#6f604c]">Property owners</div>
+                    <div className="grid max-h-80 gap-2 overflow-y-auto pr-1">
+                      {debugPropertyOptions.map((property) => (
+                        <label key={property.id} className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                          {property.name}
+                          <select
+                            aria-label={`${property.name} owner`}
+                            onChange={(event) => setDebugPropertyOwner(property.id, event.target.value)}
+                            value={debugPropertyOwners[property.id] ?? ""}
+                            className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                          >
+                            <option value="">Bank</option>
+                            {players.map((player, seatOrder) => (
+                              <option key={player.id} value={seatOrder}>
+                                {player.name.trim() || `Player ${seatOrder + 1}`}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </fieldset>
 
             {messages.length > 0 ? (

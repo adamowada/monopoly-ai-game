@@ -142,6 +142,43 @@ def test_initial_game_state_contains_core_state_slots() -> None:
     assert state.active_bankruptcy is None
 
 
+def test_initial_game_state_can_apply_debug_cash_and_property_allocations() -> None:
+    state = create_initial_game_state(
+        seed="debug-seed",
+        players=_player_setups(2),
+        game_id="game-1",
+        initial_cash_by_player_id={"player-1": 2200},
+        initial_property_owner_by_property_id={"property_mediterranean_avenue": "player-1"},
+    )
+
+    assert state.players[0].cash == 2200
+    assert state.players[1].cash == 1500
+    mediterranean = next(
+        ownership
+        for ownership in state.property_ownership
+        if ownership.property_id == "property_mediterranean_avenue"
+    )
+    assert mediterranean.owner_id == "player-1"
+
+
+def test_initial_game_state_rejects_debug_allocations_for_unknown_entities() -> None:
+    with pytest.raises(ValueError, match="unknown initial cash player"):
+        create_initial_game_state(
+            seed="debug-seed",
+            players=_player_setups(2),
+            game_id="game-1",
+            initial_cash_by_player_id={"missing-player": 2200},
+        )
+
+    with pytest.raises(ValueError, match="unknown initial property"):
+        create_initial_game_state(
+            seed="debug-seed",
+            players=_player_setups(2),
+            game_id="game-1",
+            initial_property_owner_by_property_id={"property_missing": "player-1"},
+        )
+
+
 def test_initial_decks_are_seeded_deterministic_shuffles() -> None:
     players = _player_setups(2)
 
