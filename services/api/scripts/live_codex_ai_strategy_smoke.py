@@ -53,6 +53,10 @@ BROWN_PROPERTY_IDS = {
     "property_mediterranean_avenue",
     "property_baltic_avenue",
 }
+DARK_BLUE_PROPERTY_IDS = {
+    "property_park_place",
+    "property_boardwalk",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +213,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             decision_type="action_decision",
             state_factory=_orange_monopoly_state,
             verifier=_verify_orange_monopoly_development,
+        ),
+        StrategySmokeCase(
+            name="dark_blue_monopoly_development",
+            game_id=UUID("00000000-0000-0000-0000-00000000b22c"),
+            decision_type="action_decision",
+            state_factory=_dark_blue_monopoly_state,
+            verifier=_verify_dark_blue_monopoly_development,
         ),
         StrategySmokeCase(
             name="multiple_monopolies_prioritizes_orange_development",
@@ -537,6 +548,15 @@ def _verify_orange_monopoly_development(parsed: dict[str, Any]) -> None:
     assert action.get("type") == "BUY_HOUSE", f"expected BUY_HOUSE, got {action.get('type')}"
     assert payload.get("property_id") == "property_new_york_avenue"
     assert payload.get("cost") == 100
+
+
+def _verify_dark_blue_monopoly_development(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BUY_HOUSE", f"expected BUY_HOUSE, got {action.get('type')}"
+    assert payload.get("property_id") == "property_boardwalk"
+    assert payload.get("cost") == 200
 
 
 def _verify_low_cash_defers_monopoly_development(parsed: dict[str, Any]) -> None:
@@ -1241,6 +1261,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "dark_blue_monopoly_development":
+        return (
+            {
+                "id": "live-strategy-develop-dark-blue",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace owns Park Place and Boardwalk with "
+                    "enough cash to build. BUY_HOUSE is legal on both dark-blue properties, "
+                    "and property_boardwalk has the higher marginal_rent_gain for the first "
+                    "house. Choose BUY_HOUSE on property_boardwalk before rolling."
+                ),
+            },
+        )
     if case.name == "low_cash_defers_monopoly_development":
         return (
             {
@@ -1850,6 +1883,25 @@ def _orange_monopoly_state(game_id: UUID) -> GameState:
             "hotel": False,
         }
         if item.property_id in ORANGE_PROPERTY_IDS
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _dark_blue_monopoly_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-dark-blue-monopoly")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 3000
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+            "mortgaged": False,
+            "houses": 0,
+            "hotel": False,
+        }
+        if item.property_id in DARK_BLUE_PROPERTY_IDS
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]

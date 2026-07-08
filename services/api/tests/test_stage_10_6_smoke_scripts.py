@@ -97,6 +97,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "auction_pass_to_preserve_cash_reserve" in source
     assert "auction_bid_to_complete_color_group" in source
     assert "auction_bid_to_block_opponent_color_group" in source
+    assert "dark_blue_monopoly_development" in source
     assert "orange_monopoly_development" in source
     assert "multiple_monopolies_prioritizes_orange_development" in source
     assert "low_cash_defers_monopoly_development" in source
@@ -142,6 +143,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "cash reserve floor" in source
     assert "property_reading_railroad" in source
     assert "property_boardwalk" in source
+    assert "property_park_place" in source
     assert "property_short_line_railroad" in source
     assert "property_pennsylvania_railroad" in source
     assert "open_negotiation" in source
@@ -353,6 +355,42 @@ def test_live_codex_strategy_smoke_defers_low_cash_development() -> None:
     assert len(guidance["deferred_development_opportunities"]) == 3
     assert guidance["deferred_development_opportunities"][0]["cash_after_cost"] == 250
     assert "cash reserve floor" in " ".join(guidance["turn_guidance"])
+
+
+def test_live_codex_strategy_smoke_prioritizes_dark_blue_development() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["dark_blue_monopoly_development"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["action_selection_guidance"]
+    opportunities = guidance["development_opportunities"]
+    assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
+    assert opportunities[0]["group"] == "dark_blue"
+    assert opportunities[0]["property_id"] == "property_boardwalk"
+    assert opportunities[0]["marginal_rent_gain"] == 150
+    assert opportunities[0]["development_priority_score"] == 2100
+    assert guidance["recommended_development_action"] == {
+        "type": "BUY_HOUSE",
+        "payload": {
+            "property_id": "property_boardwalk",
+            "cost": 200,
+        },
+        "reason_code": "highest_priority_even_monopoly_development",
+        "property_id": "property_boardwalk",
+        "property_name": "Boardwalk",
+        "group": "dark_blue",
+        "group_name": "Dark Blue",
+        "development_priority_score": 2100,
+        "marginal_rent_gain": 150,
+    }
 
 
 def test_live_codex_strategy_smoke_auction_blocks_opponent_group_completion() -> None:
