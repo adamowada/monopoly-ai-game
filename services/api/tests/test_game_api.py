@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from app.ai.context_pack import build_ai_context_pack
 from app.core.config import Settings
 from app.db.metadata import (
     deals,
@@ -23,6 +24,7 @@ from app.db.metadata import (
     rejected_actions,
 )
 from app.main import create_app
+from app.rules.state import GameState
 
 
 TEST_DATABASE_URL = os.getenv(
@@ -243,6 +245,85 @@ async def test_debug_monopoly_allocation_exposes_development_actions(
             "property_new_york_avenue",
         ]
         assert all(action["payload"]["cost"] == 100 for action in build_actions)
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_debug_near_monopoly_allocation_exposes_ai_trade_strategy(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "debug-near-monopoly-negotiation-game",
+            "players": [
+                {"name": "Ada", "kind": "ai"},
+                {"name": "Grace", "kind": "ai"},
+                {"name": "Linus", "kind": "ai"},
+                {"name": "Marie", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [
+                        {"seat_order": 0, "cash": 1500},
+                        {"seat_order": 1, "cash": 1500},
+                        {"seat_order": 2, "cash": 1500},
+                        {"seat_order": 3, "cash": 1500},
+                    ],
+                    "property_owners": [
+                        {"property_id": "property_st_james_place", "seat_order": 0},
+                        {"property_id": "property_new_york_avenue", "seat_order": 0},
+                        {"property_id": "property_tennessee_avenue", "seat_order": 1},
+                    ],
+                }
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    target_player_id = created["players"][1]["id"]
+    try:
+        state_response = await client.get(f"/games/{game_id}/state")
+        assert state_response.status_code == 200
+        state_body = dict(state_response.json()["state"])
+        state_body.pop("state_hash", None)
+        state = GameState.model_validate(state_body)
+
+        pack = build_ai_context_pack(
+            state,
+            player_id=UUID(ai_player_id),
+            decision_type="open_negotiation",
+        )
+        guidance = pack["negotiation_strategy_guidance"]
+
+        assert guidance["recommended_decision_types"] == ["open_negotiation"]
+        assert guidance["open_negotiation_payload_template"] == {
+            "participant_player_ids": [ai_player_id, target_player_id],
+            "context": {
+                "topic": "Trade for Tennessee Avenue to complete Orange",
+                "target_property_id": "property_tennessee_avenue",
+                "target_property_name": "Tennessee Avenue",
+                "target_owner_id": target_player_id,
+                "target_owner_name": "Grace",
+                "strategic_reason": (
+                    "Completing Orange unlocks BUY_HOUSE development and materially raises rent pressure."
+                ),
+                "suggested_offer": {
+                    "cash_budget_floor": 180,
+                    "cash_budget_ceiling": 270,
+                    "avoid_trading_away_group_property_ids": [
+                        "property_st_james_place",
+                        "property_new_york_avenue",
+                    ],
+                },
+            },
+        }
+        assert guidance["trade_opportunities"][0]["target_property_id"] == "property_tennessee_avenue"
+        assert guidance["trade_opportunities"][0]["target_owner_id"] == target_player_id
     finally:
         await delete_game(session_factory, str(game_id))
 
