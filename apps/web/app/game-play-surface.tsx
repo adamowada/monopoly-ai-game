@@ -200,6 +200,7 @@ const tokenSettleDelayMs = 480;
 const cardRevealDelayMs = 320;
 const jailBoardPosition = 10;
 const tradeHealthyCashFloor = 300;
+const groupCompletionCounterofferCashFloor = 100;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -1190,8 +1191,104 @@ function acceptedPlayerIdsForDeal(negotiation: Negotiation, dealId: string): Set
   return new Set(negotiation.acceptances[dealId] ?? []);
 }
 
+function ownershipOwnerByPropertyId(snapshot: GameStateResponse | undefined): Map<string, string | null> {
+  const ownership = snapshot?.state.property_ownership;
+  const ownerByPropertyId = new Map<string, string | null>();
+  if (!Array.isArray(ownership)) {
+    return ownerByPropertyId;
+  }
+  for (const entry of ownership) {
+    if (!isRecord(entry) || typeof entry.property_id !== "string") {
+      continue;
+    }
+    ownerByPropertyId.set(entry.property_id, typeof entry.owner_id === "string" ? entry.owner_id : null);
+  }
+  return ownerByPropertyId;
+}
+
+function termPlayerId(term: Deal["terms"][number], key: "from_player_id" | "to_player_id"): string | null {
+  const value = term[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+function termPropertyId(term: Deal["terms"][number]): string | null {
+  const value = term.property_id;
+  return typeof value === "string" && value ? value : null;
+}
+
+function termAmount(term: Deal["terms"][number]): number {
+  return readInteger(term.amount);
+}
+
+function dealCashTransferAmount(deal: Deal, fromPlayerId: string, toPlayerId: string): number {
+  return deal.terms.reduce((total, term) => {
+    if (
+      term.kind === "immediate_cash_transfer" &&
+      termPlayerId(term, "from_player_id") === fromPlayerId &&
+      termPlayerId(term, "to_player_id") === toPlayerId
+    ) {
+      return total + termAmount(term);
+    }
+    return total;
+  }, 0);
+}
+
+function propertyCompletesResponderGroup(
+  snapshot: GameStateResponse | undefined,
+  responderId: string,
+  property: StaticDataProperty,
+): boolean {
+  const group = propertyGroupById.get(property.group);
+  if (!group || group.property_ids.length <= 1) {
+    return false;
+  }
+  const ownerByPropertyId = ownershipOwnerByPropertyId(snapshot);
+  return group.property_ids
+    .filter((propertyId) => propertyId !== property.id)
+    .every((propertyId) => ownerByPropertyId.get(propertyId) === responderId);
+}
+
+function shouldAutoCounterofferCurrentDeal(
+  game: GameMetadata,
+  snapshot: GameStateResponse | undefined,
+  responder: GameMetadata["players"][number],
+  deal: Deal,
+): boolean {
+  if (!snapshot || deal.parent_deal_id) {
+    return false;
+  }
+  const responderCash = playerCashAmount(responder, snapshot);
+  for (const term of deal.terms) {
+    if (term.kind !== "immediate_property_transfer" || termPlayerId(term, "to_player_id") !== responder.id) {
+      continue;
+    }
+    const senderPlayerId = termPlayerId(term, "from_player_id");
+    const property = propertyById(termPropertyId(term));
+    if (!senderPlayerId || !property || !propertyCompletesResponderGroup(snapshot, responder.id, property)) {
+      continue;
+    }
+    if (!game.players.some((player) => player.id === senderPlayerId && player.controller_type === "ai")) {
+      continue;
+    }
+    const requestedCash = dealCashTransferAmount(deal, responder.id, senderPlayerId);
+    const valueCeiling = Math.floor((property.price * 3) / 2);
+    const cashAfterPayment = responderCash - requestedCash;
+    const counterCeiling = Math.min(valueCeiling, Math.max(responderCash - groupCompletionCounterofferCashFloor, 0));
+    if (
+      requestedCash > 0 &&
+      counterCeiling >= property.price &&
+      counterCeiling < requestedCash &&
+      (requestedCash > valueCeiling || cashAfterPayment < groupCompletionCounterofferCashFloor)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function autoNegotiationLifecycleRequestFor(
   game: GameMetadata,
+  snapshot: GameStateResponse | undefined,
   negotiations: Negotiation[],
   deals: Deal[],
 ): AiNegotiationStepRequest | null {
@@ -1232,7 +1329,7 @@ function autoNegotiationLifecycleRequestFor(
   }
 
   return {
-    decisionType: "accept_reject",
+    decisionType: shouldAutoCounterofferCurrentDeal(game, snapshot, nextResponder, currentDeal) ? "counteroffer" : "accept_reject",
     playerId: nextResponder.id,
     negotiationId: activeNegotiation.id,
     selectedDealId: currentDeal.id,
@@ -2835,8 +2932,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     [activeAiPlayer, game, negotiationsQuery.data, stateQuery.data],
   );
   const autoNegotiationLifecycleRequest = useMemo(
-    () => autoNegotiationLifecycleRequestFor(game, negotiationsQuery.data ?? [], dealsQuery.data ?? []),
-    [dealsQuery.data, game, negotiationsQuery.data],
+    () => autoNegotiationLifecycleRequestFor(game, stateQuery.data, negotiationsQuery.data ?? [], dealsQuery.data ?? []),
+    [dealsQuery.data, game, negotiationsQuery.data, stateQuery.data],
   );
   const autoExecutableNegotiation = useMemo(
     () => autoExecutableNegotiationFor(game, negotiationsQuery.data ?? [], dealsQuery.data ?? []),
