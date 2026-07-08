@@ -954,8 +954,8 @@ function autoTradeOpportunityFor(
     ownerByPropertyId.set(entry.property_id, typeof entry.owner_id === "string" ? entry.owner_id : null);
   }
 
-  const completionOpportunities: ScoredAutoTradeOpportunity[] = [];
-  let completionOrder = 0;
+  const opportunities: ScoredAutoTradeOpportunity[] = [];
+  let opportunityOrder = 0;
   for (const group of PROPERTY_GROUPS) {
     const properties = group.property_ids
       .map((propertyId) => propertyById(propertyId))
@@ -981,8 +981,8 @@ function autoTradeOpportunityFor(
       continue;
     }
 
-    completionOpportunities.push({
-      order: completionOrder,
+    opportunities.push({
+      order: opportunityOrder,
       score: propertyGroupCompletionPriorityScore(group.kind, properties, group.house_cost),
       opportunity: {
         kind: completionTradeKind(group.kind),
@@ -999,16 +999,9 @@ function autoTradeOpportunityFor(
         strategic_reason: completionStrategicReason(group.kind, group.name),
       },
     });
-    completionOrder += 1;
+    opportunityOrder += 1;
   }
 
-  const completionOpportunity = bestAutoTradeOpportunity(completionOpportunities);
-  if (completionOpportunity) {
-    return completionOpportunity;
-  }
-
-  const blockingOpportunities: ScoredAutoTradeOpportunity[] = [];
-  let blockingOrder = 0;
   for (const group of PROPERTY_GROUPS) {
     const properties = group.property_ids
       .map((propertyId) => propertyById(propertyId))
@@ -1043,9 +1036,9 @@ function autoTradeOpportunityFor(
       }
 
       const actorOwned = properties.filter((property) => ownerByPropertyId.get(property.id) === player.id);
-      blockingOpportunities.push({
-        order: blockingOrder,
-        score: propertyGroupCompletionPriorityScore(group.kind, properties, group.house_cost),
+      opportunities.push({
+        order: opportunityOrder,
+        score: propertyGroupCompletionPriorityScore(group.kind, properties, group.house_cost) - 1,
         opportunity: {
           kind: blockingTradeKind(group.kind),
           group: group.id,
@@ -1065,11 +1058,11 @@ function autoTradeOpportunityFor(
           strategic_reason: blockingStrategicReason(group.name, opponent.name, targetProperty.name),
         },
       });
-      blockingOrder += 1;
+      opportunityOrder += 1;
     }
   }
 
-  return bestAutoTradeOpportunity(blockingOpportunities);
+  return bestAutoTradeOpportunity(opportunities);
 }
 
 function bestAutoTradeOpportunity(opportunities: ScoredAutoTradeOpportunity[]): AutoTradeOpportunity | null {

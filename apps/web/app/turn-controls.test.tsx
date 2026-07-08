@@ -448,6 +448,65 @@ function aiBlockOpponentNearMonopolyStateFixture(eventSequence = 0) {
   };
 }
 
+function aiCompletionAndHigherValueBlockStateFixture(eventSequence = 0) {
+  const base = stateFixture(0, eventSequence);
+  return {
+    ...base,
+    state: {
+      ...base.state,
+      players: [
+        { id: adaId, cash: 1500, position: 0 },
+        { id: graceId, cash: 1500, position: 0 },
+        { id: linId, cash: 1500, position: 0 },
+      ],
+      turn: {
+        phase: "START_TURN",
+        current_player_index: 0,
+        current_player_id: adaId,
+      },
+      property_ownership: [
+        {
+          property_id: "property_mediterranean_avenue",
+          owner_id: adaId,
+          mortgaged: false,
+          houses: 0,
+          hotel: false,
+        },
+        {
+          property_id: "property_baltic_avenue",
+          owner_id: linId,
+          mortgaged: false,
+          houses: 0,
+          hotel: false,
+        },
+        {
+          property_id: "property_st_james_place",
+          owner_id: graceId,
+          mortgaged: false,
+          houses: 0,
+          hotel: false,
+        },
+        {
+          property_id: "property_tennessee_avenue",
+          owner_id: linId,
+          mortgaged: false,
+          houses: 0,
+          hotel: false,
+        },
+        {
+          property_id: "property_new_york_avenue",
+          owner_id: graceId,
+          mortgaged: false,
+          houses: 0,
+          hotel: false,
+        },
+      ],
+    },
+    state_hash: `ai-completion-and-block-state-${eventSequence}`,
+    event_sequence: eventSequence,
+  };
+}
+
 function metadataFallbackAiGame(): GameMetadata {
   const game = gameFixture();
   return {
@@ -3478,6 +3537,71 @@ describe("GamePlaySurface turn controls", () => {
         ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
       );
       expect(aiStepCalls).toHaveLength(1);
+      expect(JSON.parse(String(aiStepCalls[0]?.[1]?.body))).toMatchObject({
+        player_id: adaId,
+        decision_type: "open_negotiation",
+        mandatory: false,
+        request_context: {
+          mode: "auto_negotiation",
+          trade_opportunity: {
+            kind: "block_opponent_street_group",
+            group: "orange",
+            target_property_id: "property_tennessee_avenue",
+            target_owner_id: linId,
+            opponent_player_id: graceId,
+          },
+        },
+      });
+    });
+  });
+
+  it("auto-step blocks a high-value opponent set before completing a low-value owned set", async () => {
+    const game = metadataThreeAiGame();
+    const state = aiCompletionAndHigherValueBlockStateFixture();
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(game);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(state);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [legalAction("ROLL_DICE", {}, state.state_hash, state.event_sequence)],
+          state_hash: state.state_hash,
+          event_sequence: state.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/negotiations`) {
+        return Response.json({ negotiations: [] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/deals`) {
+        return Response.json({ deals: [] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock, game);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Auto-step AI" }));
+
+    await waitFor(() => {
+      const aiStepCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+      );
+      expect(aiStepCalls.length).toBeGreaterThanOrEqual(1);
       expect(JSON.parse(String(aiStepCalls[0]?.[1]?.body))).toMatchObject({
         player_id: adaId,
         decision_type: "open_negotiation",
