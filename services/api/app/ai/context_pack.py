@@ -695,6 +695,7 @@ def _action_selection_guidance(
     recommended_before_roll: list[str] = []
     lower_priority_action_types: list[str] = []
     turn_guidance: list[str] = []
+    auction_guidance = _auction_guidance(state, actor_id, legal_actions)
 
     if development_opportunities:
         recommended_before_roll.append("BUY_HOUSE")
@@ -705,11 +706,97 @@ def _action_selection_guidance(
             "development before ROLL_DICE when cash_after_cost remains healthy."
         )
 
+    if auction_guidance is not None:
+        minimum_bid = _int_or_zero(auction_guidance.get("minimum_bid"))
+        valuation_ceiling = _int_or_zero(auction_guidance.get("valuation_ceiling"))
+        turn_guidance.append(
+            "For BID_AUCTION, the payload amount is the minimum legal floor, "
+            "not a recommendation. If bidding, choose a deliberate value based "
+            "on property price, current high bid, and cash while staying near "
+            "the valuation ceiling, or PASS_AUCTION; avoid one-dollar increment loops."
+        )
+        if valuation_ceiling > 0 and minimum_bid > valuation_ceiling:
+            turn_guidance.append(
+                "Choose PASS_AUCTION when the minimum BID_AUCTION amount is "
+                "above the valuation ceiling unless a concrete monopoly-completion "
+                "reason justifies the overpay."
+            )
+
     return {
         "recommended_action_types_before_roll": recommended_before_roll,
         "lower_priority_action_types": lower_priority_action_types,
         "development_opportunities": development_opportunities,
+        "auction_guidance": auction_guidance,
         "turn_guidance": turn_guidance,
+    }
+
+
+def _auction_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    auction = state.active_auction
+    if auction is None:
+        return None
+
+    bid_action = next((action for action in legal_actions if action.get("type") == "BID_AUCTION"), None)
+    if bid_action is None:
+        return None
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    property_data = properties_by_id.get(auction.property_id)
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if property_data is None or player is None:
+        return None
+
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    group = groups_by_id.get(property_data.group)
+    same_group_owned_property_ids: list[str] = []
+    if group is not None:
+        same_group_owned_property_ids = [
+            property_id
+            for property_id in group.property_ids
+            if ownership_by_property_id.get(property_id) is not None
+            and ownership_by_property_id[property_id].owner_id == actor_id
+        ]
+    property_group_size = len(group.property_ids) if group is not None else 1
+    completes_property_group = (
+        group is not None
+        and auction.property_id not in same_group_owned_property_ids
+        and len(same_group_owned_property_ids) == property_group_size - 1
+    )
+    if completes_property_group:
+        valuation_ceiling = property_data.price * 3 // 2
+        valuation_basis = "property_group_completion_premium"
+    elif same_group_owned_property_ids:
+        valuation_ceiling = property_data.price * 5 // 4
+        valuation_basis = "same_group_position_premium"
+    else:
+        valuation_ceiling = property_data.price
+        valuation_basis = "listed_price"
+
+    bid_payload = _mapping(bid_action.get("payload"))
+    return {
+        "property_id": auction.property_id,
+        "property_name": property_data.name,
+        "property_group": property_data.group,
+        "property_price": property_data.price,
+        "current_high_bidder_id": auction.high_bidder_id,
+        "current_high_bid_amount": auction.high_bid_amount,
+        "minimum_bid": _int_or_zero(bid_payload.get("amount")),
+        "cash_available": player.cash,
+        "same_group_owned_property_ids": same_group_owned_property_ids,
+        "property_group_size": property_group_size,
+        "completes_property_group": completes_property_group,
+        "valuation_ceiling": min(player.cash, valuation_ceiling),
+        "valuation_basis": valuation_basis,
+        "pass_action_available": any(action.get("type") == "PASS_AUCTION" for action in legal_actions),
+        "bid_payload_amount_is_floor": True,
     }
 
 

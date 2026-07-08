@@ -335,6 +335,58 @@ async def test_ai_action_canonicalizes_exact_current_legal_action_state_metadata
 
 
 @pytest.mark.asyncio
+async def test_ai_auction_bid_canonicalizes_exact_current_legal_action_state_metadata(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory, state_transform=_active_auction_state)
+    legal_bid = next(
+        action
+        for action in list_legal_actions(fixture.state, str(AI_PLAYER_ID))
+        if action.type == "BID_AUCTION"
+    )
+    ai_output = valid_action_output(fixture.state)
+    ai_output["expected_state_hash"] = legal_bid.expected_state_hash.replace("a", "b", 1)
+    ai_output["expected_event_sequence"] = legal_bid.expected_event_sequence
+    ai_output["action"] = {
+        "type": "BID_AUCTION",
+        "payload": json.dumps(dict(legal_bid.payload), separators=(",", ":")),
+    }
+    assert ai_output["expected_state_hash"] != fixture.state.state_hash()
+    runner = FakeCodexRunner(final_output=ai_output)
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="action_decision",
+                mandatory=True,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        replayed = await EventPersistence(session_factory).replay_from_event_zero(GAME_ID)
+        decisions = await fetch_rows(session_factory, ai_decisions)
+
+        assert result.status == "accepted"
+        assert result.rejected_action_id is None
+        assert replayed.active_auction is not None
+        assert replayed.active_auction.high_bidder_id == str(AI_PLAYER_ID)
+        assert replayed.active_auction.high_bid_amount == legal_bid.payload["amount"]
+        assert decisions[0]["status"] == "accepted"
+        assert decisions[0]["parsed_output"]["expected_state_hash"] == ai_output["expected_state_hash"]
+        assert await table_count(session_factory, rejected_actions) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_request_once_forwards_codex_home_to_codex_decision_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -817,6 +869,24 @@ def _active_debt_state(state: GameState) -> GameState:
                 "amount_paid": 0,
                 "reason": "rent:property_illinois_avenue",
                 "negotiation_allowed": True,
+            },
+        }
+    )
+
+
+def _active_auction_state(state: GameState) -> GameState:
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+            "active_auction": {
+                "property_id": "property_electric_company",
+                "high_bidder_id": str(HUMAN_PLAYER_ID),
+                "high_bid_amount": 12,
+                "passed_player_ids": [],
             },
         }
     )

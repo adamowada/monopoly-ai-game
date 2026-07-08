@@ -291,17 +291,27 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
         if actor_id not in auction.passed_player_ids and actor_id != auction.high_bidder_id:
             minimum_bid = _minimum_auction_bid(state)
             if player.cash >= minimum_bid:
+                property_data = _property_data(auction.property_id)
                 add(
                     "BID_AUCTION",
                     {"property_id": auction.property_id, "amount": minimum_bid},
                     schema=_object_schema(
                         {
                             "property_id": _const_string_schema(auction.property_id),
-                            "amount": {"type": "integer", "minimum": minimum_bid},
+                            "amount": {
+                                "type": "integer",
+                                "minimum": minimum_bid,
+                                "maximum": player.cash,
+                            },
                         },
                         required=("amount",),
                     ),
-                    description=f"Bid at least {minimum_bid} for {_property_data(auction.property_id).name}.",
+                    description=(
+                        f"Bid any integer from {minimum_bid} to {player.cash} for "
+                        f"{property_data.name}; {minimum_bid} is the legal floor, "
+                        "not a recommended bid. The maximum reflects cash affordability, "
+                        "not strategic value."
+                    ),
                 )
             add(
                 "PASS_AUCTION",

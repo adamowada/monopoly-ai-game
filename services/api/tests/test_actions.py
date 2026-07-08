@@ -394,6 +394,10 @@ def test_active_auction_exposes_bid_and_pass_and_validates_bid_amounts() -> None
     assert bid_action.payload["property_id"] == "property_mediterranean_avenue"
     assert bid_action.payload["amount"] == 1
     assert bid_action.schema["properties"]["amount"]["minimum"] == 1  # type: ignore[index]
+    assert bid_action.schema["properties"]["amount"]["maximum"] == 1500  # type: ignore[index]
+    assert bid_action.description is not None
+    assert "not a recommended bid" in bid_action.description
+    assert "cash affordability" in bid_action.description
 
     bid_state = apply_action(state, _action(state, "player-1", "BID_AUCTION", {"amount": 25}), "bid")
     assert bid_state.active_auction is not None

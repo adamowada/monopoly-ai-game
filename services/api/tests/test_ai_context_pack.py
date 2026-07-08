@@ -54,6 +54,7 @@ from app.db.metadata import (
     players,
 )
 from app.rules.actions import list_legal_actions
+from app.rules.phases import TurnPhase
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
@@ -244,6 +245,53 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     assert all(opportunity["cash_after_cost"] == 2900 for opportunity in guidance["development_opportunities"])
     assert "complete color group" in guidance["turn_guidance"][0]
     assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
+def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops() -> None:
+    state = _state_with_active_auction()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    bid_action = next(action for action in pack["legal_actions"] if action["type"] == "BID_AUCTION")
+    assert bid_action["payload"]["amount"] == 51
+    assert bid_action["schema"]["properties"]["amount"]["minimum"] == 51
+    assert bid_action["schema"]["properties"]["amount"]["maximum"] == 1500
+    assert "not a recommended bid" in bid_action["description"]
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["auction_guidance"] == {
+        "property_id": "property_virginia_avenue",
+        "property_name": "Virginia Avenue",
+        "property_group": "pink",
+        "property_price": 160,
+        "current_high_bidder_id": str(OTHER_PLAYER_ID),
+        "current_high_bid_amount": 50,
+        "minimum_bid": 51,
+        "cash_available": 1500,
+        "same_group_owned_property_ids": [],
+        "property_group_size": 3,
+        "completes_property_group": False,
+        "valuation_ceiling": 160,
+        "valuation_basis": "listed_price",
+        "pass_action_available": True,
+        "bid_payload_amount_is_floor": True,
+    }
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "not a recommendation" in guidance_text
+    assert "one-dollar increment loops" in guidance_text
+    assert "valuation ceiling" in guidance_text
+
+
+def test_context_pack_guides_auction_pass_when_minimum_bid_exceeds_valuation() -> None:
+    state = _state_with_active_auction(high_bid_amount=1000)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["auction_guidance"]["minimum_bid"] == 1001
+    assert guidance["auction_guidance"]["valuation_ceiling"] == 160
+
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "PASS_AUCTION" in guidance_text
+    assert "above the valuation ceiling" in guidance_text
 
 
 def test_context_pack_redacts_profile_seed_source_from_prompt() -> None:
@@ -715,6 +763,25 @@ def _state_with_orange_monopoly() -> GameState:
                 else ownership
                 for ownership in state.property_ownership
             ),
+        }
+    )
+
+
+def _state_with_active_auction(*, high_bid_amount: int = 50) -> GameState:
+    state = _state()
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+            "active_auction": {
+                "property_id": "property_virginia_avenue",
+                "high_bidder_id": str(OTHER_PLAYER_ID),
+                "high_bid_amount": high_bid_amount,
+                "passed_player_ids": [],
+            },
         }
     )
 

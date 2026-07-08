@@ -55,6 +55,7 @@ from app.rules.actions import (
     GameAction,
     execute_action,
     list_legal_actions,
+    validate_action,
 )
 from app.rules.state import GameState
 
@@ -1139,15 +1140,30 @@ def _canonicalize_current_legal_action_metadata(state: GameState, action: GameAc
     if action.expected_event_sequence != state.event_sequence:
         return action
 
+    legal_actions = list_legal_actions(state, action.actor_id)
     legal_matches = [
         legal_action
-        for legal_action in list_legal_actions(state, action.actor_id)
+        for legal_action in legal_actions
         if legal_action.type == action.type
         and _json_equivalent(legal_action.payload, action.payload)
         and legal_action.expected_event_sequence == state.event_sequence
     ]
     if len(legal_matches) != 1:
-        return action
+        if not any(legal_action.type == action.type for legal_action in legal_actions):
+            return action
+
+        repaired_action = GameAction(
+            actor_id=action.actor_id,
+            type=action.type,
+            payload=action.payload,
+            expected_state_hash=state.state_hash(),
+            expected_event_sequence=action.expected_event_sequence,
+        )
+        try:
+            validate_action(state, repaired_action)
+        except ActionValidationError:
+            return action
+        return repaired_action
 
     legal_action = legal_matches[0]
     return GameAction(
