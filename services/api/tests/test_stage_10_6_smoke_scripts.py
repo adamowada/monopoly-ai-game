@@ -101,6 +101,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_monopoly_development" in source
     assert "multiple_monopolies_prioritizes_orange_development" in source
     assert "low_cash_defers_monopoly_development" in source
+    assert "dark_blue_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "railroad_near_set_negotiation" in source
     assert "multiple_near_monopolies_prioritizes_orange_negotiation" in source
@@ -579,6 +580,38 @@ def test_live_codex_strategy_smoke_negotiates_for_railroad_set_completion() -> N
     assert context["target_owner_id"] == str(module.OTHER_PLAYER_ID)
     assert guidance["trade_opportunities"][0]["kind"] == "complete_railroad_group"
     assert guidance["trade_opportunities"][0]["property_group_kind"] == "railroad"
+
+
+def test_live_codex_strategy_smoke_negotiates_for_dark_blue_completion() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["dark_blue_near_monopoly_negotiation"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["negotiation_strategy_guidance"]
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"]["participant_player_ids"] == [
+        str(module.AI_PLAYER_ID),
+        str(module.OTHER_PLAYER_ID),
+    ]
+    context = guidance["open_negotiation_payload_template"]["context"]
+    assert context["topic"] == "Trade for Park Place to complete Dark Blue"
+    assert context["target_property_id"] == "property_park_place"
+    assert context["target_owner_id"] == str(module.OTHER_PLAYER_ID)
+    assert context["suggested_offer"] == {
+        "cash_budget_floor": 350,
+        "cash_budget_ceiling": 525,
+        "avoid_trading_away_group_property_ids": ["property_boardwalk"],
+    }
+    assert guidance["trade_opportunities"][0]["kind"] == "complete_street_group"
+    assert guidance["trade_opportunities"][0]["group"] == "dark_blue"
 
 
 def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance() -> None:
