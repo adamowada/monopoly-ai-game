@@ -853,6 +853,8 @@ def _action_selection_guidance(
                 "disabled unnecessarily."
             )
         elif recommendation == "mortgage_only_enough_for_debt":
+            if "MORTGAGE_PROPERTY" in legal_action_types:
+                recommended_action_types.append("MORTGAGE_PROPERTY")
             for action_type in ("DECLARE_BANKRUPTCY",):
                 if (
                     action_type in legal_action_types

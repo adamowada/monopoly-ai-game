@@ -918,10 +918,13 @@ def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> 
     assert len(mortgage_actions) == 1
 
     guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["MORTGAGE_PROPERTY"]
     assert "MORTGAGE_PROPERTY" not in guidance["lower_priority_action_types"]
+    assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
     assert (
         guidance["mortgage_guidance"]["recommendation"] == "liquidate_only_enough_for_active_debt"
     )
+    assert guidance["debt_resolution_guidance"]["recommendation"] == "mortgage_only_enough_for_debt"
     assert guidance["mortgage_guidance"]["has_active_debt"] is True
     assert guidance["mortgage_guidance"]["cash_available"] == 0
     guidance_text = " ".join(guidance["turn_guidance"])
