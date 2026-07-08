@@ -91,6 +91,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_railroad_purchase_with_healthy_cash,
         ),
         StrategySmokeCase(
+            name="purchase_completes_color_group_with_thin_cash",
+            game_id=UUID("00000000-0000-0000-0000-00000000b215"),
+            decision_type="action_decision",
+            state_factory=_purchase_completes_color_group_state,
+            verifier=_verify_purchase_completes_color_group_with_thin_cash,
+        ),
+        StrategySmokeCase(
             name="healthy_cash_avoids_mortgage",
             game_id=UUID("00000000-0000-0000-0000-00000000b208"),
             decision_type="action_decision",
@@ -247,6 +254,17 @@ def _verify_railroad_purchase_with_healthy_cash(parsed: dict[str, Any]) -> None:
     assert payload.get("property_id") == "property_reading_railroad"
     if "price" in payload:
         assert payload.get("price") == 200
+
+
+def _verify_purchase_completes_color_group_with_thin_cash(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BUY_PROPERTY", f"expected BUY_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_tennessee_avenue"
+    if "price" in payload:
+        assert payload.get("price") == 180
 
 
 def _verify_healthy_cash_avoids_mortgage(parsed: dict[str, Any]) -> None:
@@ -668,6 +686,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "purchase_completes_color_group_with_thin_cash":
+        return (
+            {
+                "id": "live-strategy-buy-property-to-complete-color-group",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace owns St. James Place and New York Avenue, "
+                    "has $400, and landed on unowned property_tennessee_avenue. Buying Tennessee "
+                    "for $180 leaves $220 and completes Orange, unlocking BUY_HOUSE development. "
+                    "purchase_guidance recommendation is buy_property_to_complete_group. "
+                    "Choose BUY_PROPERTY rather than START_AUCTION."
+                ),
+            },
+        )
     if case.decision_type == "accept_reject":
         return (
             {
@@ -758,6 +790,34 @@ def _railroad_purchase_state(game_id: UUID) -> GameState:
         {
             **state.model_dump(mode="python"),
             "players": players,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _purchase_completes_color_group_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-purchase-completes-color-group")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 400
+    players[0]["position"] = 18
+    owned_property_ids = {"property_st_james_place", "property_new_york_avenue"}
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id in owned_property_ids
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "property_ownership": ownership,
             "turn": {
                 **state.turn.model_dump(mode="python"),
                 "phase": TurnPhase.PURCHASE_OR_AUCTION,

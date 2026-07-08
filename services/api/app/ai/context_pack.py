@@ -48,6 +48,7 @@ _FIELD_JOINER = "".join
 AIContextPack: TypeAlias = dict[str, Any]
 MORTGAGE_HEALTHY_CASH_FLOOR = 200
 PURCHASE_HEALTHY_CASH_FLOOR = 300
+GROUP_COMPLETION_PURCHASE_CASH_FLOOR = 100
 UNMORTGAGE_HEALTHY_CASH_FLOOR = 300
 
 
@@ -722,6 +723,15 @@ def _action_selection_guidance(
                 "remains healthy; START_AUCTION lets competitors win the property and should "
                 "need a concrete liquidity or valuation reason."
             )
+        elif recommendation == "buy_property_to_complete_group":
+            recommended_action_types.append("BUY_PROPERTY")
+            if "START_AUCTION" in legal_action_types:
+                lower_priority_action_types.append("START_AUCTION")
+            turn_guidance.append(
+                "Prefer BUY_PROPERTY because this landed property would complete the color group; "
+                "START_AUCTION risks losing monopoly leverage and should need an immediate "
+                "cash-survival reason."
+            )
         elif recommendation == "consider_auction_for_liquidity":
             turn_guidance.append(
                 "START_AUCTION may be reasonable because BUY_PROPERTY cash_after_price would "
@@ -891,11 +901,12 @@ def _purchase_guidance(
             and len(same_group_owned_property_ids) == len(group.property_ids) - 1
         )
 
-    recommendation = (
-        "buy_property_at_list_price"
-        if cash_after_price >= PURCHASE_HEALTHY_CASH_FLOOR
-        else "consider_auction_for_liquidity"
-    )
+    if completes_property_group and cash_after_price >= GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
+        recommendation = "buy_property_to_complete_group"
+    elif cash_after_price >= PURCHASE_HEALTHY_CASH_FLOOR:
+        recommendation = "buy_property_at_list_price"
+    else:
+        recommendation = "consider_auction_for_liquidity"
 
     return {
         "action_available": True,
@@ -909,6 +920,7 @@ def _purchase_guidance(
         "cash_available": player.cash,
         "cash_after_price": cash_after_price,
         "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+        "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
         "start_auction_available": start_auction_available,
         "same_group_owned_property_ids": sorted(same_group_owned_property_ids),
         "same_group_other_owner_ids": sorted(same_group_other_owner_ids),

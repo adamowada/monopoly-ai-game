@@ -536,6 +536,27 @@ def test_context_pack_keeps_auction_viable_when_buying_would_break_liquidity_flo
     assert "cash_after_price would fall below" in guidance_text
 
 
+def test_context_pack_prefers_buying_property_that_completes_group_with_thin_cash() -> None:
+    state = _state_landed_on_group_completing_tennessee(cash=400)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_to_complete_group"
+    assert guidance["purchase_guidance"]["property_id"] == "property_tennessee_avenue"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 220
+    assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "complete the color group" in guidance_text
+    assert "START_AUCTION" in guidance_text
+
+
 def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops() -> None:
     state = _state_with_active_auction()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -1203,6 +1224,33 @@ def _state_landed_on_unowned_reading_railroad(*, cash: int) -> GameState:
             "players": (ai_player.model_dump(mode="python"), *[
                 player.model_dump(mode="python") for player in state.players[1:]
             ]),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_landed_on_group_completing_tennessee(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 18})
+    owned_property_ids = {"property_st_james_place", "property_new_york_avenue"}
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (ai_player.model_dump(mode="python"), *[
+                player.model_dump(mode="python") for player in state.players[1:]
+            ]),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
             "turn": {
                 **state.turn.model_dump(mode="python"),
                 "phase": TurnPhase.PURCHASE_OR_AUCTION,
