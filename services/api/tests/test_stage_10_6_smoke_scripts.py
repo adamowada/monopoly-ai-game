@@ -319,6 +319,14 @@ def test_live_codex_strategy_smoke_auction_blocks_opponent_group_completion() ->
     assert guidance["property_id"] == "property_virginia_avenue"
     assert guidance["valuation_basis"] == "block_opponent_group_completion_premium"
     assert guidance["strategic_valuation_ceiling"] == 240
+    assert guidance["recommended_auction_action"] == {
+        "type": "BID_AUCTION",
+        "payload": {
+            "property_id": "property_virginia_avenue",
+            "amount": 161,
+        },
+        "reason_code": "bid_deliberate_amount_at_or_below_valuation",
+    }
     assert guidance["opponent_group_completion_threats"] == [
         {
             "opponent_player_id": str(module.OTHER_PLAYER_ID),

@@ -1522,6 +1522,10 @@ def _auction_guidance(
     )
     if bid_action is None:
         return None
+    pass_action = next(
+        (action for action in legal_actions if action.get("type") == "PASS_AUCTION"),
+        None,
+    )
 
     data = load_classic_monopoly_data()
     properties_by_id = {property_data.id: property_data for property_data in data.properties}
@@ -1609,6 +1613,14 @@ def _auction_guidance(
             if minimum_bid > cash_limited_bid_ceiling
             else "pass_minimum_above_valuation"
         )
+    recommended_auction_action = _recommended_auction_action_template(
+        bid_action=bid_action,
+        pass_action=pass_action,
+        property_id=auction.property_id,
+        recommended_auction_action_type=recommended_auction_action_type,
+        recommended_bid_amount=recommended_bid_amount,
+        recommended_bid_reason=recommended_bid_reason,
+    )
     return {
         "property_id": auction.property_id,
         "property_name": property_data.name,
@@ -1630,11 +1642,38 @@ def _auction_guidance(
         "recommended_auction_action_type": recommended_auction_action_type,
         "recommended_bid_amount": recommended_bid_amount,
         "recommended_bid_reason": recommended_bid_reason,
+        "recommended_auction_action": recommended_auction_action,
         "pass_action_available": any(
             action.get("type") == "PASS_AUCTION" for action in legal_actions
         ),
         "bid_payload_amount_is_floor": True,
     }
+
+
+def _recommended_auction_action_template(
+    *,
+    bid_action: Mapping[str, Any],
+    pass_action: Mapping[str, Any] | None,
+    property_id: str,
+    recommended_auction_action_type: str,
+    recommended_bid_amount: int | None,
+    recommended_bid_reason: str,
+) -> dict[str, Any] | None:
+    if (
+        recommended_auction_action_type == "BID_AUCTION"
+        and recommended_bid_amount is not None
+    ):
+        payload = dict(_mapping(bid_action.get("payload")))
+        payload["property_id"] = property_id
+        payload["amount"] = recommended_bid_amount
+        return {
+            "type": "BID_AUCTION",
+            "payload": payload,
+            "reason_code": recommended_bid_reason,
+        }
+    if recommended_auction_action_type == "PASS_AUCTION" and pass_action is not None:
+        return _legal_action_template(pass_action, recommended_bid_reason)
+    return None
 
 
 def _development_opportunities(
@@ -2944,6 +2983,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
             "When auction_guidance provides recommended_bid_amount, use that amount for BID_AUCTION instead of blindly submitting the legal minimum payload.",
+            "When auction_guidance provides recommended_auction_action, use that action payload for BID_AUCTION or PASS_AUCTION unless visible auction state has changed.",
             "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
             "When debt_resolution_guidance provides recommended_debt_action, use that exact legal action payload before lower-priority liquidation or bankruptcy actions.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
