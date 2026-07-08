@@ -693,6 +693,104 @@ def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopo
     assert "Accept proposed deals" in guidance["guidance"][0]
 
 
+def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_railroad_set() -> None:
+    state = _state_with_railroad_near_set(ai_cash=500)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[
+            _cash_for_property_deal(
+                property_id="property_short_line_railroad",
+                cash_from_player_id=str(AI_PLAYER_ID),
+                cash_to_player_id=str(OTHER_PLAYER_ID),
+                property_from_player_id=str(OTHER_PLAYER_ID),
+                property_to_player_id=str(AI_PLAYER_ID),
+                amount=240,
+            )
+        ],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "accept"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_railroad_group_with_affordable_cash"
+    )
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["kind"] == "actor_railroad_group_completion"
+    assert opportunity["property_group_kind"] == "railroad"
+    assert opportunity["property_id"] == "property_short_line_railroad"
+    assert opportunity["maximum_cash_value_ceiling"] == 300
+    assert opportunity["cash_after_payment"] == 260
+
+
+def test_context_pack_rejects_lowball_deal_that_completes_opponent_railroad_set() -> None:
+    state = _state_with_railroad_near_set()
+    pack = build_ai_context_pack(
+        state,
+        player_id=OTHER_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[
+            _cash_for_property_deal(
+                property_id="property_short_line_railroad",
+                cash_from_player_id=str(AI_PLAYER_ID),
+                cash_to_player_id=str(OTHER_PLAYER_ID),
+                property_from_player_id=str(OTHER_PLAYER_ID),
+                property_to_player_id=str(AI_PLAYER_ID),
+                amount=1,
+            )
+        ],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_completes_opponent_railroad_group_below_floor"
+    )
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["kind"] == "opponent_railroad_group_completion"
+    assert risk["property_group_kind"] == "railroad"
+    assert risk["property_id"] == "property_short_line_railroad"
+    assert risk["minimum_cash_value_floor"] == 300
+    assert risk["cash_value_gap"] == 299
+
+
+def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_utility_set() -> None:
+    state = _state_with_utility_near_set(ai_cash=400)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[
+            _cash_for_property_deal(
+                property_id="property_water_works",
+                cash_from_player_id=str(AI_PLAYER_ID),
+                cash_to_player_id=str(OTHER_PLAYER_ID),
+                property_from_player_id=str(OTHER_PLAYER_ID),
+                property_to_player_id=str(AI_PLAYER_ID),
+                amount=180,
+            )
+        ],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_utility_group_with_affordable_cash"
+    )
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["kind"] == "actor_utility_group_completion"
+    assert opportunity["property_group_kind"] == "utility"
+    assert opportunity["property_id"] == "property_water_works"
+    assert opportunity["maximum_cash_value_ceiling"] == 225
+    assert opportunity["cash_after_payment"] == 220
+
+
 def test_context_pack_recommends_rejecting_overpriced_deal_that_completes_actor_monopoly() -> None:
     state = _state_with_orange_near_monopoly(ai_cash=800)
     pack = build_ai_context_pack(
@@ -1678,6 +1776,51 @@ def _fair_tennessee_deal(*, amount: int = 220) -> dict[str, Any]:
                     "from_player_id": str(OTHER_PLAYER_ID),
                     "to_player_id": str(AI_PLAYER_ID),
                     "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _cash_for_property_deal(
+    *,
+    property_id: str,
+    cash_from_player_id: str,
+    cash_to_player_id: str,
+    property_from_player_id: str,
+    property_to_player_id: str,
+    amount: int,
+) -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": cash_to_player_id,
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [cash_from_player_id, cash_to_player_id],
+            "terms_hash": f"cash-for-{property_id}",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": f"cash-for-{property_id}",
+                    "from_player_id": cash_from_player_id,
+                    "to_player_id": cash_to_player_id,
+                    "amount": amount,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": f"{property_id}-transfer",
+                    "from_player_id": property_from_player_id,
+                    "to_player_id": property_to_player_id,
+                    "property_id": property_id,
                 },
             ],
         },

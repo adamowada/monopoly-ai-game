@@ -1534,14 +1534,14 @@ def _deal_evaluation_guidance(
     guidance_messages: list[str] = []
     if any(evaluation.get("recommendation") == "reject" for evaluation in evaluations):
         guidance_messages.append(
-            "Reject proposed deals that transfer away a property completing an opponent's street group, "
-            "break up this player's complete street group below value, overpay for this player's own "
-            "street-group completion, or breach the liquidity floor."
+            "Reject proposed deals that transfer away a property completing an opponent's set, "
+            "break up this player's complete property group below value, overpay for this player's "
+            "own set completion, or breach the liquidity floor."
         )
     if any(evaluation.get("recommendation") == "accept" for evaluation in evaluations):
         guidance_messages.append(
-            "Accept proposed deals that complete this player's street group when the cash payment "
-            "is within the strategic value ceiling and leaves enough liquidity."
+            "Accept proposed deals that complete this player's color group, railroad set, or utility "
+            "set when the cash payment is within the strategic value ceiling and leaves enough liquidity."
         )
 
     return {
@@ -1622,16 +1622,12 @@ def _deal_completion_evaluation(
             continue
         ownership = ownership_by_property_id.get(property_id)
         property_data = properties_by_id.get(property_id)
-        if (
-            ownership is None
-            or ownership.owner_id != actor_id
-            or property_data is None
-            or property_data.kind != "street"
-        ):
+        if ownership is None or ownership.owner_id != actor_id or property_data is None:
             continue
         group = groups_by_id.get(property_data.group)
-        if group is None:
+        if group is None or len(group.property_ids) <= 1:
             continue
+        group_kind = _deal_group_kind(group.kind)
         recipient_already_owned_property_ids = [
             group_property_id
             for group_property_id in group.property_ids
@@ -1653,54 +1649,66 @@ def _deal_completion_evaluation(
             if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:
                 continue
 
-            return {
-                "deal_id": _string_or_none(deal.get("id")),
-                "recommendation": "reject",
-                "reason_code": "transfers_property_that_breaks_actor_complete_street_group_below_floor",
-                "actor_id": actor_id,
-                "actor_receives_cash_total": actor_receives_cash_total,
-                "actor_pays_cash_total": actor_pays_cash_total,
-                "actor_transfers_property_ids": actor_transfers_property_ids,
-                "actor_receives_property_ids": actor_receives_property_ids,
-                "risk": {
-                    "kind": "actor_street_group_breakup",
-                    "property_id": property_id,
-                    "property_name": property_data.name,
-                    "property_price": property_data.price,
-                    "group": group.id,
-                    "group_name": group.name,
-                    "recipient_player_id": recipient_player_id,
-                    "actor_owned_group_property_ids": actor_owned_group_property_ids,
-                    "minimum_cash_value_floor": minimum_cash_value_floor,
-                    "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
-                },
-            }
-
-        minimum_cash_value_floor = property_data.price * 3 // 2
-        if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:
-            continue
-
-        return {
-            "deal_id": _string_or_none(deal.get("id")),
-            "recommendation": "reject",
-            "reason_code": "transfers_property_that_completes_opponent_street_group_below_floor",
-            "actor_id": actor_id,
-            "actor_receives_cash_total": actor_receives_cash_total,
-            "actor_pays_cash_total": actor_pays_cash_total,
-            "actor_transfers_property_ids": actor_transfers_property_ids,
-            "actor_receives_property_ids": actor_receives_property_ids,
-            "risk": {
-                "kind": "opponent_street_group_completion",
+            risk = {
+                "kind": _actor_group_breakup_kind(group_kind),
                 "property_id": property_id,
                 "property_name": property_data.name,
                 "property_price": property_data.price,
                 "group": group.id,
                 "group_name": group.name,
                 "recipient_player_id": recipient_player_id,
-                "recipient_already_owned_property_ids": recipient_already_owned_property_ids,
+                "actor_owned_group_property_ids": actor_owned_group_property_ids,
                 "minimum_cash_value_floor": minimum_cash_value_floor,
                 "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
-            },
+            }
+            _include_property_group_kind(risk, group_kind)
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": _deal_group_reason_code(
+                    "transfers_property_that_breaks_actor_complete",
+                    group_kind,
+                    "below_floor",
+                ),
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "risk": risk,
+            }
+
+        minimum_cash_value_floor = property_data.price * 3 // 2
+        if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:
+            continue
+
+        risk = {
+            "kind": _opponent_group_completion_kind(group_kind),
+            "property_id": property_id,
+            "property_name": property_data.name,
+            "property_price": property_data.price,
+            "group": group.id,
+            "group_name": group.name,
+            "recipient_player_id": recipient_player_id,
+            "recipient_already_owned_property_ids": recipient_already_owned_property_ids,
+            "minimum_cash_value_floor": minimum_cash_value_floor,
+            "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+        }
+        _include_property_group_kind(risk, group_kind)
+        return {
+            "deal_id": _string_or_none(deal.get("id")),
+            "recommendation": "reject",
+            "reason_code": _deal_group_reason_code(
+                "transfers_property_that_completes_opponent",
+                group_kind,
+                "below_floor",
+            ),
+            "actor_id": actor_id,
+            "actor_receives_cash_total": actor_receives_cash_total,
+            "actor_pays_cash_total": actor_pays_cash_total,
+            "actor_transfers_property_ids": actor_transfers_property_ids,
+            "actor_receives_property_ids": actor_receives_property_ids,
+            "risk": risk,
         }
 
     for receipt in actor_receives:
@@ -1710,16 +1718,12 @@ def _deal_completion_evaluation(
             continue
         ownership = ownership_by_property_id.get(property_id)
         property_data = properties_by_id.get(property_id)
-        if (
-            ownership is None
-            or ownership.owner_id != sender_player_id
-            or property_data is None
-            or property_data.kind != "street"
-        ):
+        if ownership is None or ownership.owner_id != sender_player_id or property_data is None:
             continue
         group = groups_by_id.get(property_data.group)
-        if group is None:
+        if group is None or len(group.property_ids) <= 1:
             continue
+        group_kind = _deal_group_kind(group.kind)
         actor_already_owned_property_ids = [
             group_property_id
             for group_property_id in group.property_ids
@@ -1733,7 +1737,7 @@ def _deal_completion_evaluation(
         maximum_cash_value_ceiling = property_data.price * 3 // 2
         cash_after_payment = player_cash - actor_pays_cash_total
         opportunity = {
-            "kind": "actor_street_group_completion",
+            "kind": _actor_group_completion_kind(group_kind),
             "property_id": property_id,
             "property_name": property_data.name,
             "property_price": property_data.price,
@@ -1745,11 +1749,16 @@ def _deal_completion_evaluation(
             "cash_after_payment": cash_after_payment,
             "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
         }
+        _include_property_group_kind(opportunity, group_kind)
         if actor_pays_cash_total > maximum_cash_value_ceiling:
             return {
                 "deal_id": _string_or_none(deal.get("id")),
                 "recommendation": "reject",
-                "reason_code": "receives_property_that_completes_actor_street_group_above_value_ceiling",
+                "reason_code": _deal_group_reason_code(
+                    "receives_property_that_completes_actor",
+                    group_kind,
+                    "above_value_ceiling",
+                ),
                 "actor_id": actor_id,
                 "actor_receives_cash_total": actor_receives_cash_total,
                 "actor_pays_cash_total": actor_pays_cash_total,
@@ -1764,7 +1773,11 @@ def _deal_completion_evaluation(
             return {
                 "deal_id": _string_or_none(deal.get("id")),
                 "recommendation": "reject",
-                "reason_code": "receives_property_that_completes_actor_street_group_below_cash_floor",
+                "reason_code": _deal_group_reason_code(
+                    "receives_property_that_completes_actor",
+                    group_kind,
+                    "below_cash_floor",
+                ),
                 "actor_id": actor_id,
                 "actor_receives_cash_total": actor_receives_cash_total,
                 "actor_pays_cash_total": actor_pays_cash_total,
@@ -1779,7 +1792,11 @@ def _deal_completion_evaluation(
         return {
             "deal_id": _string_or_none(deal.get("id")),
             "recommendation": "accept",
-            "reason_code": "receives_property_that_completes_actor_street_group_with_affordable_cash",
+            "reason_code": _deal_group_reason_code(
+                "receives_property_that_completes_actor",
+                group_kind,
+                "with_affordable_cash",
+            ),
             "actor_id": actor_id,
             "actor_receives_cash_total": actor_receives_cash_total,
             "actor_pays_cash_total": actor_pays_cash_total,
@@ -1788,6 +1805,33 @@ def _deal_completion_evaluation(
             "opportunity": opportunity,
         }
     return None
+
+
+def _deal_group_kind(group_kind: str) -> str:
+    if group_kind in {"railroad", "utility"}:
+        return group_kind
+    return "street"
+
+
+def _deal_group_reason_code(prefix: str, group_kind: str, suffix: str) -> str:
+    return f"{prefix}_{group_kind}_group_{suffix}"
+
+
+def _actor_group_completion_kind(group_kind: str) -> str:
+    return f"actor_{group_kind}_group_completion"
+
+
+def _opponent_group_completion_kind(group_kind: str) -> str:
+    return f"opponent_{group_kind}_group_completion"
+
+
+def _actor_group_breakup_kind(group_kind: str) -> str:
+    return f"actor_{group_kind}_group_breakup"
+
+
+def _include_property_group_kind(payload: dict[str, Any], group_kind: str) -> None:
+    if group_kind != "street":
+        payload["property_group_kind"] = group_kind
 
 
 def _property_group_trade_opportunities(
