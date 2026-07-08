@@ -107,6 +107,12 @@ type AutoTradeOpportunity = {
   strategic_reason: string;
 };
 
+type ScoredAutoTradeOpportunity = {
+  opportunity: AutoTradeOpportunity;
+  order: number;
+  score: number;
+};
+
 type BoardMotionState =
   | (Extract<BoardMotion, { status: "rolling" }> & { motionKey: string })
   | (Extract<BoardMotion, { status: "moving" | "settled" }> & {
@@ -948,6 +954,8 @@ function autoTradeOpportunityFor(
     ownerByPropertyId.set(entry.property_id, typeof entry.owner_id === "string" ? entry.owner_id : null);
   }
 
+  const completionOpportunities: ScoredAutoTradeOpportunity[] = [];
+  let completionOrder = 0;
   for (const group of PROPERTY_GROUPS) {
     const properties = group.property_ids
       .map((propertyId) => propertyById(propertyId))
@@ -973,22 +981,34 @@ function autoTradeOpportunityFor(
       continue;
     }
 
-    return {
-      kind: completionTradeKind(group.kind),
-      group: group.id,
-      group_name: group.name,
-      property_group_kind: group.kind,
-      actor_owned_property_ids: actorOwned.map((property) => property.id),
-      actor_owned_property_names: actorOwned.map((property) => property.name),
-      target_property_id: targetProperty.id,
-      target_property_name: targetProperty.name,
-      target_owner_id: targetOwner.id,
-      target_owner_name: targetOwner.name,
-      participants,
-      strategic_reason: completionStrategicReason(group.kind, group.name),
-    };
+    completionOpportunities.push({
+      order: completionOrder,
+      score: propertyGroupCompletionPriorityScore(group.kind, properties, group.house_cost),
+      opportunity: {
+        kind: completionTradeKind(group.kind),
+        group: group.id,
+        group_name: group.name,
+        property_group_kind: group.kind,
+        actor_owned_property_ids: actorOwned.map((property) => property.id),
+        actor_owned_property_names: actorOwned.map((property) => property.name),
+        target_property_id: targetProperty.id,
+        target_property_name: targetProperty.name,
+        target_owner_id: targetOwner.id,
+        target_owner_name: targetOwner.name,
+        participants,
+        strategic_reason: completionStrategicReason(group.kind, group.name),
+      },
+    });
+    completionOrder += 1;
   }
 
+  const completionOpportunity = bestAutoTradeOpportunity(completionOpportunities);
+  if (completionOpportunity) {
+    return completionOpportunity;
+  }
+
+  const blockingOpportunities: ScoredAutoTradeOpportunity[] = [];
+  let blockingOrder = 0;
   for (const group of PROPERTY_GROUPS) {
     const properties = group.property_ids
       .map((propertyId) => propertyById(propertyId))
@@ -1022,32 +1042,69 @@ function autoTradeOpportunityFor(
         continue;
       }
 
-      return {
-        kind: blockingTradeKind(group.kind),
-        group: group.id,
-        group_name: group.name,
-        property_group_kind: group.kind,
-        actor_owned_property_ids: properties
-          .filter((property) => ownerByPropertyId.get(property.id) === player.id)
-          .map((property) => property.id),
-        actor_owned_property_names: properties
-          .filter((property) => ownerByPropertyId.get(property.id) === player.id)
-          .map((property) => property.name),
-        opponent_player_id: opponent.id,
-        opponent_player_name: opponent.name,
-        opponent_owned_property_ids: opponentOwned.map((property) => property.id),
-        opponent_owned_property_names: opponentOwned.map((property) => property.name),
-        target_property_id: targetProperty.id,
-        target_property_name: targetProperty.name,
-        target_owner_id: targetOwner.id,
-        target_owner_name: targetOwner.name,
-        participants,
-        strategic_reason: blockingStrategicReason(group.name, opponent.name, targetProperty.name),
-      };
+      const actorOwned = properties.filter((property) => ownerByPropertyId.get(property.id) === player.id);
+      blockingOpportunities.push({
+        order: blockingOrder,
+        score: propertyGroupCompletionPriorityScore(group.kind, properties, group.house_cost),
+        opportunity: {
+          kind: blockingTradeKind(group.kind),
+          group: group.id,
+          group_name: group.name,
+          property_group_kind: group.kind,
+          actor_owned_property_ids: actorOwned.map((property) => property.id),
+          actor_owned_property_names: actorOwned.map((property) => property.name),
+          opponent_player_id: opponent.id,
+          opponent_player_name: opponent.name,
+          opponent_owned_property_ids: opponentOwned.map((property) => property.id),
+          opponent_owned_property_names: opponentOwned.map((property) => property.name),
+          target_property_id: targetProperty.id,
+          target_property_name: targetProperty.name,
+          target_owner_id: targetOwner.id,
+          target_owner_name: targetOwner.name,
+          participants,
+          strategic_reason: blockingStrategicReason(group.name, opponent.name, targetProperty.name),
+        },
+      });
+      blockingOrder += 1;
     }
   }
 
-  return null;
+  return bestAutoTradeOpportunity(blockingOpportunities);
+}
+
+function bestAutoTradeOpportunity(opportunities: ScoredAutoTradeOpportunity[]): AutoTradeOpportunity | null {
+  if (opportunities.length === 0) {
+    return null;
+  }
+  return [...opportunities].sort((left, right) => right.score - left.score || left.order - right.order)[0].opportunity;
+}
+
+function propertyGroupCompletionPriorityScore(
+  groupKind: PropertyGroupKind,
+  groupProperties: StaticDataProperty[],
+  houseCost?: number,
+): number {
+  if (groupKind === "railroad") {
+    return Math.max(
+      0,
+      ...groupProperties.map((property) =>
+        property.kind === "railroad" ? Math.max(0, ...property.rent_by_owned_count) : 0,
+      ),
+    );
+  }
+  if (groupKind === "utility") {
+    return Math.max(
+      0,
+      ...groupProperties.map((property) =>
+        property.kind === "utility" ? Math.max(0, ...property.rent_multipliers) * property.price : 0,
+      ),
+    );
+  }
+  const totalThreeHouseRent = groupProperties.reduce(
+    (total, property) => total + (property.kind === "street" ? property.rents[3] : 0),
+    0,
+  );
+  return totalThreeHouseRent - (houseCost ?? 0) * groupProperties.length;
 }
 
 function completionTradeKind(groupKind: PropertyGroupKind): AutoTradeOpportunity["kind"] {
