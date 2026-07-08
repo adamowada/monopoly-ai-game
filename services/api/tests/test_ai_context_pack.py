@@ -505,6 +505,54 @@ def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopo
     assert "Accept proposed deals" in guidance["guidance"][0]
 
 
+def test_context_pack_recommends_rejecting_overpriced_deal_that_completes_actor_monopoly() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=800)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_fair_tennessee_deal(amount=400)],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    )
+    assert guidance["deal_evaluations"][0]["actor_pays_cash_total"] == 400
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["maximum_cash_value_ceiling"] == 270
+    assert opportunity["cash_over_value_ceiling"] == 130
+    assert opportunity["cash_after_payment"] == 400
+
+
+def test_context_pack_recommends_rejecting_monopoly_completion_deal_that_drains_cash() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=300)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_fair_tennessee_deal(amount=220)],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_below_cash_floor"
+    )
+    assert guidance["deal_evaluations"][0]["actor_pays_cash_total"] == 220
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["cash_after_payment"] == 80
+    assert opportunity["group_completion_cash_floor"] == 100
+    assert opportunity["cash_floor_gap"] == 20
+
+
 def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="deal_proposal")
@@ -1275,7 +1323,7 @@ def _lowball_tennessee_deal() -> dict[str, Any]:
     }
 
 
-def _fair_tennessee_deal() -> dict[str, Any]:
+def _fair_tennessee_deal(*, amount: int = 220) -> dict[str, Any]:
     return {
         "id": str(DEAL_ID),
         "negotiation_id": str(NEGOTIATION_ID),
@@ -1294,7 +1342,7 @@ def _fair_tennessee_deal() -> dict[str, Any]:
                     "instrument_id": "fair-cash",
                     "from_player_id": str(AI_PLAYER_ID),
                     "to_player_id": str(OTHER_PLAYER_ID),
-                    "amount": 220,
+                    "amount": amount,
                 },
                 {
                     "kind": "immediate_property_transfer",

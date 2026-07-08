@@ -1440,8 +1440,8 @@ def _deal_evaluation_guidance(
     guidance_messages: list[str] = []
     if any(evaluation.get("recommendation") == "reject" for evaluation in evaluations):
         guidance_messages.append(
-            "Reject proposed deals that transfer away a property completing an opponent's street group "
-            "when the visible compensation is below the strategic cash value floor."
+            "Reject proposed deals that transfer away a property completing an opponent's street group, "
+            "overpay for this player's own street-group completion, or breach the liquidity floor."
         )
     if any(evaluation.get("recommendation") == "accept" for evaluation in evaluations):
         guidance_messages.append(
@@ -1603,11 +1603,49 @@ def _deal_completion_evaluation(
 
         maximum_cash_value_ceiling = property_data.price * 3 // 2
         cash_after_payment = player_cash - actor_pays_cash_total
-        if (
-            actor_pays_cash_total > maximum_cash_value_ceiling
-            or cash_after_payment < GROUP_COMPLETION_PURCHASE_CASH_FLOOR
-        ):
-            continue
+        opportunity = {
+            "kind": "actor_street_group_completion",
+            "property_id": property_id,
+            "property_name": property_data.name,
+            "property_price": property_data.price,
+            "group": group.id,
+            "group_name": group.name,
+            "sender_player_id": sender_player_id,
+            "actor_already_owned_property_ids": actor_already_owned_property_ids,
+            "maximum_cash_value_ceiling": maximum_cash_value_ceiling,
+            "cash_after_payment": cash_after_payment,
+            "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
+        }
+        if actor_pays_cash_total > maximum_cash_value_ceiling:
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": "receives_property_that_completes_actor_street_group_above_value_ceiling",
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "opportunity": {
+                    **opportunity,
+                    "cash_over_value_ceiling": actor_pays_cash_total - maximum_cash_value_ceiling,
+                },
+            }
+        if cash_after_payment < GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": "receives_property_that_completes_actor_street_group_below_cash_floor",
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "opportunity": {
+                    **opportunity,
+                    "cash_floor_gap": GROUP_COMPLETION_PURCHASE_CASH_FLOOR - cash_after_payment,
+                },
+            }
 
         return {
             "deal_id": _string_or_none(deal.get("id")),
@@ -1618,19 +1656,7 @@ def _deal_completion_evaluation(
             "actor_pays_cash_total": actor_pays_cash_total,
             "actor_transfers_property_ids": actor_transfers_property_ids,
             "actor_receives_property_ids": actor_receives_property_ids,
-            "opportunity": {
-                "kind": "actor_street_group_completion",
-                "property_id": property_id,
-                "property_name": property_data.name,
-                "property_price": property_data.price,
-                "group": group.id,
-                "group_name": group.name,
-                "sender_player_id": sender_player_id,
-                "actor_already_owned_property_ids": actor_already_owned_property_ids,
-                "maximum_cash_value_ceiling": maximum_cash_value_ceiling,
-                "cash_after_payment": cash_after_payment,
-                "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
-            },
+            "opportunity": opportunity,
         }
     return None
 
