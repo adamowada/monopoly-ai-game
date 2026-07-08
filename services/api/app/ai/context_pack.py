@@ -759,8 +759,8 @@ def _action_selection_guidance(
             "BUY_HOUSE is legal on a complete color group; prefer even monopoly "
             "development before ROLL_DICE when cash_after_cost remains healthy. "
             "When multiple groups can develop, choose from the highest "
-            "development_priority_score group first, then choose the legal property "
-            "with the highest marginal_rent_gain."
+            "development_priority_score group first, then choose a least-developed property "
+            "under the even-building rule with the highest marginal_rent_gain."
         )
     elif deferred_development_opportunities:
         if "BUY_HOUSE" not in lower_priority_action_types:
@@ -1557,11 +1557,14 @@ def _development_opportunities(
             for ownership in group_ownerships
             if ownership is not None
         }
+        minimum_group_improvement_level = min(group_improvement_levels.values(), default=0)
+        maximum_group_improvement_level = max(group_improvement_levels.values(), default=0)
         development_priority_score = _street_group_completion_priority_score(
             group_properties,
             group.house_cost,
         )
         current_improvement_level = group_improvement_levels.get(property_id, 0)
+        even_building_priority = maximum_group_improvement_level - current_improvement_level
         marginal_rent_gain = _marginal_rent_gain(property_data, current_improvement_level)
         cash_after_cost = player.cash - cost
         opportunities.append(
@@ -1583,11 +1586,15 @@ def _development_opportunities(
                 "cash_reserve_floor": PURCHASE_HEALTHY_CASH_FLOOR,
                 "cash_after_cost_is_healthy": cash_after_cost >= PURCHASE_HEALTHY_CASH_FLOOR,
                 "current_improvement_level": current_improvement_level,
+                "minimum_group_improvement_level": minimum_group_improvement_level,
+                "maximum_group_improvement_level": maximum_group_improvement_level,
+                "even_building_priority": even_building_priority,
                 "group_improvement_levels": group_improvement_levels,
                 "recommendation": (
                     "Prefer this legal BUY_HOUSE action before rolling when it has "
-                    "the best available development priority and marginal rent gain "
-                    "unless a specific liquidity risk outweighs development."
+                    "the best available development priority, follows even-building "
+                    "pressure, and has strong marginal rent gain unless a specific "
+                    "liquidity risk outweighs development."
                 ),
             }
         )
@@ -1598,6 +1605,7 @@ def _development_opportunities(
             enumerate(opportunities),
             key=lambda indexed_opportunity: (
                 -_int_or_zero(indexed_opportunity[1].get("development_priority_score")),
+                -_int_or_zero(indexed_opportunity[1].get("even_building_priority")),
                 -_int_or_zero(indexed_opportunity[1].get("marginal_rent_gain")),
                 indexed_opportunity[0],
             ),

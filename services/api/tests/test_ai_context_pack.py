@@ -267,6 +267,31 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     )
 
 
+def test_context_pack_explains_even_building_priority_for_uneven_monopoly() -> None:
+    state = _state_with_uneven_orange_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    opportunities = guidance["development_opportunities"]
+
+    assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
+    assert [opportunity["property_id"] for opportunity in opportunities] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+    ]
+    assert all(opportunity["current_improvement_level"] == 1 for opportunity in opportunities)
+    assert all(
+        opportunity["minimum_group_improvement_level"] == 1 for opportunity in opportunities
+    )
+    assert all(
+        opportunity["maximum_group_improvement_level"] == 2 for opportunity in opportunities
+    )
+    assert all(opportunity["even_building_priority"] == 1 for opportunity in opportunities)
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "least-developed property" in guidance_text
+    assert "even-building rule" in guidance_text
+
+
 def test_context_pack_defers_monopoly_development_when_cash_after_cost_breaches_reserve() -> None:
     state = _state_with_orange_monopoly(cash=350)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -1954,6 +1979,27 @@ def _state_with_orange_monopoly(*, cash: int = 3000) -> GameState:
             "property_ownership": tuple(
                 ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
                 if ownership.property_id in orange_property_ids
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_uneven_orange_monopoly() -> GameState:
+    state = _state_with_orange_monopoly()
+    improvement_levels = {
+        "property_st_james_place": 1,
+        "property_tennessee_avenue": 2,
+        "property_new_york_avenue": 1,
+    }
+    return state.model_copy(
+        update={
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"houses": improvement_levels[ownership.property_id], "hotel": False}
+                )
+                if ownership.property_id in improvement_levels
                 else ownership
                 for ownership in state.property_ownership
             ),
