@@ -251,10 +251,16 @@ describe("ClassicGameBoard", () => {
       "aria-label",
       "Owner marker: Grace owns Boardwalk",
     );
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-edge", "perimeter");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveClass("bottom-0.5");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).not.toHaveClass("top-0.5");
     expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute(
       "aria-label",
       "Development marker: Boardwalk has a hotel",
     );
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-edge", "interior");
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveClass("top-0.5");
+    expect(boardwalk?.querySelector("[data-development-marker]")).not.toHaveClass("bottom-0.5");
     expect(boardwalk?.querySelector("[data-space-bottom-label]")).toHaveTextContent("$400");
     expect(board.querySelector("[data-property-hover]")).toBeNull();
     fireEvent.mouseEnter(boardwalk as Element);
@@ -266,9 +272,14 @@ describe("ClassicGameBoard", () => {
       "aria-label",
       "Owner marker: Ada owns Mediterranean Avenue",
     );
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-edge", "perimeter");
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
       "aria-label",
       "Development marker: Mediterranean Avenue has 3 houses",
+    );
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "data-marker-edge",
+      "interior",
     );
   });
 
@@ -394,7 +405,11 @@ describe("ClassicGameBoard", () => {
       "data-token-motion-overlay",
       "true",
     );
-    expect(screen.getByRole("status", { name: "Board movement" })).toHaveTextContent("Ada moving to Baltic Avenue");
+    const movementBanner = screen.getByRole("status", { name: "Board movement" });
+    expect(movementBanner).toHaveTextContent("Ada moving to Baltic Avenue");
+    expect(movementBanner).toHaveAttribute("data-board-motion-placement", "below-dice");
+    expect(movementBanner).toHaveClass("max-w-[14rem]");
+    expect(movementBanner).not.toHaveClass("w-full");
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
   });
 

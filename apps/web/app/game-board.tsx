@@ -449,11 +449,12 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative mx-auto my-2 w-full max-w-md rounded border-2 border-[#2f2418] bg-[#fffbea] px-3 py-2 text-center text-[#1f2a1f] shadow-[0_6px_0_rgba(47,36,24,0.18)]"
+      className="relative mx-auto mb-0.5 mt-1 w-fit max-w-[14rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-2 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
+      data-board-motion-placement="below-dice"
       role="status"
     >
-      <div className="break-words text-xs font-black leading-tight">{message}</div>
+      <div className="break-words text-[11px] font-black leading-tight">{message}</div>
     </div>
   );
 }
@@ -474,12 +475,12 @@ function CenterBoardArt({ motion, winner }: Readonly<{ motion?: BoardMotion; win
               <BoardTitleMark />
             </div>
 
-            <BoardMotionBanner motion={motion} />
-
             <div className="relative grid min-h-0 grid-cols-2 gap-3">
               <DeckArtPreview deck={DECK_ART.chance} />
               <DeckArtPreview deck={DECK_ART.community_chest} />
             </div>
+
+            <BoardMotionBanner motion={motion} />
           </>
         )}
       </div>
@@ -748,7 +749,8 @@ function BoardOwnerMarker({
   return (
     <span
       aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
-      className="absolute right-0.5 top-0.5 z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm"
+      className="absolute bottom-0.5 right-0.5 z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm"
+      data-marker-edge="perimeter"
       data-owner-marker=""
       data-token-icon={icon}
       role="img"
@@ -789,8 +791,9 @@ function DevelopmentMarker({
   return (
     <span
       aria-label={label}
-      className="absolute bottom-0.5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm"
+      className="absolute left-1/2 top-0.5 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm"
       data-development-marker=""
+      data-marker-edge="interior"
       role="img"
       title={label.replace("Development marker: ", "")}
     >
