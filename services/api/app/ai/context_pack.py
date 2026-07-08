@@ -2424,6 +2424,11 @@ def _deal_completion_evaluation(
         for property_id in actor_receives_property_ids
         if property_id in properties_by_id
     )
+    actor_transfers_property_value_total = sum(
+        properties_by_id[property_id].price
+        for property_id in actor_transfers_property_ids
+        if property_id in properties_by_id
+    )
     actor_receives_total_compensation_value = (
         actor_receives_cash_total + actor_receives_property_value_total
     )
@@ -2431,6 +2436,7 @@ def _deal_completion_evaluation(
         actor_receives_total_compensation_value - actor_pays_cash_total
     )
     actor_net_cash_payment = max(actor_pays_cash_total - actor_receives_cash_total, 0)
+    actor_total_payment_value = actor_net_cash_payment + actor_transfers_property_value_total
     actor_cash_after_net_payment = player_cash - actor_net_cash_payment
     actor_completion_opportunities_by_property_id: dict[str, dict[str, Any]] = {}
     for receipt in actor_receives:
@@ -2726,12 +2732,14 @@ def _deal_completion_evaluation(
             "actor_already_owned_property_ids": actor_already_owned_property_ids,
             "maximum_cash_value_ceiling": maximum_cash_value_ceiling,
             "net_cash_payment": actor_net_cash_payment,
+            "actor_transfers_property_value_total": actor_transfers_property_value_total,
+            "total_payment_value": actor_total_payment_value,
             "cash_after_payment": cash_after_payment,
             "cash_after_net_payment": actor_cash_after_net_payment,
             "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
         }
         _include_property_group_kind(opportunity, group_kind)
-        if actor_net_cash_payment > maximum_cash_value_ceiling:
+        if actor_total_payment_value > maximum_cash_value_ceiling:
             return {
                 "deal_id": _string_or_none(deal.get("id")),
                 "recommendation": "reject",
@@ -2747,8 +2755,17 @@ def _deal_completion_evaluation(
                 "actor_receives_property_ids": actor_receives_property_ids,
                 "opportunity": {
                     **opportunity,
-                    "cash_over_value_ceiling": (
-                        actor_net_cash_payment - maximum_cash_value_ceiling
+                    **(
+                        {
+                            "cash_over_value_ceiling": (
+                                actor_net_cash_payment - maximum_cash_value_ceiling
+                            )
+                        }
+                        if actor_net_cash_payment > maximum_cash_value_ceiling
+                        else {}
+                    ),
+                    "payment_value_over_ceiling": (
+                        actor_total_payment_value - maximum_cash_value_ceiling
                     ),
                 },
             }

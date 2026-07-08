@@ -795,6 +795,8 @@ def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopo
                 ],
                 "maximum_cash_value_ceiling": 270,
                 "net_cash_payment": 220,
+                "actor_transfers_property_value_total": 0,
+                "total_payment_value": 220,
                 "cash_after_payment": 280,
                 "cash_after_net_payment": 280,
                 "group_completion_cash_floor": 100,
@@ -831,6 +833,37 @@ def test_context_pack_accepts_actor_completion_when_cash_return_makes_net_price_
     assert opportunity["net_cash_payment"] == 200
     assert opportunity["cash_after_net_payment"] == 300
     assert opportunity["cash_after_payment"] == 100
+
+
+def test_context_pack_rejects_actor_completion_when_property_payment_overpays() -> None:
+    state = _state_with_orange_near_monopoly_and_ai_boardwalk()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_boardwalk_for_tennessee_completion_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    )
+    assert guidance["deal_evaluations"][0]["actor_transfers_property_ids"] == [
+        "property_boardwalk"
+    ]
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["maximum_cash_value_ceiling"] == 270
+    assert opportunity["net_cash_payment"] == 0
+    assert opportunity["actor_transfers_property_value_total"] == 400
+    assert opportunity["total_payment_value"] == 400
+    assert opportunity["payment_value_over_ceiling"] == 130
 
 
 def test_context_pack_rejects_mutual_completion_that_gives_opponent_stronger_group() -> None:
@@ -1016,6 +1049,7 @@ def test_context_pack_recommends_rejecting_overpriced_deal_that_completes_actor_
     assert opportunity["property_id"] == "property_tennessee_avenue"
     assert opportunity["maximum_cash_value_ceiling"] == 270
     assert opportunity["cash_over_value_ceiling"] == 130
+    assert opportunity["payment_value_over_ceiling"] == 130
     assert opportunity["cash_after_payment"] == 400
 
 
@@ -2448,6 +2482,43 @@ def _cash_return_tennessee_completion_deal() -> dict[str, Any]:
     }
 
 
+def _boardwalk_for_tennessee_completion_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "boardwalk-for-tennessee-completion",
+            "terms": [
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "boardwalk-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_boardwalk",
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
 def _mutual_light_blue_for_orange_completion_deal() -> dict[str, Any]:
     return {
         "id": str(DEAL_ID),
@@ -2781,6 +2852,20 @@ def _state_with_orange_near_monopoly(*, ai_cash: int = 1500) -> GameState:
                     update={"owner_id": owner_by_property_id[ownership.property_id]}
                 )
                 if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_orange_near_monopoly_and_ai_boardwalk() -> GameState:
+    state = _state_with_orange_near_monopoly(ai_cash=1500)
+    return state.model_copy(
+        update={
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id == "property_boardwalk"
                 else ownership
                 for ownership in state.property_ownership
             ),
