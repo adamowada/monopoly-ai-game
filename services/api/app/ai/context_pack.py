@@ -775,12 +775,28 @@ def _action_selection_guidance(
         minimum_bid = _int_or_zero(auction_guidance.get("minimum_bid"))
         valuation_ceiling = _int_or_zero(auction_guidance.get("valuation_ceiling"))
         cash_limited_bid_ceiling = _int_or_zero(auction_guidance.get("cash_limited_bid_ceiling"))
+        recommended_auction_action_type = _string_or_none(
+            auction_guidance.get("recommended_auction_action_type")
+        )
+        recommended_bid_amount = _int_or_none(auction_guidance.get("recommended_bid_amount"))
+        if (
+            recommended_auction_action_type is not None
+            and recommended_auction_action_type in legal_action_types
+            and recommended_auction_action_type not in recommended_action_types
+        ):
+            recommended_action_types.append(recommended_auction_action_type)
         turn_guidance.append(
             "For BID_AUCTION, the payload amount is the minimum legal floor, "
             "not a recommendation. If bidding, choose a deliberate value based "
             "on property price, current high bid, and cash while staying near "
             "the valuation ceiling, or PASS_AUCTION; avoid one-dollar increment loops."
         )
+        if recommended_auction_action_type == "BID_AUCTION" and recommended_bid_amount is not None:
+            turn_guidance.append(
+                f"Auction guidance recommends BID_AUCTION for about ${recommended_bid_amount}; "
+                "that is a deliberate bid target, while the legal payload amount is only the "
+                "minimum floor."
+            )
         if minimum_bid > valuation_ceiling:
             if minimum_bid > cash_limited_bid_ceiling:
                 turn_guidance.append(
@@ -1308,8 +1324,24 @@ def _auction_guidance(
         cash_reserve_floor = PURCHASE_HEALTHY_CASH_FLOOR
 
     bid_payload = _mapping(bid_action.get("payload"))
+    minimum_bid = _int_or_zero(bid_payload.get("amount"))
     cash_limited_bid_ceiling = max(player.cash - cash_reserve_floor, 0)
     valuation_ceiling = min(strategic_valuation_ceiling, cash_limited_bid_ceiling)
+    if minimum_bid <= valuation_ceiling and valuation_ceiling > 0:
+        recommended_auction_action_type = "BID_AUCTION"
+        recommended_bid_amount = min(
+            valuation_ceiling,
+            max(minimum_bid, property_data.price),
+        )
+        recommended_bid_reason = "bid_deliberate_amount_at_or_below_valuation"
+    else:
+        recommended_auction_action_type = "PASS_AUCTION"
+        recommended_bid_amount = None
+        recommended_bid_reason = (
+            "pass_to_preserve_cash_reserve"
+            if minimum_bid > cash_limited_bid_ceiling
+            else "pass_minimum_above_valuation"
+        )
     return {
         "property_id": auction.property_id,
         "property_name": property_data.name,
@@ -1328,6 +1360,9 @@ def _auction_guidance(
         "strategic_valuation_ceiling": strategic_valuation_ceiling,
         "valuation_ceiling": valuation_ceiling,
         "valuation_basis": valuation_basis,
+        "recommended_auction_action_type": recommended_auction_action_type,
+        "recommended_bid_amount": recommended_bid_amount,
+        "recommended_bid_reason": recommended_bid_reason,
         "pass_action_available": any(
             action.get("type") == "PASS_AUCTION" for action in legal_actions
         ),
@@ -2362,6 +2397,7 @@ def _instruction_contract() -> dict[str, Any]:
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
+            "When auction_guidance provides recommended_bid_amount, use that amount for BID_AUCTION instead of blindly submitting the legal minimum payload.",
             "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a color group, railroad set, utility set, or blocking an opponent's set.",
@@ -2458,6 +2494,14 @@ def _int_or_zero(value: Any) -> int:
     if isinstance(value, int):
         return value
     return 0
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _row_id(row: Mapping[str, Any]) -> str:

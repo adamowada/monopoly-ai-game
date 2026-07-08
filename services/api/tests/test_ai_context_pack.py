@@ -1185,6 +1185,7 @@ def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops
     assert "not a recommended bid" in bid_action["description"]
 
     guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["BID_AUCTION"]
     assert guidance["auction_guidance"] == {
         "property_id": "property_virginia_avenue",
         "property_name": "Virginia Avenue",
@@ -1203,13 +1204,21 @@ def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops
         "strategic_valuation_ceiling": 160,
         "valuation_ceiling": 160,
         "valuation_basis": "listed_price",
+        "recommended_auction_action_type": "BID_AUCTION",
+        "recommended_bid_amount": 160,
+        "recommended_bid_reason": "bid_deliberate_amount_at_or_below_valuation",
         "pass_action_available": True,
         "bid_payload_amount_is_floor": True,
     }
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "not a recommendation" in guidance_text
     assert "one-dollar increment loops" in guidance_text
+    assert "BID_AUCTION for about $160" in guidance_text
     assert "valuation ceiling" in guidance_text
+    assert any(
+        "recommended_bid_amount" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
 
 
 def test_context_pack_guides_auction_pass_when_minimum_bid_exceeds_valuation() -> None:
@@ -1219,6 +1228,8 @@ def test_context_pack_guides_auction_pass_when_minimum_bid_exceeds_valuation() -
     guidance = pack["action_selection_guidance"]
     assert guidance["auction_guidance"]["minimum_bid"] == 1001
     assert guidance["auction_guidance"]["valuation_ceiling"] == 160
+    assert guidance["auction_guidance"]["recommended_auction_action_type"] == "PASS_AUCTION"
+    assert guidance["auction_guidance"]["recommended_bid_amount"] is None
 
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "PASS_AUCTION" in guidance_text
@@ -1235,6 +1246,8 @@ def test_context_pack_guides_auction_pass_when_cash_reserve_would_be_breached() 
     assert guidance["auction_guidance"]["valuation_ceiling"] == 0
     assert guidance["auction_guidance"]["cash_reserve_floor"] == 300
     assert guidance["auction_guidance"]["cash_limited_bid_ceiling"] == 0
+    assert guidance["auction_guidance"]["recommended_auction_action_type"] == "PASS_AUCTION"
+    assert guidance["auction_guidance"]["recommended_bid_amount"] is None
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "PASS_AUCTION" in guidance_text
     assert "cash reserve" in guidance_text
@@ -1250,8 +1263,10 @@ def test_context_pack_guides_auction_premium_to_block_opponent_group_completion(
     assert (
         guidance["auction_guidance"]["valuation_basis"] == "block_opponent_group_completion_premium"
     )
+    assert guidance["recommended_action_types"] == ["BID_AUCTION"]
     assert guidance["auction_guidance"]["strategic_valuation_ceiling"] == 240
     assert guidance["auction_guidance"]["valuation_ceiling"] == 240
+    assert guidance["auction_guidance"]["recommended_bid_amount"] == 160
     assert guidance["auction_guidance"]["opponent_group_completion_threats"] == [
         {
             "opponent_player_id": str(OTHER_PLAYER_ID),
