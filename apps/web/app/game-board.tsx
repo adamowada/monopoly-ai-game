@@ -18,6 +18,8 @@ type BoardCoordinates = {
   columnSpan: number;
 };
 
+type BoardEdge = "bottom" | "left" | "top" | "right";
+
 type PlayerColorSetting = {
   seat_order: number;
   color: string;
@@ -360,6 +362,43 @@ function contentRotationForPosition(position: number): number {
   return 0;
 }
 
+function perimeterEdgeForPosition(position: number): BoardEdge {
+  if (position > 10 && position < 20) {
+    return "left";
+  }
+  if (position > 20 && position < 30) {
+    return "top";
+  }
+  if (position > 30) {
+    return "right";
+  }
+  return "bottom";
+}
+
+function oppositeEdge(edge: BoardEdge): BoardEdge {
+  switch (edge) {
+    case "bottom":
+      return "top";
+    case "left":
+      return "right";
+    case "top":
+      return "bottom";
+    case "right":
+      return "left";
+  }
+}
+
+const markerSideClasses: Record<BoardEdge, string> = {
+  bottom: "bottom-0.5 left-1/2 -translate-x-1/2",
+  left: "left-0.5 top-1/2 -translate-y-1/2",
+  right: "right-0.5 top-1/2 -translate-y-1/2",
+  top: "left-1/2 top-0.5 -translate-x-1/2",
+};
+
+function developmentMarkerAxisClass(edge: BoardEdge): string {
+  return edge === "left" || edge === "right" ? "flex-col" : "flex-row";
+}
+
 function orientedContentStyle(rotation: number): CSSProperties {
   const sideways = Math.abs(rotation) === 90;
   return {
@@ -449,17 +488,42 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative mx-auto mb-0.5 mt-1 w-fit max-w-[14rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-2 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-50 mx-auto w-fit max-w-[10rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-2 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
-      data-board-motion-placement="below-dice"
+      data-board-motion-placement="above-dice"
       role="status"
     >
-      <div className="break-words text-[11px] font-black leading-tight">{message}</div>
+      <div className="break-words text-[10px] font-black leading-[1.05]">{message}</div>
     </div>
   );
 }
 
-function CenterBoardArt({ motion, winner }: Readonly<{ motion?: BoardMotion; winner: GamePlayer | null }>) {
+function CenterMotionStack({
+  lastRoll,
+  motion,
+}: Readonly<{
+  lastRoll?: LastRollView | null;
+  motion?: BoardMotion;
+}>) {
+  if (!motion && !lastRoll) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-50 grid place-items-center px-2" data-center-motion-stack="">
+      <div className="grid max-w-[11rem] justify-items-center gap-1.5">
+        <BoardMotionBanner motion={motion} />
+        <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
+      </div>
+    </div>
+  );
+}
+
+function CenterBoardArt({
+  lastRoll,
+  motion,
+  winner,
+}: Readonly<{ lastRoll?: LastRollView | null; motion?: BoardMotion; winner: GamePlayer | null }>) {
   return (
     <div
       className="col-start-3 col-end-12 row-start-3 row-end-12 overflow-hidden border-4 border-[#2f2418] bg-[#eaf3d7] p-3 text-[#2f2418] shadow-inner"
@@ -480,7 +544,7 @@ function CenterBoardArt({ motion, winner }: Readonly<{ motion?: BoardMotion; win
               <DeckArtPreview deck={DECK_ART.community_chest} />
             </div>
 
-            <BoardMotionBanner motion={motion} />
+            <CenterMotionStack lastRoll={lastRoll} motion={motion} />
           </>
         )}
       </div>
@@ -528,7 +592,15 @@ function DiceFace({ index, rolling, value }: Readonly<{ index: number; rolling: 
   );
 }
 
-function DiceMotionStatus({ lastRoll, motion }: Readonly<{ lastRoll?: LastRollView | null; motion?: BoardMotion }>) {
+function DiceMotionStatus({
+  lastRoll,
+  motion,
+  placement = "board-overlay",
+}: Readonly<{
+  lastRoll?: LastRollView | null;
+  motion?: BoardMotion;
+  placement?: "board-overlay" | "center-board";
+}>) {
   if (!motion && !lastRoll) {
     return null;
   }
@@ -565,9 +637,12 @@ function DiceMotionStatus({ lastRoll, motion }: Readonly<{ lastRoll?: LastRollVi
       aria-label="Dice roll animation"
       aria-live="polite"
       className={cn(
-        "dice-motion-panel absolute z-40 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]",
-        "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+        "dice-motion-panel z-40 rounded-md border-2 border-[#1f2a1f] bg-[#fffbea]/95 px-3 py-2 text-center text-[#1f2a1f] shadow-[0_14px_30px_rgba(31,42,31,0.22)]",
+        placement === "board-overlay"
+          ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+          : "relative w-fit max-w-full",
       )}
+      data-dice-placement={placement}
       data-dice-motion={motion?.status ?? "last-roll"}
       role="status"
     >
@@ -732,10 +807,12 @@ function RotateBoardButton({ onRotate }: Readonly<{ onRotate: () => void }>) {
 function BoardOwnerMarker({
   game,
   ownership,
+  position,
   property,
 }: Readonly<{
   game: GameMetadata;
   ownership: PropertyOwnershipView;
+  position: number;
   property: StaticDataProperty;
 }>) {
   const owner = ownerPlayer(game, ownership.owner_id);
@@ -745,12 +822,17 @@ function BoardOwnerMarker({
 
   const color = getPlayerColor(game, owner.seat_order);
   const icon = getPlayerIcon(game, owner.seat_order);
+  const perimeterEdge = perimeterEdgeForPosition(position);
 
   return (
     <span
       aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
-      className="absolute bottom-0.5 right-0.5 z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm"
+      className={cn(
+        "absolute z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm",
+        markerSideClasses[perimeterEdge],
+      )}
       data-marker-edge="perimeter"
+      data-marker-side={perimeterEdge}
       data-owner-marker=""
       data-token-icon={icon}
       role="img"
@@ -769,9 +851,11 @@ function BoardOwnerMarker({
 
 function DevelopmentMarker({
   ownership,
+  position,
   property,
 }: Readonly<{
   ownership: PropertyOwnershipView;
+  position: number;
   property: StaticDataProperty;
 }>) {
   if (property.kind !== "street") {
@@ -787,13 +871,19 @@ function DevelopmentMarker({
   const label = hasHotel
     ? `Development marker: ${property.name} has a hotel`
     : `Development marker: ${property.name} has ${houses} ${houses === 1 ? "house" : "houses"}`;
+  const interiorEdge = oppositeEdge(perimeterEdgeForPosition(position));
 
   return (
     <span
       aria-label={label}
-      className="absolute left-1/2 top-0.5 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm"
+      className={cn(
+        "absolute z-20 flex items-center justify-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm",
+        developmentMarkerAxisClass(interiorEdge),
+        markerSideClasses[interiorEdge],
+      )}
       data-development-marker=""
       data-marker-edge="interior"
+      data-marker-side={interiorEdge}
       role="img"
       title={label.replace("Development marker: ", "")}
     >
@@ -936,7 +1026,6 @@ function StreetPropertyCell({
   bandColor,
   game,
   motion,
-  ownership,
   players,
   property,
   space,
@@ -944,15 +1033,12 @@ function StreetPropertyCell({
   bandColor: string;
   game: GameMetadata;
   motion?: BoardMotion;
-  ownership: PropertyOwnershipView;
   players: GamePlayer[];
   property: StaticDataProperty;
   space: StaticDataBoardSpace;
 }>) {
   return (
     <>
-      <BoardOwnerMarker game={game} ownership={ownership} property={property} />
-      <DevelopmentMarker ownership={ownership} property={property} />
       <span aria-hidden="true" className="h-3 w-full shrink-0" data-property-color-band="" style={{ backgroundColor: bandColor }} />
       <div className="flex min-h-0 flex-1 flex-col justify-between gap-0.5 px-1 pb-1 pt-1">
         <div className="break-words text-[8px] font-black leading-[0.9] text-[#1f2a1f] uppercase" data-space-name="">
@@ -1068,18 +1154,14 @@ function OtherSpaceCell({
   game,
   isCorner,
   motion,
-  ownership,
   players,
-  property,
   space,
 }: Readonly<{
   bottom: string | null;
   game: GameMetadata;
   isCorner: boolean;
   motion?: BoardMotion;
-  ownership: PropertyOwnershipView | null;
   players: GamePlayer[];
-  property: StaticDataProperty | null;
   space: StaticDataBoardSpace;
 }>) {
   const art = SPACE_ART_BY_ID[space.id];
@@ -1097,7 +1179,6 @@ function OtherSpaceCell({
       )}
       data-large-space-art={largeArtwork ? "true" : undefined}
     >
-      {property && ownership ? <BoardOwnerMarker game={game} ownership={ownership} property={property} /> : null}
       <div
         className={`${largeArtwork ? (isCorner ? "text-[12px]" : "text-[9px]") : isCorner ? "text-[10px]" : "text-[8px]"} break-words font-black leading-[0.9] text-[#1f2a1f] uppercase`}
         data-space-name=""
@@ -1167,7 +1248,7 @@ export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissD
             transformOrigin: "center",
           }}
         >
-          <CenterBoardArt motion={motion} winner={winner} />
+          <CenterBoardArt lastRoll={lastRoll} motion={motion} winner={winner} />
 
           {BOARD_SPACES.map((space) => {
             const coordinates = boardCoordinates(space.position);
@@ -1222,6 +1303,17 @@ export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissD
                   gridRow: `${coordinates.row} / span ${coordinates.rowSpan}`,
                 }}
               >
+                {property && ownership ? (
+                  <BoardOwnerMarker
+                    game={game}
+                    ownership={ownership}
+                    position={space.position}
+                    property={property}
+                  />
+                ) : null}
+                {property?.kind === "street" && ownership ? (
+                  <DevelopmentMarker ownership={ownership} position={space.position} property={property} />
+                ) : null}
                 <OrientedSpaceContent rotation={contentRotation}>
                   {space.id === "space_jail" ? (
                     <JailSpaceCell
@@ -1236,7 +1328,6 @@ export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissD
                       bandColor={bandColor}
                       game={game}
                       motion={motion}
-                      ownership={ownership ?? defaultOwnership(property.id)}
                       players={players}
                       property={property}
                       space={space}
@@ -1247,9 +1338,7 @@ export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissD
                       game={game}
                       isCorner={isCorner}
                       motion={motion}
-                      ownership={ownership}
                       players={players}
-                      property={property}
                       space={space}
                     />
                   )}
@@ -1259,7 +1348,6 @@ export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissD
           })}
           <MotionTokenOverlay game={game} motion={motion} />
         </div>
-        <DiceMotionStatus lastRoll={lastRoll} motion={motion} />
         <DrawnCardModal card={drawnCard} onDismiss={onDismissDrawnCard} />
         <PropertyHoverOverlay game={game} property={hoveredProperty} snapshot={snapshot} tooltipId={hoveredTooltipId} />
       </div>

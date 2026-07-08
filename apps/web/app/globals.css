@@ -50,6 +50,10 @@ textarea {
   animation: dice-panel-pop 220ms ease-out both;
 }
 
+.dice-motion-panel[data-dice-placement="center-board"] {
+  animation-name: dice-panel-pop-in-place;
+}
+
 .dice-motion-panel[data-dice-motion="rolling"] .dice-motion-ring {
   animation: dice-ring-pulse 620ms ease-out infinite;
 }
@@ -121,6 +125,17 @@ textarea {
   to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes dice-panel-pop-in-place {
+  from {
+    opacity: 0;
+    transform: translateY(0.2rem) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

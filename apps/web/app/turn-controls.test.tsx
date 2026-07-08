@@ -1462,7 +1462,11 @@ describe("GamePlaySurface turn controls", () => {
       },
     );
     expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("2 + 3 = 5");
-    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveClass("left-1/2");
+    expect(board.querySelector("[data-center-motion-stack]")).toBeInTheDocument();
+    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute(
+      "data-dice-placement",
+      "center-board",
+    );
   }, 14_000);
 
   it("keeps the centered dice destination when a roll sends the player to jail", async () => {
@@ -1628,7 +1632,8 @@ describe("GamePlaySurface turn controls", () => {
     const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
     const diceStatus = await within(board).findByRole("status", { name: "Dice roll animation" });
     expect(diceStatus).toHaveTextContent("2 + 3 = 5");
-    expect(diceStatus).toHaveClass("left-1/2");
+    expect(board.querySelector("[data-center-motion-stack]")).toBeInTheDocument();
+    expect(diceStatus).toHaveAttribute("data-dice-placement", "center-board");
     expect(diceStatus).not.toHaveClass("right-3");
   });
 
@@ -2055,7 +2060,8 @@ describe("GamePlaySurface turn controls", () => {
     const diceStatus = within(board).getByRole("status", { name: "Dice roll animation" });
     expect(diceStatus).toHaveTextContent("2 + 3 = 5");
     expect(diceStatus).toHaveAttribute("data-dice-motion", "settled");
-    expect(diceStatus).toHaveClass("left-1/2");
+    expect(board.querySelector("[data-center-motion-stack]")).toBeInTheDocument();
+    expect(diceStatus).toHaveAttribute("data-dice-placement", "center-board");
     expect(diceStatus).not.toHaveClass("right-3");
   }, 14_000);
 
@@ -2114,7 +2120,11 @@ describe("GamePlaySurface turn controls", () => {
       expect(aiStepCalls).toHaveLength(2);
     });
     expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveTextContent("2 + 3 = 5");
-    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveClass("left-1/2");
+    expect(board.querySelector("[data-center-motion-stack]")).toBeInTheDocument();
+    expect(within(board).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute(
+      "data-dice-placement",
+      "center-board",
+    );
   });
 
   it("refetches AI audit records after a successful Manual AI step", async () => {

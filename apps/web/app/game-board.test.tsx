@@ -117,6 +117,22 @@ function stateFixture(): GameStateResponse {
           hotel: true,
         },
         {
+          property_id: "property_illinois_avenue",
+          owner_id: "player-1",
+          mortgaged: false,
+          houses: 2,
+          hotels: 0,
+          hotel: false,
+        },
+        {
+          property_id: "property_states_avenue",
+          owner_id: "player-2",
+          mortgaged: false,
+          houses: 1,
+          hotels: 0,
+          hotel: false,
+        },
+        {
           property_id: "property_mediterranean_avenue",
           owner_id: "player-1",
           mortgaged: false,
@@ -242,6 +258,8 @@ describe("ClassicGameBoard", () => {
 
     const board = screen.getByRole("region", { name: "Classic Monopoly-style board" });
     const boardwalk = board.querySelector("[data-space-index='39']");
+    const illinois = board.querySelector("[data-space-index='24']");
+    const states = board.querySelector("[data-space-index='13']");
     const mediterranean = board.querySelector("[data-space-index='1']");
 
     expect(boardwalk).toHaveAttribute("data-space-kind", "street-property");
@@ -252,15 +270,17 @@ describe("ClassicGameBoard", () => {
       "Owner marker: Grace owns Boardwalk",
     );
     expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-edge", "perimeter");
-    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveClass("bottom-0.5");
-    expect(boardwalk?.querySelector("[data-owner-marker]")).not.toHaveClass("top-0.5");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "right");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveClass("right-0.5");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).not.toHaveClass("left-0.5");
     expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute(
       "aria-label",
       "Development marker: Boardwalk has a hotel",
     );
     expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-edge", "interior");
-    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveClass("top-0.5");
-    expect(boardwalk?.querySelector("[data-development-marker]")).not.toHaveClass("bottom-0.5");
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "left");
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveClass("left-0.5");
+    expect(boardwalk?.querySelector("[data-development-marker]")).not.toHaveClass("right-0.5");
     expect(boardwalk?.querySelector("[data-space-bottom-label]")).toHaveTextContent("$400");
     expect(board.querySelector("[data-property-hover]")).toBeNull();
     fireEvent.mouseEnter(boardwalk as Element);
@@ -273,6 +293,8 @@ describe("ClassicGameBoard", () => {
       "Owner marker: Ada owns Mediterranean Avenue",
     );
     expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-edge", "perimeter");
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "bottom");
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveClass("bottom-0.5");
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
       "aria-label",
       "Development marker: Mediterranean Avenue has 3 houses",
@@ -281,6 +303,13 @@ describe("ClassicGameBoard", () => {
       "data-marker-edge",
       "interior",
     );
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "top");
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveClass("top-0.5");
+
+    expect(illinois?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "top");
+    expect(illinois?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "bottom");
+    expect(states?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "left");
+    expect(states?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "right");
   });
 
   it("renders non-street board cells with a top name, large logo, and relevant bottom labels", () => {
@@ -407,9 +436,16 @@ describe("ClassicGameBoard", () => {
     );
     const movementBanner = screen.getByRole("status", { name: "Board movement" });
     expect(movementBanner).toHaveTextContent("Ada moving to Baltic Avenue");
-    expect(movementBanner).toHaveAttribute("data-board-motion-placement", "below-dice");
-    expect(movementBanner).toHaveClass("max-w-[14rem]");
+    expect(movementBanner).toHaveAttribute("data-board-motion-placement", "above-dice");
+    expect(movementBanner).toHaveClass("max-w-[10rem]");
     expect(movementBanner).not.toHaveClass("w-full");
+    const centerBoard = screen.getByTestId("center-board-art");
+    const motionStack = centerBoard.querySelector("[data-center-motion-stack]");
+    expect(motionStack).toBeInTheDocument();
+    expect(within(centerBoard).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute(
+      "data-dice-placement",
+      "center-board",
+    );
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
   });
 

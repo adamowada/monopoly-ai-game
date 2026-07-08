@@ -14,7 +14,7 @@ async function createGame(page: import("@playwright/test").Page, seed: string) {
   await expect(page.getByRole("region", { name: "Classic Monopoly-style board" })).toBeVisible();
 }
 
-test("shows legal turn controls, rolls from the returned action, logs accepted events, and refreshes on accepted events", async ({ page }) => {
+test("shows legal turn controls, rolls from the returned action, logs accepted moves, and refreshes on accepted events", async ({ page }) => {
   const legalActionsResponses: string[] = [];
   page.on("response", (response) => {
     if (response.url().includes("/legal-actions")) {
@@ -64,8 +64,8 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   await expect(page.getByLabel("Ada token at GO, position 0")).toHaveCount(0);
   await page.getByRole("tab", { name: "Contracts" }).click();
   const log = page.getByRole("region", { name: "Game log" });
-  await expect(log).toContainText("DICE_ROLLED");
-  await expect(log).toContainText("PLAYER_POSITION_SET");
+  await expect(log).toContainText("Ada rolled 3 + 4 = 7");
+  await expect(log).toContainText("Ada moved to Chance");
   await expect
     .poll(() => legalActionsResponses.length, { message: "accepted event should refresh legal actions" })
     .toBeGreaterThan(legalActionFetchesBeforeAction);
