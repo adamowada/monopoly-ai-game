@@ -1097,6 +1097,7 @@ function GameLogChatPanel({
   game: GameMetadata;
 }>) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const logRegionRef = useRef<HTMLOListElement | null>(null);
   const logEndRef = useRef<HTMLLIElement | null>(null);
   const [enabledCategories, setEnabledCategories] = useState<ReadonlySet<GameLogCategory>>(
     () => new Set(gameLogCategories.map((category) => category.id)),
@@ -1113,7 +1114,18 @@ function GameLogChatPanel({
     entries.length > 0 ? `${entries.at(-1)?.sequence}:${entries.at(-1)?.eventId}` : "empty";
 
   useEffect(() => {
-    logEndRef.current?.scrollIntoView?.({ block: "end" });
+    const scrollToLatestEntry = () => {
+      if (logRegionRef.current) {
+        logRegionRef.current.scrollTop = logRegionRef.current.scrollHeight;
+      }
+      logEndRef.current?.scrollIntoView?.({ block: "end" });
+    };
+    scrollToLatestEntry();
+    if (typeof window.requestAnimationFrame !== "function") {
+      return undefined;
+    }
+    const frame = window.requestAnimationFrame(scrollToLatestEntry);
+    return () => window.cancelAnimationFrame(frame);
   }, [latestEntryKey]);
 
   function toggleCategory(category: GameLogCategory) {
@@ -1168,6 +1180,7 @@ function GameLogChatPanel({
         aria-live="polite"
         className="flex max-h-[min(58vh,38rem)] min-h-[22rem] flex-col gap-2 overflow-y-auto rounded-md border border-[#2f2418]/20 bg-white/65 p-3"
         data-game-log-scroll-region=""
+        ref={logRegionRef}
       >
         {entries.length > 0
           ? (

@@ -23,6 +23,8 @@ const graceId = "player-2";
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 type EventSourceListener = (event: Event) => void;
 let originalScrollIntoView: typeof HTMLElement.prototype.scrollIntoView | undefined;
+let originalScrollHeightDescriptor: PropertyDescriptor | undefined;
+let originalScrollTopDescriptor: PropertyDescriptor | undefined;
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -968,6 +970,18 @@ afterEach(() => {
     delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
   }
   originalScrollIntoView = undefined;
+  if (originalScrollHeightDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeightDescriptor);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+  }
+  if (originalScrollTopDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", originalScrollTopDescriptor);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
+  }
+  originalScrollHeightDescriptor = undefined;
+  originalScrollTopDescriptor = undefined;
   FakeEventSource.instances = [];
   window.localStorage.clear();
   routerMock.push.mockReset();
@@ -1297,10 +1311,32 @@ describe("GamePlaySurface turn controls", () => {
 
   it("pins the game log to the latest entry like a chat room", async () => {
     originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+    originalScrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
     const scrollIntoView = vi.fn();
+    const scrollTopWrites: number[] = [];
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
       configurable: true,
       value: scrollIntoView,
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.hasAttribute("data-game-log-scroll-region") ? 800 : 0;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+      configurable: true,
+      get() {
+        const storedValue = (this as HTMLElement & { __testScrollTop?: number }).__testScrollTop;
+        return typeof storedValue === "number" ? storedValue : 0;
+      },
+      set(value: number) {
+        if (this.hasAttribute("data-game-log-scroll-region")) {
+          scrollTopWrites.push(value);
+        }
+        (this as HTMLElement & { __testScrollTop?: number }).__testScrollTop = value;
+      },
     });
 
     renderSurface(
@@ -1316,6 +1352,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(await within(log).findByText(/rolled 3 \+ 4 = 7/)).toBeInTheDocument();
     expect(await within(log).findByText(/moved to Chance/)).toBeInTheDocument();
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "end" }));
+    await waitFor(() => expect(scrollTopWrites).toContain(800));
   });
 
   it("renders backend die_1 and die_2 dice payloads as pips and total instead of placeholders", async () => {
