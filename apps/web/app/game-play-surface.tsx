@@ -199,6 +199,7 @@ const tokenStepDelayMs = 440;
 const tokenSettleDelayMs = 480;
 const cardRevealDelayMs = 320;
 const jailBoardPosition = 10;
+const tradeHealthyCashFloor = 300;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -283,9 +284,13 @@ function snapshotPlayerRecord(
   return isRecord(player) ? player : null;
 }
 
-function playerCash(player: GameMetadata["players"][number], snapshot?: GameStateResponse): string {
+function playerCashAmount(player: GameMetadata["players"][number], snapshot?: GameStateResponse): number {
   const snapshotPlayer = snapshotPlayerRecord(snapshot, player.id);
-  return money(readNumber(snapshotPlayer?.cash, readNumber(player.state.cash)));
+  return readNumber(snapshotPlayer?.cash, readNumber(player.state.cash));
+}
+
+function playerCash(player: GameMetadata["players"][number], snapshot?: GameStateResponse): string {
+  return money(playerCashAmount(player, snapshot));
 }
 
 function playerPosition(player: GameMetadata["players"][number], snapshot?: GameStateResponse): string {
@@ -953,6 +958,7 @@ function autoTradeOpportunityFor(
     }
     ownerByPropertyId.set(entry.property_id, typeof entry.owner_id === "string" ? entry.owner_id : null);
   }
+  const actorCash = playerCashAmount(player, snapshot);
 
   const opportunities: ScoredAutoTradeOpportunity[] = [];
   let opportunityOrder = 0;
@@ -974,6 +980,9 @@ function autoTradeOpportunityFor(
     const targetOwnerId = ownerByPropertyId.get(targetProperty.id);
     const targetOwner = game.players.find((candidate) => candidate.id === targetOwnerId);
     if (!targetOwner || targetOwner.controller_type !== "ai") {
+      continue;
+    }
+    if (!canSupportCredibleTradeOffer(actorCash, targetProperty.price)) {
       continue;
     }
     const participants = [player.id, targetOwner.id];
@@ -1030,6 +1039,9 @@ function autoTradeOpportunityFor(
       if (!targetOwner || targetOwner.controller_type !== "ai") {
         continue;
       }
+      if (!canSupportCredibleTradeOffer(actorCash, targetProperty.price)) {
+        continue;
+      }
       const participants = [player.id, targetOwner.id];
       if (hasActiveNegotiationBetween(negotiations, participants)) {
         continue;
@@ -1063,6 +1075,10 @@ function autoTradeOpportunityFor(
   }
 
   return bestAutoTradeOpportunity(opportunities);
+}
+
+function canSupportCredibleTradeOffer(playerCashValue: number, targetPropertyPrice: number): boolean {
+  return Math.max(playerCashValue - tradeHealthyCashFloor, 0) >= targetPropertyPrice;
 }
 
 function bestAutoTradeOpportunity(opportunities: ScoredAutoTradeOpportunity[]): AutoTradeOpportunity | null {

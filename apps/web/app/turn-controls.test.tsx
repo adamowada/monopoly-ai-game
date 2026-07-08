@@ -287,6 +287,21 @@ function aiNearMonopolyStateFixture(eventSequence = 0) {
   };
 }
 
+function aiLowCashNearMonopolyStateFixture(eventSequence = 0) {
+  const base = aiNearMonopolyStateFixture(eventSequence);
+  return {
+    ...base,
+    state: {
+      ...base.state,
+      players: [
+        { id: adaId, cash: 350, position: 0 },
+        { id: graceId, cash: 1500, position: 0 },
+      ],
+    },
+    state_hash: `ai-low-cash-near-monopoly-state-${eventSequence}`,
+  };
+}
+
 function aiNearRailroadSetStateFixture(eventSequence = 0) {
   const base = stateFixture(0, eventSequence);
   return {
@@ -3422,6 +3437,62 @@ describe("GamePlaySurface turn controls", () => {
             target_owner_id: graceId,
           },
         },
+      });
+    });
+  });
+
+  it("auto-step defers near-monopoly negotiation when cash cannot support a credible offer", async () => {
+    const game = metadataFallbackAiGame();
+    const state = aiLowCashNearMonopolyStateFixture();
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(game);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(state);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [legalAction("ROLL_DICE", {}, state.state_hash, state.event_sequence)],
+          state_hash: state.state_hash,
+          event_sequence: state.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/negotiations`) {
+        return Response.json({ negotiations: [] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/deals`) {
+        return Response.json({ deals: [] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock, game);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Auto-step AI" }));
+
+    await waitFor(() => {
+      const aiStepCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+      );
+      expect(aiStepCalls.length).toBeGreaterThanOrEqual(1);
+      expect(JSON.parse(String(aiStepCalls[0]?.[1]?.body))).toMatchObject({
+        player_id: adaId,
+        decision_type: "action_decision",
+        mandatory: true,
+        request_context: { mode: "auto" },
       });
     });
   });
