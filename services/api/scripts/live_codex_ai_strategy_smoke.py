@@ -99,6 +99,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_railroad_purchase_with_healthy_cash,
         ),
         StrategySmokeCase(
+            name="boardwalk_purchase_with_healthy_cash",
+            game_id=UUID("00000000-0000-0000-0000-00000000b22b"),
+            decision_type="action_decision",
+            state_factory=_boardwalk_purchase_state,
+            verifier=_verify_boardwalk_purchase_with_healthy_cash,
+        ),
+        StrategySmokeCase(
             name="railroad_purchase_completes_set_with_thin_cash",
             game_id=UUID("00000000-0000-0000-0000-00000000b227"),
             decision_type="action_decision",
@@ -371,6 +378,17 @@ def _verify_railroad_purchase_with_healthy_cash(parsed: dict[str, Any]) -> None:
     assert payload.get("property_id") == "property_reading_railroad"
     if "price" in payload:
         assert payload.get("price") == 200
+
+
+def _verify_boardwalk_purchase_with_healthy_cash(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BUY_PROPERTY", f"expected BUY_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_boardwalk"
+    if "price" in payload:
+        assert payload.get("price") == 400
 
 
 def _verify_railroad_purchase_completes_set_with_thin_cash(parsed: dict[str, Any]) -> None:
@@ -1114,6 +1132,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "boardwalk_purchase_with_healthy_cash":
+        return (
+            {
+                "id": "live-strategy-buy-boardwalk-over-auction",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has $1300 and landed on unowned "
+                    "property_boardwalk. Buying Boardwalk for $400 leaves $900, above "
+                    "the healthy cash floor. Prefer BUY_PROPERTY over START_AUCTION because "
+                    "auctioning gives competitors a chance to win a premium dark-blue property."
+                ),
+            },
+        )
     if case.name == "railroad_purchase_completes_set_with_thin_cash":
         return (
             {
@@ -1407,6 +1438,23 @@ def _railroad_purchase_state(game_id: UUID) -> GameState:
     players = [player.model_dump(mode="python") for player in state.players]
     players[0]["cash"] = 1500
     players[0]["position"] = 5
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _boardwalk_purchase_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-boardwalk-purchase")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 1300
+    players[0]["position"] = 39
     return GameState.model_validate(
         {
             **state.model_dump(mode="python"),

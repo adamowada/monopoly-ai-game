@@ -82,6 +82,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "model_reasoning_effort" in source
     assert "low" in source
     assert "railroad_purchase_with_healthy_cash" in source
+    assert "boardwalk_purchase_with_healthy_cash" in source
     assert "railroad_purchase_completes_set_with_thin_cash" in source
     assert "purchase_completes_color_group_with_thin_cash" in source
     assert "purchase_blocks_opponent_color_group_with_thin_cash" in source
@@ -140,6 +141,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "marginal_rent_gain" in source
     assert "cash reserve floor" in source
     assert "property_reading_railroad" in source
+    assert "property_boardwalk" in source
     assert "property_short_line_railroad" in source
     assert "property_pennsylvania_railroad" in source
     assert "open_negotiation" in source
@@ -423,6 +425,36 @@ def test_live_codex_strategy_smoke_purchase_blocks_opponent_group_completion() -
             ],
         }
     ]
+
+
+def test_live_codex_strategy_smoke_buys_boardwalk_with_healthy_cash() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["boardwalk_purchase_with_healthy_cash"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["property_id"] == "property_boardwalk"
+    assert guidance["purchase_guidance"]["property_name"] == "Boardwalk"
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_at_list_price"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 900
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_boardwalk",
+            "price": 400,
+        },
+        "reason_code": "buy_property_at_list_price",
+    }
 
 
 def test_live_codex_strategy_smoke_purchase_completes_railroad_set() -> None:
