@@ -190,6 +190,64 @@ async def test_create_game_applies_debug_cash_and_property_allocations(
 
 
 @pytest.mark.asyncio
+async def test_debug_monopoly_allocation_exposes_development_actions(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "debug-monopoly-development-game",
+            "players": [
+                {"name": "Ada", "kind": "ai"},
+                {"name": "Grace", "kind": "ai"},
+                {"name": "Linus", "kind": "ai"},
+                {"name": "Marie", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [
+                        {"seat_order": 0, "cash": 3000},
+                        {"seat_order": 1, "cash": 1500},
+                        {"seat_order": 2, "cash": 1500},
+                        {"seat_order": 3, "cash": 1500},
+                    ],
+                    "property_owners": [
+                        {"property_id": "property_st_james_place", "seat_order": 0},
+                        {"property_id": "property_tennessee_avenue", "seat_order": 0},
+                        {"property_id": "property_new_york_avenue", "seat_order": 0},
+                    ],
+                }
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    try:
+        legal_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": ai_player_id},
+        )
+
+        assert legal_response.status_code == 200
+        build_actions = [
+            action
+            for action in legal_response.json()["legal_actions"]
+            if action["type"] == "BUY_HOUSE"
+        ]
+        assert [action["payload"]["property_id"] for action in build_actions] == [
+            "property_st_james_place",
+            "property_tennessee_avenue",
+            "property_new_york_avenue",
+        ]
+        assert all(action["payload"]["cost"] == 100 for action in build_actions)
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
 async def test_create_game_rejects_invalid_debug_allocations(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/games",
