@@ -102,6 +102,7 @@ def build_ai_context_pack(
             ],
             "public_deals": [_public_deal(row) for row in _sorted_rows(deals)],
         },
+        "deal_evaluation_guidance": _deal_evaluation_guidance(state, actor_id, deals),
         "contracts": {
             "active_contracts": [_public_contract(row) for row in _sorted_rows(contracts)],
             "active_obligations": [_public_obligation(row) for row in _sorted_rows(obligations)],
@@ -1420,6 +1421,147 @@ def _open_negotiation_payload_template(opportunity: Mapping[str, Any]) -> dict[s
     }
 
 
+def _deal_evaluation_guidance(
+    state: GameState,
+    actor_id: str,
+    deals: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    evaluations = [
+        evaluation
+        for deal in _sorted_rows(deals)
+        if _string_or_none(deal.get("status")) == "proposed"
+        if (evaluation := _deal_completion_risk_evaluation(state, actor_id, deal)) is not None
+    ]
+    recommended_accept_reject_by_deal_id = {
+        str(evaluation["deal_id"]): str(evaluation["recommendation"])
+        for evaluation in evaluations
+        if evaluation.get("recommendation") in {"accept", "reject"}
+    }
+    guidance_messages: list[str] = []
+    if any(evaluation.get("recommendation") == "reject" for evaluation in evaluations):
+        guidance_messages.append(
+            "Reject proposed deals that transfer away a property completing an opponent's street group "
+            "when the visible compensation is below the strategic cash value floor."
+        )
+
+    return {
+        "recommended_accept_reject_by_deal_id": recommended_accept_reject_by_deal_id,
+        "deal_evaluations": evaluations,
+        "guidance": guidance_messages,
+    }
+
+
+def _deal_completion_risk_evaluation(
+    state: GameState,
+    actor_id: str,
+    deal: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    terms = _mapping(deal.get("terms"))
+    raw_instruments = terms.get("terms")
+    if not isinstance(raw_instruments, Sequence) or isinstance(raw_instruments, str):
+        return None
+
+    instruments = [dict(term) for term in raw_instruments if isinstance(term, Mapping)]
+    actor_receives_cash_total = sum(
+        _int_or_zero(term.get("amount"))
+        for term in instruments
+        if term.get("kind") == "immediate_cash_transfer"
+        and _string_or_none(term.get("to_player_id")) == actor_id
+    )
+    actor_pays_cash_total = sum(
+        _int_or_zero(term.get("amount"))
+        for term in instruments
+        if term.get("kind") == "immediate_cash_transfer"
+        and _string_or_none(term.get("from_player_id")) == actor_id
+    )
+    actor_transfers = [
+        {
+            "property_id": _string_or_none(term.get("property_id")),
+            "recipient_player_id": _string_or_none(term.get("to_player_id")),
+        }
+        for term in instruments
+        if term.get("kind") == "immediate_property_transfer"
+        and _string_or_none(term.get("from_player_id")) == actor_id
+        and _string_or_none(term.get("to_player_id")) not in {None, actor_id}
+    ]
+    actor_transfers_property_ids = [
+        str(transfer["property_id"])
+        for transfer in actor_transfers
+        if transfer.get("property_id") is not None
+    ]
+    actor_receives_property_ids = [
+        str(term.get("property_id"))
+        for term in instruments
+        if term.get("kind") == "immediate_property_transfer"
+        and _string_or_none(term.get("to_player_id")) == actor_id
+        and _string_or_none(term.get("property_id")) is not None
+    ]
+    if not actor_transfers:
+        return None
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+
+    for transfer in actor_transfers:
+        property_id = _string_or_none(transfer.get("property_id"))
+        recipient_player_id = _string_or_none(transfer.get("recipient_player_id"))
+        if property_id is None or recipient_player_id is None:
+            continue
+        ownership = ownership_by_property_id.get(property_id)
+        property_data = properties_by_id.get(property_id)
+        if (
+            ownership is None
+            or ownership.owner_id != actor_id
+            or property_data is None
+            or property_data.kind != "street"
+        ):
+            continue
+        group = groups_by_id.get(property_data.group)
+        if group is None:
+            continue
+        recipient_already_owned_property_ids = [
+            group_property_id
+            for group_property_id in group.property_ids
+            if group_property_id != property_id
+            and (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+            and group_ownership.owner_id == recipient_player_id
+        ]
+        if len(recipient_already_owned_property_ids) != len(group.property_ids) - 1:
+            continue
+
+        minimum_cash_value_floor = property_data.price * 3 // 2
+        if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:
+            continue
+
+        return {
+            "deal_id": _string_or_none(deal.get("id")),
+            "recommendation": "reject",
+            "reason_code": "transfers_property_that_completes_opponent_street_group_below_floor",
+            "actor_id": actor_id,
+            "actor_receives_cash_total": actor_receives_cash_total,
+            "actor_pays_cash_total": actor_pays_cash_total,
+            "actor_transfers_property_ids": actor_transfers_property_ids,
+            "actor_receives_property_ids": actor_receives_property_ids,
+            "risk": {
+                "kind": "opponent_street_group_completion",
+                "property_id": property_id,
+                "property_name": property_data.name,
+                "property_price": property_data.price,
+                "group": group.id,
+                "group_name": group.name,
+                "recipient_player_id": recipient_player_id,
+                "recipient_already_owned_property_ids": recipient_already_owned_property_ids,
+                "minimum_cash_value_floor": minimum_cash_value_floor,
+                "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+            },
+        }
+    return None
+
+
 def _street_group_trade_opportunities(
     state: GameState,
     actor_id: str,
@@ -1783,6 +1925,7 @@ def _instruction_contract() -> dict[str, Any]:
             "For deal_proposal, deal_proposal.deal.terms must be a valid JSON object string. Do not prefix the string with labels such as structured_deal:.",
             "For deal_proposal, the decoded deal_proposal.deal.terms object must use kind structured_deal, deal_schema_version 1, participants, and a terms array of financial instrument objects.",
             "For counteroffer, counteroffer.terms must follow the same valid JSON object string structured_deal shape.",
+            "When deal_evaluation_guidance recommends reject for accept_reject, reject that deal unless visible terms clearly offset the listed strategic risk.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",

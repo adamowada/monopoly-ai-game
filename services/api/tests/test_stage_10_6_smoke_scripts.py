@@ -243,6 +243,31 @@ def test_live_codex_strategy_smoke_defers_low_cash_development() -> None:
     assert "cash reserve floor" in " ".join(guidance["turn_guidance"])
 
 
+def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_bad_deal_rejection"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        negotiation_messages=module._negotiation_messages(case),
+        deals=module._deals(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+    assert guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.BAD_DEAL_ID): "reject"
+    }
+    assert guidance["deal_evaluations"][0]["risk"]["property_id"] == "property_tennessee_avenue"
+    assert guidance["deal_evaluations"][0]["risk"]["minimum_cash_value_floor"] == 270
+    assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 269
+
+
 def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_product_smoke_module()
     fake_api = _FakeScriptedSmokeApi(rotates_turns=False)
