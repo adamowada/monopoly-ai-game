@@ -84,6 +84,11 @@ def build_ai_context_pack(
         "timing": _timing_context(state, legal_actions),
         "legal_actions": legal_actions,
         "action_selection_guidance": _action_selection_guidance(state, actor_id, legal_actions),
+        "negotiation_strategy_guidance": _negotiation_strategy_guidance(
+            state,
+            actor_id,
+            negotiations,
+        ),
         "negotiation_context": {
             "active_negotiations": [
                 _public_negotiation(row) for row in _sorted_rows(negotiations)
@@ -1044,6 +1049,130 @@ def _development_opportunities(
     return opportunities
 
 
+def _negotiation_strategy_guidance(
+    state: GameState,
+    actor_id: str,
+    negotiations: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    trade_opportunities = _street_group_trade_opportunities(
+        state,
+        actor_id,
+        negotiations,
+    )
+    return {
+        "recommended_decision_types": ["open_negotiation"] if trade_opportunities else [],
+        "trade_opportunities": trade_opportunities,
+        "guidance": (
+            [
+                "Open a concise negotiation for the highest-priority trade opportunity before ordinary low-impact actions."
+            ]
+            if trade_opportunities
+            else []
+        ),
+    }
+
+
+def _street_group_trade_opportunities(
+    state: GameState,
+    actor_id: str,
+    negotiations: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    player_name_by_id = {player.id: player.name for player in state.players}
+    player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
+    active_participant_sets = _active_negotiation_participant_sets(negotiations)
+    opportunities: list[dict[str, Any]] = []
+
+    for group in data.property_groups:
+        group_properties = [
+            properties_by_id[property_id]
+            for property_id in group.property_ids
+            if property_id in properties_by_id
+        ]
+        if not group_properties or any(property_data.kind != "street" for property_data in group_properties):
+            continue
+
+        actor_owned_property_ids: list[str] = []
+        target_ownerships = []
+        for property_data in group_properties:
+            ownership = ownership_by_property_id.get(property_data.id)
+            if ownership is None:
+                continue
+            if ownership.owner_id == actor_id:
+                actor_owned_property_ids.append(property_data.id)
+            elif ownership.owner_id is not None:
+                target_ownerships.append(ownership)
+
+        if len(actor_owned_property_ids) != len(group.property_ids) - 1 or len(target_ownerships) != 1:
+            continue
+
+        target_ownership = target_ownerships[0]
+        target_owner_id = target_ownership.owner_id
+        if target_owner_id is None or target_owner_id == actor_id:
+            continue
+        participants = [actor_id, target_owner_id]
+        if frozenset(participants) in active_participant_sets:
+            continue
+
+        target_property = properties_by_id[target_ownership.property_id]
+        cash_budget_ceiling = min(
+            max(player_cash - PURCHASE_HEALTHY_CASH_FLOOR, 0),
+            target_property.price * 3 // 2,
+        )
+        opportunities.append(
+            {
+                "kind": "complete_street_group",
+                "priority": "high",
+                "group": group.id,
+                "group_name": group.name,
+                "actor_owned_property_ids": actor_owned_property_ids,
+                "actor_owned_property_names": [
+                    properties_by_id[property_id].name for property_id in actor_owned_property_ids
+                ],
+                "target_property_id": target_property.id,
+                "target_property_name": target_property.name,
+                "target_owner_id": target_owner_id,
+                "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
+                "participants": participants,
+                "strategic_reason": (
+                    f"Completing {group.name} unlocks BUY_HOUSE development and materially raises rent pressure."
+                ),
+                "suggested_offer": {
+                    "cash_budget_floor": target_property.price,
+                    "cash_budget_ceiling": cash_budget_ceiling,
+                    "avoid_trading_away_group_property_ids": actor_owned_property_ids,
+                },
+            }
+        )
+
+    return sorted(
+        opportunities,
+        key=lambda opportunity: (
+            opportunity["group"],
+            opportunity["target_property_id"],
+        ),
+    )
+
+
+def _active_negotiation_participant_sets(
+    negotiations: Sequence[Mapping[str, Any]],
+) -> set[frozenset[str]]:
+    participant_sets: set[frozenset[str]] = set()
+    for row in negotiations:
+        status = _string_or_none(row.get("status"))
+        if status not in ACTIVE_NEGOTIATION_STATUSES:
+            continue
+        context = _mapping(row.get("context"))
+        participant_ids = _string_list(context.get("participant_player_ids"))
+        if len(participant_ids) >= 2:
+            participant_sets.add(frozenset(participant_ids))
+    return participant_sets
+
+
 def _owned_property_ids_by_player(state: GameState) -> dict[str, list[str]]:
     owned: dict[str, list[str]] = {player.id: [] for player in state.players}
     for ownership in state.property_ownership:
@@ -1243,6 +1372,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When purchase_guidance recommends BUY_PROPERTY, choose BUY_PROPERTY over START_AUCTION unless cash_after_price, valuation, or blocking risk gives a concrete reason.",
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
+            "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a street group or blocking an opponent's street group.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",

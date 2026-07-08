@@ -437,15 +437,21 @@ describe("ClassicGameBoard", () => {
     const movementBanner = screen.getByRole("status", { name: "Board movement" });
     expect(movementBanner).toHaveTextContent("Ada moving to Baltic Avenue");
     expect(movementBanner).toHaveAttribute("data-board-motion-placement", "above-dice");
-    expect(movementBanner).toHaveClass("max-w-[10rem]");
+    expect(movementBanner).toHaveAttribute("data-board-motion-size", "compact");
+    expect(movementBanner).toHaveClass("max-w-[8.25rem]");
+    expect(movementBanner).not.toHaveClass("max-w-[10rem]");
     expect(movementBanner).not.toHaveClass("w-full");
     const centerBoard = screen.getByTestId("center-board-art");
     const motionStack = centerBoard.querySelector("[data-center-motion-stack]");
     expect(motionStack).toBeInTheDocument();
-    expect(within(centerBoard).getByRole("status", { name: "Dice roll animation" })).toHaveAttribute(
+    expect(motionStack).toHaveAttribute("data-center-motion-layout", "banner-over-dice");
+    const centeredDiceStatus = within(centerBoard).getByRole("status", { name: "Dice roll animation" });
+    expect(movementBanner.compareDocumentPosition(centeredDiceStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(centeredDiceStatus).toHaveAttribute(
       "data-dice-placement",
       "center-board",
     );
+    expect(centeredDiceStatus).toHaveAttribute("data-dice-layer", "below-motion-banner");
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
   });
 

@@ -2026,6 +2026,31 @@ async def execute_negotiation(
                     "round_number": negotiation_row["round_number"],
                 },
             )
+            try:
+                contract_result = await create_contract_from_accepted_deal(
+                    session=session,
+                    session_factory=session_factory,
+                    game_id=game_id,
+                    deal_id=current_deal_id,
+                )
+                await settle_contract(
+                    session=session,
+                    session_factory=session_factory,
+                    game_id=game_id,
+                    contract_id=contract_result.contract["id"],
+                    trigger_context={
+                        "type": "immediate",
+                        "source": "negotiation_execute",
+                        "negotiation_id": str(negotiation_id),
+                        "deal_id": str(current_deal_id),
+                    },
+                )
+            except ContractExecutionError as exc:
+                if exc.reason_code == "deal_not_found":
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="deal not found") from exc
+                return _lifecycle_rejection_response(exc.reason_code, exc.message, field=exc.field)
+            except SettlementEngineError as exc:
+                return _lifecycle_rejection_response(exc.reason_code, exc.message, field=exc.field)
             updated = await _load_negotiation_row_by_id(session, negotiation_id)
             if updated is None:
                 raise HTTPException(

@@ -40,11 +40,13 @@ import {
   submitAiStep,
   type AcceptedEvent,
   type ActionRejectedResponse,
+  type AiDecisionType,
   type AiStepResponse,
   type GameStateResponse,
   type LegalAction,
 } from "../lib/api/gameplay";
 import { endGame, readGame, type GameMetadata } from "../lib/api/games";
+import { readDeals, readNegotiations, type Deal, type Negotiation } from "../lib/api/negotiations";
 import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
 import { AiAuditPanel } from "./ai-audit-panel";
@@ -68,6 +70,28 @@ type AiStepMode = "manual" | "auto" | "auction_ai_bidder";
 type AiStepRequest = {
   mode: AiStepMode;
   playerId: string;
+};
+
+type AiNegotiationStepRequest = {
+  decisionType: AiDecisionType;
+  playerId: string;
+  negotiationId?: string | null;
+  selectedDealId?: string | null;
+  tradeOpportunity?: AutoTradeOpportunity | null;
+};
+
+type AutoTradeOpportunity = {
+  kind: "complete_street_group";
+  group: string;
+  group_name: string;
+  actor_owned_property_ids: string[];
+  actor_owned_property_names: string[];
+  target_property_id: string;
+  target_property_name: string;
+  target_owner_id: string;
+  target_owner_name: string;
+  participants: string[];
+  strategic_reason: string;
 };
 
 type BoardMotionState =
@@ -879,6 +903,168 @@ function currentPlayerProperties(
       },
     ];
   });
+}
+
+function autoTradeOpportunityFor(
+  snapshot: GameStateResponse | undefined,
+  game: GameMetadata,
+  player: GameMetadata["players"][number] | null | undefined,
+  negotiations: Negotiation[],
+): AutoTradeOpportunity | null {
+  if (!snapshot || !player || player.controller_type !== "ai" || readActiveAuction(snapshot)) {
+    return null;
+  }
+  const state = snapshot.state;
+  if (isRecord(state.active_payment) || isRecord(state.active_bankruptcy)) {
+    return null;
+  }
+  const phase = activePhase(game, snapshot);
+  if (!["START_TURN", "ROLL_REQUIRED", "POST_ROLL_MANAGEMENT"].includes(phase)) {
+    return null;
+  }
+
+  const ownership = state.property_ownership;
+  if (!Array.isArray(ownership)) {
+    return null;
+  }
+  const ownerByPropertyId = new Map<string, string | null>();
+  for (const entry of ownership) {
+    if (!isRecord(entry) || typeof entry.property_id !== "string") {
+      continue;
+    }
+    ownerByPropertyId.set(entry.property_id, typeof entry.owner_id === "string" ? entry.owner_id : null);
+  }
+
+  for (const group of PROPERTY_GROUPS) {
+    const properties = group.property_ids
+      .map((propertyId) => propertyById(propertyId))
+      .filter((property): property is StaticDataProperty => Boolean(property));
+    if (properties.length === 0 || properties.some((property) => property.kind !== "street")) {
+      continue;
+    }
+
+    const actorOwned = properties.filter((property) => ownerByPropertyId.get(property.id) === player.id);
+    const missing = properties.filter((property) => ownerByPropertyId.get(property.id) !== player.id);
+    if (actorOwned.length !== properties.length - 1 || missing.length !== 1) {
+      continue;
+    }
+
+    const targetProperty = missing[0];
+    const targetOwnerId = ownerByPropertyId.get(targetProperty.id);
+    const targetOwner = game.players.find((candidate) => candidate.id === targetOwnerId);
+    if (!targetOwner || targetOwner.controller_type !== "ai") {
+      continue;
+    }
+    const participants = [player.id, targetOwner.id];
+    if (hasActiveNegotiationBetween(negotiations, participants)) {
+      continue;
+    }
+
+    return {
+      kind: "complete_street_group",
+      group: group.id,
+      group_name: group.name,
+      actor_owned_property_ids: actorOwned.map((property) => property.id),
+      actor_owned_property_names: actorOwned.map((property) => property.name),
+      target_property_id: targetProperty.id,
+      target_property_name: targetProperty.name,
+      target_owner_id: targetOwner.id,
+      target_owner_name: targetOwner.name,
+      participants,
+      strategic_reason: `Completing ${group.name} unlocks development and materially raises rent pressure.`,
+    };
+  }
+
+  return null;
+}
+
+function hasActiveNegotiationBetween(negotiations: Negotiation[], participantIds: string[]): boolean {
+  const participants = new Set(participantIds);
+  return negotiations.some((negotiation) => {
+    if (!["opened", "active", "countered", "accepted"].includes(negotiation.status)) {
+      return false;
+    }
+    if (negotiation.participant_player_ids.length !== participants.size) {
+      return false;
+    }
+    return negotiation.participant_player_ids.every((playerId) => participants.has(playerId));
+  });
+}
+
+function aiPlayerById(game: GameMetadata, playerId: string | null | undefined): GameMetadata["players"][number] | null {
+  if (!playerId) {
+    return null;
+  }
+  const player = game.players.find((candidate) => candidate.id === playerId);
+  return player?.controller_type === "ai" ? player : null;
+}
+
+function isAllAiNegotiation(game: GameMetadata, negotiation: Negotiation): boolean {
+  return (
+    negotiation.participant_player_ids.length > 0 &&
+    negotiation.participant_player_ids.every((playerId) => aiPlayerById(game, playerId) !== null)
+  );
+}
+
+function firstAiParticipant(game: GameMetadata, negotiation: Negotiation): string | null {
+  const opener = aiPlayerById(game, negotiation.opened_by_player_id);
+  if (opener) {
+    return opener.id;
+  }
+  return negotiation.participant_player_ids.find((playerId) => aiPlayerById(game, playerId) !== null) ?? null;
+}
+
+function acceptedPlayerIdsForDeal(negotiation: Negotiation, dealId: string): Set<string> {
+  return new Set(negotiation.acceptances[dealId] ?? []);
+}
+
+function autoNegotiationLifecycleRequestFor(
+  game: GameMetadata,
+  negotiations: Negotiation[],
+  deals: Deal[],
+): AiNegotiationStepRequest | null {
+  const activeNegotiation = negotiations.find(
+    (negotiation) =>
+      ["opened", "active", "countered"].includes(negotiation.status) && isAllAiNegotiation(game, negotiation),
+  );
+  if (!activeNegotiation) {
+    return null;
+  }
+
+  if (!activeNegotiation.current_deal_id) {
+    const proposerId = firstAiParticipant(game, activeNegotiation);
+    return proposerId
+      ? {
+          decisionType: "deal_proposal",
+          playerId: proposerId,
+          negotiationId: activeNegotiation.id,
+          selectedDealId: null,
+        }
+      : null;
+  }
+
+  const currentDeal = deals.find((deal) => deal.id === activeNegotiation.current_deal_id);
+  if (!currentDeal || currentDeal.status !== "proposed") {
+    return null;
+  }
+  const acceptedPlayerIds = acceptedPlayerIdsForDeal(activeNegotiation, currentDeal.id);
+  const nextResponderId =
+    currentDeal.participant_player_ids.find(
+      (playerId) => playerId !== currentDeal.proposer_player_id && !acceptedPlayerIds.has(playerId),
+    ) ??
+    currentDeal.participant_player_ids.find((playerId) => !acceptedPlayerIds.has(playerId)) ??
+    null;
+  const nextResponder = aiPlayerById(game, nextResponderId);
+  if (!nextResponder) {
+    return null;
+  }
+
+  return {
+    decisionType: "accept_reject",
+    playerId: nextResponder.id,
+    negotiationId: activeNegotiation.id,
+    selectedDealId: currentDeal.id,
+  };
 }
 
 function groupedPlayerProperties(properties: CurrentPlayerProperty[]): Array<{
@@ -1986,6 +2172,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [dismissedCardEventId, setDismissedCardEventId] = useState<string | null>(null);
   const [revealedCardEventId, setRevealedCardEventId] = useState<string | null>(null);
   const [lastAutoStepKey, setLastAutoStepKey] = useState<string | null>(null);
+  const [lastAutoNegotiationStepKey, setLastAutoNegotiationStepKey] = useState<string | null>(null);
   const [savedGames, setSavedGames] = useState<SavedGameRecord[]>(() => readSavedGames());
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [showLoadGames, setShowLoadGames] = useState(false);
@@ -2064,6 +2251,16 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       }
       return snapshot.rejectedActions;
     },
+  });
+
+  const negotiationsQuery = useQuery({
+    queryKey: ["negotiations", gameId],
+    queryFn: () => readNegotiations({ gameId, baseUrl }),
+  });
+
+  const dealsQuery = useQuery({
+    queryKey: ["deals", gameId],
+    queryFn: () => readDeals({ gameId, baseUrl }),
   });
 
   const playersById = useMemo(() => new Map(game.players.map((player) => [player.id, player])), [game.players]);
@@ -2319,6 +2516,32 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
   });
 
+  const aiNegotiationStep = useMutation({
+    mutationFn: ({ decisionType, playerId, negotiationId, selectedDealId, tradeOpportunity }: AiNegotiationStepRequest) =>
+      submitAiStep({
+        gameId,
+        baseUrl,
+        input: {
+          player_id: playerId,
+          decision_type: decisionType,
+          ...(decisionType === "open_negotiation" ? {} : { negotiation_id: negotiationId ?? null }),
+          mandatory: false,
+          request_context: {
+            mode: "auto_negotiation",
+            selected_deal_id: selectedDealId ?? null,
+            trade_opportunity: tradeOpportunity ?? null,
+          },
+        },
+      }),
+    onMutate: () => {
+      setAiStepResult(null);
+    },
+    onSuccess: (result) => {
+      setAiStepResult(result);
+      void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
+    },
+  });
+
   const legalActions = legalActionsQuery.data?.legal_actions ?? [];
   const auctionLegalActions = useMemo(
     () =>
@@ -2386,7 +2609,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       ? latestDrawnCard
       : null;
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading;
-  const controlsDisabled = gameEnded || gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending;
+  const controlsDisabled =
+    gameEnded || gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending || aiNegotiationStep.isPending;
   const turnAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
   const auctionAiStepPlayer =
     game.players.find(
@@ -2397,8 +2621,39 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const activeAiPlayer = activeAuction ? auctionAiStepPlayer : turnAiPlayer;
   const manualAiStepMode: AiStepMode = auctionAiStepPlayer ? "auction_ai_bidder" : "manual";
   const autoAiStepMode: AiStepMode = auctionAiStepPlayer ? "auction_ai_bidder" : "auto";
+  const autoTradeOpportunity = useMemo(
+    () => autoTradeOpportunityFor(stateQuery.data, game, activeAiPlayer, negotiationsQuery.data ?? []),
+    [activeAiPlayer, game, negotiationsQuery.data, stateQuery.data],
+  );
+  const autoNegotiationLifecycleRequest = useMemo(
+    () => autoNegotiationLifecycleRequestFor(game, negotiationsQuery.data ?? [], dealsQuery.data ?? []),
+    [dealsQuery.data, game, negotiationsQuery.data],
+  );
+  const autoOpenNegotiationRequest: AiNegotiationStepRequest | null =
+    activeAiPlayer && autoTradeOpportunity
+      ? {
+          decisionType: "open_negotiation",
+          playerId: activeAiPlayer.id,
+          tradeOpportunity: autoTradeOpportunity,
+        }
+      : null;
+  const autoNegotiationRequest = autoNegotiationLifecycleRequest ?? autoOpenNegotiationRequest;
+  const autoNegotiationStepKey =
+    autoNegotiationRequest
+      ? [
+          autoNegotiationRequest.decisionType,
+          autoNegotiationRequest.playerId,
+          autoNegotiationRequest.negotiationId ?? "new",
+          autoNegotiationRequest.selectedDealId ?? "none",
+          autoNegotiationRequest.tradeOpportunity?.target_property_id ?? "none",
+          autoNegotiationRequest.tradeOpportunity?.target_owner_id ?? "none",
+          stateHash,
+          eventSequence,
+        ].join(":")
+      : null;
   const directActionControlsDisabled = controlsDisabled || Boolean(turnAiPlayer);
-  const aiStepStateBlocked = gameEnded || gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending;
+  const aiStepStateBlocked =
+    gameEnded || gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending || aiNegotiationStep.isPending;
   const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${autoAiStepMode}:${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
@@ -2442,6 +2697,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     aiStep.mutate({ mode, playerId });
   }
 
+  function handleAiNegotiationStep(request: AiNegotiationStepRequest) {
+    if (!request.playerId || gameAiBlocked || aiStepStateBlocked) {
+      return;
+    }
+    aiNegotiationStep.mutate(request);
+  }
+
   function handleSaveGame() {
     const record = savedGameRecord(game);
     const nextSavedGames = [record, ...savedGames.filter((savedGame) => savedGame.id !== record.id)];
@@ -2469,15 +2731,30 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     if (
       gameAiBlocked ||
       !autoStepAi ||
-      !activeAiPlayer ||
-      !autoStepKey ||
+      (!activeAiPlayer && !autoNegotiationRequest) ||
       aiStep.isPending ||
+      aiNegotiationStep.isPending ||
       submitAction.isPending ||
       boardMotionInProgress
     ) {
       return;
     }
-    if (stateQuery.isFetching || gameQuery.isFetching || lastAutoStepKey === autoStepKey) {
+    if (stateQuery.isFetching || gameQuery.isFetching || negotiationsQuery.isLoading || dealsQuery.isLoading) {
+      return;
+    }
+    if (
+      autoNegotiationStepKey &&
+      autoNegotiationRequest &&
+      lastAutoNegotiationStepKey !== autoNegotiationStepKey
+    ) {
+      setLastAutoNegotiationStepKey(autoNegotiationStepKey);
+      handleAiNegotiationStep(autoNegotiationRequest);
+      return;
+    }
+    if (!activeAiPlayer || !autoStepKey) {
+      return;
+    }
+    if (lastAutoStepKey === autoStepKey) {
       return;
     }
     setLastAutoStepKey(autoStepKey);
@@ -2485,13 +2762,19 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   }, [
     activeAiPlayer,
     aiStep.isPending,
+    aiNegotiationStep.isPending,
     autoAiStepMode,
+    autoNegotiationRequest,
+    autoNegotiationStepKey,
     autoStepAi,
     autoStepKey,
     boardMotionInProgress,
+    dealsQuery.isLoading,
     gameQuery.isFetching,
     gameAiBlocked,
+    lastAutoNegotiationStepKey,
     lastAutoStepKey,
+    negotiationsQuery.isLoading,
     stateQuery.isFetching,
     submitAction.isPending,
   ]);

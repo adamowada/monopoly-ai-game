@@ -247,6 +247,48 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
 
 
+def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
+    state = _state_with_orange_near_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["trade_opportunities"] == [
+        {
+            "kind": "complete_street_group",
+            "priority": "high",
+            "group": "orange",
+            "group_name": "Orange",
+            "actor_owned_property_ids": [
+                "property_st_james_place",
+                "property_new_york_avenue",
+            ],
+            "actor_owned_property_names": [
+                "St. James Place",
+                "New York Avenue",
+            ],
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "strategic_reason": (
+                "Completing Orange unlocks BUY_HOUSE development and materially raises rent pressure."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "avoid_trading_away_group_property_ids": [
+                    "property_st_james_place",
+                    "property_new_york_avenue",
+                ],
+            },
+        }
+    ]
+    assert any("open_negotiation" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
 def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt() -> None:
     state = _state_with_owned_railroad(cash=900)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -835,6 +877,28 @@ def _state_with_orange_monopoly() -> GameState:
             "property_ownership": tuple(
                 ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
                 if ownership.property_id in orange_property_ids
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_orange_near_monopoly() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_st_james_place": str(AI_PLAYER_ID),
+        "property_new_york_avenue": str(AI_PLAYER_ID),
+        "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": owner_by_property_id[ownership.property_id]})
+                if ownership.property_id in owner_by_property_id
                 else ownership
                 for ownership in state.property_ownership
             ),

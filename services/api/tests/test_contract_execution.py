@@ -429,6 +429,63 @@ async def test_contract_settlement_creates_property_owner_events_and_replayed_st
 
 
 @pytest.mark.asyncio
+async def test_execute_negotiation_creates_and_settles_accepted_immediate_property_deal(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    player_ids = [player["id"] for player in created["players"]]
+    property_id = "property_mediterranean_avenue"
+    try:
+        await EventPersistence(session_factory).append_accepted_events(
+            game_id=game_id,
+            actor_player_id=player_ids[0],
+            event_templates=[
+                AcceptedEventTemplate(
+                    event_type="PROPERTY_OWNER_SET",
+                    payload={"property_id": property_id, "owner_id": player_ids[0]},
+                )
+            ],
+        )
+        deal = await accepted_structured_deal(
+            client,
+            game_id,
+            player_ids[:2],
+            [
+                {
+                    "kind": "immediate_property_transfer",
+                    "from_player_id": player_ids[0],
+                    "to_player_id": player_ids[1],
+                    "property_id": property_id,
+                }
+            ],
+        )
+
+        execution = await client.post(f"/games/{game_id}/negotiations/{deal['negotiation_id']}/execute")
+
+        assert execution.status_code == 200, execution.text
+        assert execution.json()["status"] == "executed"
+        state = (await client.get(f"/games/{game_id}/state")).json()["state"]
+        owner_by_property = {
+            ownership["property_id"]: ownership["owner_id"]
+            for ownership in state["property_ownership"]
+        }
+        assert owner_by_property[property_id] == player_ids[1]
+        assert await table_count(session_factory, contracts, game_id) == 1
+        async with session_factory() as session:
+            result = await session.execute(
+                sa.select(obligations.c.status)
+                .where(obligations.c.game_id == UUID(str(game_id)))
+                .order_by(obligations.c.created_at)
+            )
+            obligation_statuses = [row[0] for row in result.all()]
+        assert obligation_statuses == ["settled"]
+    finally:
+        await delete_game(session_factory, game_id)
+
+
+@pytest.mark.asyncio
 async def test_trigger_enforcement_settles_due_obligations_automatically(
     client: httpx.AsyncClient,
     session_factory: async_sessionmaker,

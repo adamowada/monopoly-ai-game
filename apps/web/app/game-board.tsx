@@ -488,9 +488,10 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-50 mx-auto w-fit max-w-[10rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-2 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-50 mx-auto w-fit max-w-[8.25rem] rounded border-2 border-[#2f2418] bg-[#fffbea] px-2 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-placement="above-dice"
+      data-board-motion-size="compact"
       role="status"
     >
       <div className="break-words text-[10px] font-black leading-[1.05]">{message}</div>
@@ -510,8 +511,12 @@ function CenterMotionStack({
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-50 grid place-items-center px-2" data-center-motion-stack="">
-      <div className="grid max-w-[11rem] justify-items-center gap-1.5">
+    <div
+      className="pointer-events-none absolute inset-0 z-50 grid place-items-center px-2"
+      data-center-motion-layout="banner-over-dice"
+      data-center-motion-stack=""
+    >
+      <div className="grid max-w-[8.75rem] grid-rows-[auto_auto] justify-items-center gap-2">
         <BoardMotionBanner motion={motion} />
         <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
       </div>
@@ -644,6 +649,7 @@ function DiceMotionStatus({
       )}
       data-dice-placement={placement}
       data-dice-motion={motion?.status ?? "last-roll"}
+      data-dice-layer={placement === "center-board" ? "below-motion-banner" : undefined}
       role="status"
     >
       <span aria-hidden="true" className="dice-motion-ring" />
