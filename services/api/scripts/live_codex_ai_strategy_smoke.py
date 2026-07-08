@@ -42,6 +42,7 @@ LIVE_CODEX_ENV_VAR = "RUN_LIVE_CODEX_AI"
 AI_PLAYER_ID = UUID("00000000-0000-0000-0000-00000000b102")
 OTHER_PLAYER_ID = UUID("00000000-0000-0000-0000-00000000b103")
 THIRD_PLAYER_ID = UUID("00000000-0000-0000-0000-00000000b104")
+NEGOTIATION_ID = UUID("00000000-0000-0000-0000-00000000b301")
 ORANGE_PROPERTY_IDS = {
     "property_st_james_place",
     "property_tennessee_avenue",
@@ -94,6 +95,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             state_factory=_orange_near_monopoly_state,
             verifier=_verify_orange_near_monopoly_negotiation,
         ),
+        StrategySmokeCase(
+            name="orange_near_monopoly_deal_proposal",
+            game_id=UUID("00000000-0000-0000-0000-00000000b203"),
+            decision_type="deal_proposal",
+            state_factory=_orange_near_monopoly_state,
+            verifier=_verify_orange_near_monopoly_deal_proposal,
+        ),
     )
 
 
@@ -103,11 +111,16 @@ def _run_strategy_case(case: StrategySmokeCase) -> dict[str, Any]:
         state,
         player_id=str(AI_PLAYER_ID),
         decision_type=case.decision_type,
+        caller_request_context=_caller_request_context(case),
+        negotiations=_negotiations(case),
+        negotiation_messages=_negotiation_messages(case),
+        rule_snippets=_strategy_rule_snippets(case),
     )
     request = CodexExecAIDecisionRequest(
         game_id=case.game_id,
         player_id=AI_PLAYER_ID,
         decision_type=case.decision_type,
+        negotiation_id=NEGOTIATION_ID if case.decision_type == "deal_proposal" else None,
         phase=state.turn.phase.value,
         state_hash=state.state_hash(),
         prompt_context=pack,
@@ -163,10 +176,47 @@ def _verify_orange_near_monopoly_negotiation(parsed: dict[str, Any]) -> None:
     assert context.get("target_owner_id") == str(OTHER_PLAYER_ID)
 
 
+def _verify_orange_near_monopoly_deal_proposal(parsed: dict[str, Any]) -> None:
+    deal = _dict(parsed.get("deal"))
+    terms = _dict(deal.get("terms"))
+    instruments = [_dict(term) for term in terms.get("terms", [])]
+    cash_terms = [term for term in instruments if term.get("kind") == "immediate_cash_transfer"]
+    property_terms = [term for term in instruments if term.get("kind") == "immediate_property_transfer"]
+
+    assert parsed.get("decision_type") == "deal_proposal"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert deal.get("recipient_player_ids") == [str(OTHER_PLAYER_ID)]
+    assert terms.get("kind") == "structured_deal"
+    assert terms.get("deal_schema_version") == 1
+    assert terms.get("participants") == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert cash_terms, "expected an immediate_cash_transfer in the proposal"
+    assert property_terms, "expected an immediate_property_transfer in the proposal"
+    assert any(
+        term.get("from_player_id") == str(AI_PLAYER_ID)
+        and term.get("to_player_id") == str(OTHER_PLAYER_ID)
+        and 180 <= int(term.get("amount", 0)) <= 270
+        for term in cash_terms
+    )
+    assert any(
+        term.get("from_player_id") == str(OTHER_PLAYER_ID)
+        and term.get("to_player_id") == str(AI_PLAYER_ID)
+        and term.get("property_id") == "property_tennessee_avenue"
+        for term in property_terms
+    )
+
+
 def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, Any]:
     if case.decision_type == "action_decision":
         action = _dict(parsed.get("action"))
         return {"case": case.name, "status": "ok", "action_type": action.get("type")}
+    if case.decision_type == "deal_proposal":
+        terms = _dict(_dict(parsed.get("deal")).get("terms"))
+        return {
+            "case": case.name,
+            "status": "ok",
+            "decision_type": parsed.get("decision_type"),
+            "term_kinds": [term.get("kind") for term in terms.get("terms", []) if isinstance(term, dict)],
+        }
     negotiation = _dict(parsed.get("negotiation"))
     context = _dict(negotiation.get("context"))
     return {
@@ -174,6 +224,111 @@ def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, 
         "status": "ok",
         "decision_type": parsed.get("decision_type"),
         "target_property_id": context.get("target_property_id"),
+    }
+
+
+def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
+    if case.decision_type != "deal_proposal":
+        return {}
+    deal_terms_template = _deal_terms_template()
+    return {
+        "mode": "live_strategy_smoke",
+        "negotiation_id": str(NEGOTIATION_ID),
+        "requested_decision": "Propose a structured deal to acquire Tennessee Avenue.",
+        "deal_terms_template": deal_terms_template,
+        "deal_terms_json_string_example": json.dumps(
+            deal_terms_template,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    }
+
+
+def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
+    if case.decision_type != "deal_proposal":
+        return ()
+    return (
+        {
+            "id": str(NEGOTIATION_ID),
+            "opened_by_player_id": str(AI_PLAYER_ID),
+            "status": "active",
+            "phase": "START_TURN",
+            "round_number": 1,
+            "context": {
+                "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+                "context": {
+                    "topic": "Trade for Tennessee Avenue to complete Orange",
+                    "target_property_id": "property_tennessee_avenue",
+                    "target_property_name": "Tennessee Avenue",
+                    "target_owner_id": str(OTHER_PLAYER_ID),
+                    "target_owner_name": "Ada",
+                    "suggested_offer": {
+                        "cash_budget_floor": 180,
+                        "cash_budget_ceiling": 270,
+                    },
+                },
+            },
+            "created_at": "2026-07-08T00:00:00Z",
+        },
+    )
+
+
+def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
+    if case.decision_type != "deal_proposal":
+        return ()
+    return (
+        {
+            "id": "live-strategy-message-1",
+            "negotiation_id": str(NEGOTIATION_ID),
+            "sender_player_id": str(AI_PLAYER_ID),
+            "recipient_player_id": str(OTHER_PLAYER_ID),
+            "message_type": "freeform_message",
+            "body": "I want Tennessee Avenue to complete Orange and can offer fair cash now.",
+            "payload": {"message_type": "freeform_message"},
+            "created_at": "2026-07-08T00:00:01Z",
+        },
+    )
+
+
+def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ...]:
+    if case.decision_type != "deal_proposal":
+        return ()
+    return (
+        {
+            "id": "live-strategy-deal-shape",
+            "source": "strategy-smoke",
+            "text": (
+                "For this deal_proposal, propose structured_deal terms containing "
+                "immediate_cash_transfer from Grace to Ada and immediate_property_transfer "
+                "of property_tennessee_avenue from Ada to Grace. Offer cash between $180 and $270. "
+                "Set deal.terms to a valid JSON string that decodes to the provided "
+                "deal_terms_template; do not prefix it with structured_deal: or any other label."
+            ),
+        },
+    )
+
+
+def _deal_terms_template() -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-cash-for-tennessee",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "amount": 240,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-tennessee-transfer",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_tennessee_avenue",
+            },
+        ],
     }
 
 

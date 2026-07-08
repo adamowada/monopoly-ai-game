@@ -80,8 +80,12 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "low" in source
     assert "orange_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
+    assert "orange_near_monopoly_deal_proposal" in source
     assert "BUY_HOUSE" in source
     assert "open_negotiation" in source
+    assert "deal_proposal" in source
+    assert "immediate_cash_transfer" in source
+    assert "immediate_property_transfer" in source
     assert "property_tennessee_avenue" in source
     assert "participant_player_ids" in source
     assert "treating as pass" not in source

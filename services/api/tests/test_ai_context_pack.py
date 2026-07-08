@@ -313,6 +313,19 @@ def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
     assert "open_negotiation.negotiation.context must be a JSON object" in instruction_text
 
 
+def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> None:
+    state = _state_with_orange_near_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="deal_proposal")
+
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+
+    assert "deal_proposal.deal.terms" in instruction_text
+    assert "valid JSON object string" in instruction_text
+    assert "Do not prefix" in instruction_text
+    assert "structured_deal" in instruction_text
+    assert "terms array" in instruction_text
+
+
 def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt() -> None:
     state = _state_with_owned_railroad(cash=900)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
