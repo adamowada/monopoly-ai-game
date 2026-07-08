@@ -357,7 +357,7 @@ describe("PropertyManagementPanel", () => {
     const { container } = renderPanel();
 
     const deedActions = screen.getByRole("region", { name: "Legal deed actions" });
-    expect(deedActions).toHaveTextContent("No deed actions available");
+    expect(deedActions).not.toHaveTextContent("No deed actions available");
     expect(container.querySelectorAll("[data-property-art]")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
@@ -380,8 +380,9 @@ describe("PropertyManagementPanel", () => {
     expect(detail).toHaveTextContent("Hotels: 0");
 
     const bankInventory = screen.getByRole("region", { name: "Bank inventory" });
-    expect(bankInventory).toHaveTextContent("Houses remaining");
-    expect(bankInventory).toHaveTextContent("Hotels remaining");
+    expect(bankInventory).toHaveTextContent("Houses");
+    expect(bankInventory).toHaveTextContent("Hotels");
+    expect(bankInventory).not.toHaveTextContent("remaining");
     expect(within(bankInventory).getByText("29")).toBeInTheDocument();
     expect(within(bankInventory).getByText("11")).toBeInTheDocument();
 

@@ -172,9 +172,9 @@ export function GameTableMenu({
           ) : null}
 
           {message ? (
-            <p aria-live="polite" className="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800">
+            <div aria-live="polite" className="mt-3 rounded border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800">
               {message}
-            </p>
+            </div>
           ) : null}
 
           {showLoadGames ? (
@@ -194,9 +194,9 @@ export function GameTableMenu({
                   </button>
                 ))
               ) : (
-                <p className="rounded border border-[#b99768]/60 bg-white px-3 py-2 text-xs text-[#6f604c]">
+                <div className="rounded border border-[#b99768]/60 bg-white px-3 py-2 text-xs text-[#6f604c]">
                   No saved games yet.
-                </p>
+                </div>
               )}
             </div>
           ) : null}
@@ -228,9 +228,9 @@ export function GameTableMenu({
                 <h2 id="confirm-bankruptcy-title" className="text-lg font-black">
                   Confirm bankruptcy
                 </h2>
-                <p className="mt-2 text-sm font-semibold leading-6 text-[#6f604c]">
+                <div className="mt-2 text-sm font-semibold leading-6 text-[#6f604c]">
                   {bankruptcyPlayerName} will give up and lose. The table will continue with the remaining players.
-                </p>
+                </div>
               </div>
             </div>
             <div className="mt-4 flex flex-wrap justify-end gap-2">

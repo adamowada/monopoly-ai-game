@@ -337,9 +337,7 @@ function OwnerPropertyList({
               <h4 className="text-xs font-semibold uppercase text-neutral-500">{group.label}</h4>
               <span className="text-xs font-medium text-neutral-500">{group.properties.length}</span>
             </div>
-            {group.properties.length === 0 ? (
-              <p className="mt-2 text-sm text-neutral-500">No properties.</p>
-            ) : (
+            {group.properties.length > 0 ? (
               <ul className="mt-2 space-y-2 text-sm">
                 {group.properties.map((property) => {
                   const ownership = ownerships.get(property.id) ?? defaultOwnership(property.id);
@@ -355,7 +353,7 @@ function OwnerPropertyList({
                   );
                 })}
               </ul>
-            )}
+            ) : null}
           </div>
         ))}
       </div>
@@ -372,12 +370,12 @@ function BankInventoryPanel({ inventory }: Readonly<{ inventory: BankInventoryVi
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
         <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2">
-          <p className="text-xs font-medium uppercase text-neutral-500">Houses remaining</p>
-          <p className="mt-1 font-semibold text-neutral-950">{inventory.houses ?? "Unknown"}</p>
+          <div className="text-xs font-medium uppercase text-neutral-500">Houses</div>
+          <div className="mt-1 font-semibold text-neutral-950">{inventory.houses ?? "Unknown"}</div>
         </div>
         <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2">
-          <p className="text-xs font-medium uppercase text-neutral-500">Hotels remaining</p>
-          <p className="mt-1 font-semibold text-neutral-950">{inventory.hotels ?? "Unknown"}</p>
+          <div className="text-xs font-medium uppercase text-neutral-500">Hotels</div>
+          <div className="mt-1 font-semibold text-neutral-950">{inventory.hotels ?? "Unknown"}</div>
         </div>
       </div>
     </section>
@@ -456,7 +454,7 @@ function PropertyDetailCard({
       <PropertyDeedCard game={game} ownership={ownership} property={property} />
 
       <div className="mt-3 grid gap-1.5 text-xs text-neutral-700">
-        <p>{hotelConversionText(property, ownership, buyAction, sellAction)}</p>
+        <div>{hotelConversionText(property, ownership, buyAction, sellAction)}</div>
       </div>
 
       {hasAnyAction ? (
@@ -552,11 +550,7 @@ export function PropertyManagementPanel({
               {showDeedCatalog ? "Close deed catalog" : "Open deed catalog"}
             </Button>
           </div>
-          {legalActionCards.length === 0 ? (
-            <p className="mt-3 rounded border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-600">
-              No deed actions available
-            </p>
-          ) : (
+          {legalActionCards.length > 0 ? (
             <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {legalActionCards.map((card) => (
                 <PropertyDetailCard
@@ -571,7 +565,7 @@ export function PropertyManagementPanel({
                 />
               ))}
             </div>
-          )}
+          ) : null}
         </section>
         <OwnerPropertyList groups={ownerGroups} ownerships={ownerships} />
         <div className="grid gap-4 lg:grid-cols-2">

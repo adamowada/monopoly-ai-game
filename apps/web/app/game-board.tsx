@@ -452,7 +452,7 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
       data-board-motion-banner={motion.status}
       role="status"
     >
-      <p className="break-words text-xs font-black leading-tight">{message}</p>
+      <div className="break-words text-xs font-black leading-tight">{message}</div>
     </div>
   );
 }
@@ -571,8 +571,8 @@ function DiceMotionStatus({ lastRoll, motion }: Readonly<{ lastRoll?: LastRollVi
           <DiceFace key={`${value}-${index}`} index={index} rolling={rolling} value={value} />
         ))}
       </div>
-      <p className="relative mt-1 text-[10px] font-black uppercase">{primaryLabel}</p>
-      <p className="text-[9px] font-semibold uppercase text-[#456038]">{movementLabel}</p>
+      <div className="relative mt-1 text-[10px] font-black uppercase">{primaryLabel}</div>
+      <div className="text-[9px] font-semibold uppercase text-[#456038]">{movementLabel}</div>
     </div>
   );
 }
@@ -609,7 +609,7 @@ function DrawnCardModal({
       >
         <div className="flex items-start justify-between gap-3 border-b border-[#1f2a1f]/25 pb-3">
           <div className="min-w-0">
-            <p className="text-[11px] font-black uppercase text-[#456038]">{card.deckLabel}</p>
+            <div className="text-[11px] font-black uppercase text-[#456038]">{card.deckLabel}</div>
             <h3 className="mt-1 text-xl font-black uppercase leading-tight">{card.title}</h3>
           </div>
           <button
@@ -648,9 +648,9 @@ function DrawnCardModal({
             )}
           </svg>
         </div>
-        <p className="mt-3 text-sm font-semibold leading-6">{card.description}</p>
+        <div className="mt-3 text-sm font-semibold leading-6">{card.description}</div>
         {card.playerName ? (
-          <p className="mt-3 text-xs font-bold uppercase text-[#456038]">{card.playerName}</p>
+          <div className="mt-3 text-xs font-bold uppercase text-[#456038]">{card.playerName}</div>
         ) : null}
       </article>
     </div>
@@ -947,13 +947,13 @@ function StreetPropertyCell({
       <DevelopmentMarker ownership={ownership} property={property} />
       <span aria-hidden="true" className="h-3 w-full shrink-0" data-property-color-band="" style={{ backgroundColor: bandColor }} />
       <div className="flex min-h-0 flex-1 flex-col justify-between gap-0.5 px-1 pb-1 pt-1">
-        <p className="break-words text-[8px] font-black leading-[0.9] text-[#1f2a1f] uppercase" data-space-name="">
+        <div className="break-words text-[8px] font-black leading-[0.9] text-[#1f2a1f] uppercase" data-space-name="">
           {space.name}
-        </p>
+        </div>
         <TokenStack game={game} motion={motion} players={players} space={space} />
-        <p className="text-[9px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
+        <div className="text-[9px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
           {money(property.price)}
-        </p>
+        </div>
       </div>
     </>
   );
@@ -974,9 +974,9 @@ function JailTurnMeter({ turns }: Readonly<{ turns: number }>) {
           />
         ))}
       </div>
-      <p className="text-[7px] font-black uppercase leading-none text-[#6f604c]">
+      <div className="text-[7px] font-black uppercase leading-none text-[#6f604c]">
         {turns} {turns === 1 ? "turn" : "turns"}
-      </p>
+      </div>
     </div>
   );
 }
@@ -999,13 +999,13 @@ function JailSpaceCell({
 
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-1 px-1 py-1" data-jail-space-cell="">
-      <p className="text-[9px] font-black uppercase leading-none text-[#1f2a1f]" data-space-name="">
+      <div className="text-[9px] font-black uppercase leading-none text-[#1f2a1f]" data-space-name="">
         Jail / Just Visiting
-      </p>
+      </div>
       <div className="grid min-h-0 grid-cols-[1.05fr_0.95fr] gap-1">
         <div className="grid min-h-0 content-between rounded-sm border-2 border-[#2f2418] bg-[#f9e2bf] px-1 py-1" data-jail-zone="jailed">
           <div className="text-center">
-            <p className="text-[8px] font-black uppercase leading-none text-[#2f2418]">Jail</p>
+            <div className="text-[8px] font-black uppercase leading-none text-[#2f2418]">Jail</div>
             <div aria-hidden="true" className="mt-1 grid grid-cols-4 gap-0.5">
               {Array.from({ length: 8 }, (_, index) => (
                 <span key={index} className="h-5 rounded-sm bg-[#2f2418]/75" />
@@ -1019,7 +1019,7 @@ function JailSpaceCell({
                 const jailStatus = playerJailStatus(player, snapshot);
                 return (
                   <div key={player.id} className="rounded-sm bg-white/70 px-1 py-0.5 text-center" data-jail-player-turns="">
-                    <p className="truncate text-[7px] font-black leading-none text-[#2f2418]">{player.name}</p>
+                    <div className="truncate text-[7px] font-black leading-none text-[#2f2418]">{player.name}</div>
                     <JailTurnMeter turns={jailStatus.turns} />
                   </div>
                 );
@@ -1034,7 +1034,7 @@ function JailSpaceCell({
           data-jail-zone="visiting"
         >
           <div className="text-center">
-            <p className="text-[8px] font-black uppercase leading-none text-[#2f2418]">Just Visiting</p>
+            <div className="text-[8px] font-black uppercase leading-none text-[#2f2418]">Just Visiting</div>
             <SpaceMotif art={SPACE_ART_BY_ID[space.id]} className="mx-auto mt-1 h-10 w-full max-w-12" />
           </div>
           <TokenStack game={game} motion={motion} players={visitingPlayers} space={space} />
@@ -1090,18 +1090,18 @@ function OtherSpaceCell({
       data-large-space-art={largeArtwork ? "true" : undefined}
     >
       {property && ownership ? <BoardOwnerMarker game={game} ownership={ownership} property={property} /> : null}
-      <p
+      <div
         className={`${largeArtwork ? (isCorner ? "text-[12px]" : "text-[9px]") : isCorner ? "text-[10px]" : "text-[8px]"} break-words font-black leading-[0.9] text-[#1f2a1f] uppercase`}
         data-space-name=""
       >
         {space.name}
-      </p>
+      </div>
       <SpaceMotif art={art} className={artClassName} />
       <TokenStack game={game} motion={motion} players={players} space={space} />
       {bottom ? (
-        <p className="text-[8px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
+        <div className="text-[8px] font-bold leading-none text-[#1f2a1f]" data-space-bottom-label="">
           {bottom}
-        </p>
+        </div>
       ) : (
         <span aria-hidden="true" className="h-2" />
       )}

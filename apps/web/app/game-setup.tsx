@@ -277,9 +277,7 @@ export function GameSetupPanel() {
                       >
                         {player.icon}
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-black uppercase text-[#6f604c]">Seat {playerNumber}</p>
-                      </div>
+                      <div className="min-w-0 flex-1" />
                       <Button
                         aria-label={`Remove Player ${playerNumber}`}
                         onClick={() => removePlayer(index)}

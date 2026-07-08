@@ -404,8 +404,8 @@ export function AuctionPanel({
                     className="flex flex-col gap-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
-                      <p className="font-medium text-neutral-950">{player.name}</p>
-                      <p className="mt-0.5 text-xs text-neutral-600">{playerAuctionStatus(player.id, auction)}</p>
+                      <div className="font-medium text-neutral-950">{player.name}</div>
+                      <div className="mt-0.5 text-xs text-neutral-600">{playerAuctionStatus(player.id, auction)}</div>
                     </div>
                     {hasControls ? (
                       <div className="flex flex-wrap gap-2">
@@ -453,7 +453,7 @@ export function AuctionPanel({
             <Trophy aria-hidden="true" className="size-4 text-teal-700" />
             <h3 className="text-sm font-semibold text-neutral-950">Auction result</h3>
           </div>
-          <p className="mt-2 text-sm text-neutral-700">{auctionResultText(game, resultEvent)}</p>
+          <div className="mt-2 text-sm text-neutral-700">{auctionResultText(game, resultEvent)}</div>
         </section>
       </div>
     </section>

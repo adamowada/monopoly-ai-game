@@ -23,7 +23,7 @@ export default async function GameBoardPage({ params }: GamePageProps) {
       <main className="min-h-screen bg-[var(--color-page)] px-4 py-8 text-neutral-950 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-5xl rounded-md border border-rose-200 bg-rose-50 p-5">
           <h1 className="text-xl font-semibold">Game board unavailable</h1>
-          <p className="mt-2 text-sm text-rose-700">{snapshot.error}</p>
+          <div className="mt-2 text-sm text-rose-700">{snapshot.error}</div>
           <Button asChild className="mt-4">
             <Link href="/">
               <ArrowLeft aria-hidden="true" className="size-4" />

@@ -329,7 +329,7 @@ describe("ContractsPanel", () => {
 
     expect(panel).toHaveTextContent("Active contracts");
     expect(panel).toHaveTextContent("Agreement between Ada, Grace");
-    expect(panel).toHaveTextContent("Parties Ada, Grace");
+    expect(panel).not.toHaveTextContent("Parties Ada, Grace");
     expect(panel).toHaveTextContent("Active");
     expect(panel).toHaveTextContent("Ada pays Grace $50 when Reading Railroad rent is collected.");
     expect(panel).toHaveTextContent("Created Jul 04, 2026");
@@ -343,7 +343,7 @@ describe("ContractsPanel", () => {
     expect(panel).toHaveTextContent("Turn 6");
     expect(panel).toHaveTextContent("next orange rent collection");
     expect(panel).toHaveTextContent("$50 cash transfer");
-    expect(panel).toHaveTextContent("Counterparty Grace");
+    expect(panel).not.toHaveTextContent("Counterparty Grace");
     expect(panel).not.toHaveTextContent("obligation_id obligation-upcoming");
     expect(panel).not.toHaveTextContent("contract_id contract-1");
     expect(panel).not.toHaveTextContent("due_turn 6");

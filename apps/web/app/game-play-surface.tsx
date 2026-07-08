@@ -1110,7 +1110,7 @@ function GameLogChatPanel({
                   </span>
                   <span className="shrink-0 text-[10px] font-bold uppercase text-[#6f604c]">{entry.time}</span>
                 </div>
-                <p className="text-sm font-semibold leading-5 text-[#2f2418]">{entry.detail}</p>
+                <div className="text-sm font-semibold leading-5 text-[#2f2418]">{entry.detail}</div>
                 <span className="w-fit rounded-sm bg-[#173c45] px-1.5 py-0.5 text-[9px] font-black uppercase text-[#f7d977]">
                   {entry.badge}
                 </span>
@@ -1165,7 +1165,7 @@ function RejectedActionAlert({
         <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-rose-700" />
         <div className="min-w-0">
           <h2 className="font-semibold text-rose-950">Rejected action</h2>
-          <p className="mt-1 font-medium">{rejection.reason_code}</p>
+          <div className="mt-1 font-medium">{rejection.reason_code}</div>
           {messages.length > 0 ? (
             <ul className="mt-2 list-disc space-y-1 pl-4">
               {messages.map((message) => (
@@ -1224,10 +1224,10 @@ function AiStepStatusPanel({
           <Bot aria-hidden="true" className="mt-0.5 size-4 text-purple-700" />
         )}
         <div>
-          <p className="font-semibold">{label}</p>
-          {result?.reason_code ? <p className="mt-1 text-xs">{result.reason_code}</p> : null}
+          <div className="font-semibold">{label}</div>
+          {result?.reason_code ? <div className="mt-1 text-xs">{result.reason_code}</div> : null}
           {result?.validation_errors?.[0]?.message ? (
-            <p className="mt-1 text-xs">{result.validation_errors[0].message}</p>
+            <div className="mt-1 text-xs">{result.validation_errors[0].message}</div>
           ) : null}
         </div>
       </div>
@@ -1267,10 +1267,10 @@ function ActivePaymentPanel({
         </span>
         <div className="min-w-0">
           <h3 className="text-xs font-black uppercase">Payment due</h3>
-          <p className="mt-1 text-sm font-black">
+          <div className="mt-1 text-sm font-black">
             {playerName(game, debtorId)} owes {creditorName} {money(amountDue)}
-          </p>
-          <p className="mt-1 text-xs font-semibold text-[#6f604c]">{paymentReasonLabel(reason)}</p>
+          </div>
+          <div className="mt-1 text-xs font-semibold text-[#6f604c]">{paymentReasonLabel(reason)}</div>
         </div>
       </div>
     </div>
@@ -1312,9 +1312,9 @@ function ActionButton({
         {isSubmitting ? "Submitting..." : model.label}
       </Button>
       {description ? (
-        <p className="max-w-52 text-xs font-medium leading-5 text-neutral-600" data-legal-action-description="">
+        <div className="max-w-52 text-xs font-medium leading-5 text-neutral-600" data-legal-action-description="">
           {description}
-        </p>
+        </div>
       ) : null}
     </div>
   );
@@ -1434,7 +1434,7 @@ function ActivePlayerPanel({
           </div>
         </dl>
       ) : (
-        <p className="mt-4 text-sm text-neutral-600">No active player assigned.</p>
+        <div className="mt-4 text-sm text-neutral-600">No active player assigned.</div>
       )}
     </section>
   );
@@ -1552,9 +1552,9 @@ function PlayerTrayRail({
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-1 text-2xl font-black leading-none text-[#173c45]">{playerCash(selectedPlayer, snapshot)}</p>
-                  <p className="mt-1 text-sm font-semibold text-[#6f604c]">{playerPosition(selectedPlayer, snapshot)}</p>
-                  <p className="mt-2 text-xs font-black uppercase text-[#6f604c]">{formatControllerType(selectedPlayer.controller_type)}</p>
+                  <div className="mt-1 text-2xl font-black leading-none text-[#173c45]">{playerCash(selectedPlayer, snapshot)}</div>
+                  <div className="mt-1 text-sm font-semibold text-[#6f604c]">{playerPosition(selectedPlayer, snapshot)}</div>
+                  <div className="mt-2 text-xs font-black uppercase text-[#6f604c]">{formatControllerType(selectedPlayer.controller_type)}</div>
                 </div>
               </div>
 
@@ -1581,11 +1581,7 @@ function PlayerTrayRail({
                     </div>
                   </section>
                 ))
-              ) : (
-                <p className="rounded border border-[#b99768]/60 bg-[#fffbea] px-3 py-2 text-sm font-semibold text-[#6f604c]">
-                  No deeds yet.
-                </p>
-              )}
+              ) : null}
 
               <section aria-label={`${selectedPlayer.name} contracts and obligations`} className="rounded border border-[#2f2418]/15 bg-[#fffbea] p-3">
                 <h4 className="text-xs font-black uppercase text-[#6f604c]">Contracts & obligations</h4>
@@ -1600,9 +1596,7 @@ function PlayerTrayRail({
                       </li>
                     ))}
                   </ul>
-                ) : (
-                  <p className="mt-2 text-xs font-semibold text-[#6f604c]">No current contracts or obligations.</p>
-                )}
+                ) : null}
               </section>
             </div>
           </div>
@@ -1681,21 +1675,17 @@ function CurrentPlayerHoldingsPanel({
               {properties.map((property) => (
                 <li key={property.id} className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="font-semibold text-neutral-950">{property.name}</p>
+                    <div className="font-semibold text-neutral-950">{property.name}</div>
                     <span className="text-xs font-medium text-neutral-600">{money(property.price)}</span>
                   </div>
-                  <p className="mt-1 text-xs text-neutral-600">
+                  <div className="mt-1 text-xs text-neutral-600">
                     {property.mortgaged ? "Mortgaged" : "Active"}
                     {property.hotel ? " / Hotel" : property.houses > 0 ? ` / ${property.houses} houses` : ""}
-                  </p>
+                  </div>
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="mt-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
-              No properties owned yet.
-            </p>
-          )}
+          ) : null}
         </div>
 
         <div>
@@ -1709,11 +1699,7 @@ function CurrentPlayerHoldingsPanel({
                 </li>
               ))}
             </ul>
-          ) : (
-            <p className="mt-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
-              No current contracts or obligations.
-            </p>
-          )}
+          ) : null}
         </div>
       </div>
     </section>
@@ -1726,7 +1712,7 @@ function LastTurnResultPanel({ summary }: Readonly<{ summary: TurnResultSummary 
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Last turn result</h2>
-          <p className="mt-1 text-sm text-neutral-700">{summary.detail}</p>
+          <div className="mt-1 text-sm text-neutral-700">{summary.detail}</div>
         </div>
         <span className="inline-flex w-fit shrink-0 items-center rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-700">
           {summary.badge}
@@ -1852,8 +1838,8 @@ function GameDetails({ game, phase }: Readonly<{ game: GameMetadata; phase: stri
           Negotiation cutoffs
         </h2>
         <div className="mt-3 space-y-2 text-sm text-neutral-700">
-          <p>Max rounds: {cutoffs.max_rounds ?? "not set"}</p>
-          <p>Proposal limit/player: {cutoffs.max_proposals_per_player ?? "not set"}</p>
+          <div>Max rounds: {cutoffs.max_rounds ?? "not set"}</div>
+          <div>Proposal limit/player: {cutoffs.max_proposals_per_player ?? "not set"}</div>
         </div>
       </section>
     </>

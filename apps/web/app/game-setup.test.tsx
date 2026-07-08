@@ -108,6 +108,8 @@ describe("GameSetupPanel", () => {
     const seats = screen.getByRole("region", { name: "Choose seats" });
     const seat1 = within(seats).getByRole("group", { name: "Seat 1 token setup" });
     const seat2 = within(seats).getByRole("group", { name: "Seat 2 token setup" });
+    expect(within(seat1).queryByText("Seat 1")).not.toBeInTheDocument();
+    expect(within(seat2).queryByText("Seat 2")).not.toBeInTheDocument();
     expect(within(seat1).getByRole("textbox", { name: "Player 1 name" })).toHaveValue("Player 1");
     expect(within(seat1).getByRole("combobox", { name: "Player 1 type" })).toHaveValue("human");
     expect(within(seat1).getByRole("textbox", { name: "Player 1 color hex" })).toHaveValue("#0f766e");

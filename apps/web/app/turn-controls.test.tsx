@@ -907,6 +907,8 @@ describe("GamePlaySurface turn controls", () => {
     expect(adaTray).toHaveTextContent("GO");
     expect(adaTray).toHaveTextContent("Oriental Avenue");
     expect(adaTray).not.toHaveTextContent("Park Place");
+    expect(adaTray).not.toHaveTextContent("No current contracts or obligations.");
+    expect(adaTray).not.toHaveTextContent("No deeds yet.");
 
     const graceTab = within(trays).getByRole("tab", { name: /Grace/ });
     expect(graceTab).toHaveClass("rounded-t-md");
@@ -914,6 +916,8 @@ describe("GamePlaySurface turn controls", () => {
     const graceTray = within(trays).getByRole("tabpanel", { name: "Grace active player tray" });
     expect(graceTray).toHaveTextContent("$1,500");
     expect(graceTray).toHaveTextContent("Park Place");
+    expect(graceTray).not.toHaveTextContent("No current contracts or obligations.");
+    expect(graceTray).not.toHaveTextContent("No deeds yet.");
 
     const context = await screen.findByRole("region", { name: "Turn context" });
     expect(context).toHaveTextContent("Last turn result");

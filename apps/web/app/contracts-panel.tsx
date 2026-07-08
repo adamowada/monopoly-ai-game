@@ -424,18 +424,18 @@ function ActiveContracts({
                 </span>
               </div>
               <div className="mt-3 grid gap-1 text-xs text-neutral-700">
-                <p>Created {formatDate(contract.created_at)}</p>
-                <p>Effective {formatDate(contract.effective_at)}</p>
+                <div>Created {formatDate(contract.created_at)}</div>
+                <div>Effective {formatDate(contract.effective_at)}</div>
               </div>
               <div className="mt-3 rounded-md bg-white px-3 py-2 text-xs leading-5 text-neutral-700">
                 {contractTermText(contract)}
                 <PropertyReferences game={game} propertyIds={propertyIdsFromContract(contract)} />
               </div>
               <TechnicalRecord buttonLabel="Show contract technical record">
-                <p>contract_id {contract.id}</p>
-                <p>deal_id {contract.deal_id ?? "not linked"}</p>
-                <p>source_agreement_id {contract.source_agreement_id ?? "not linked"}</p>
-                <p>effective_event_id {contract.effective_event_id ?? "not linked"}</p>
+                <div>contract_id {contract.id}</div>
+                <div>deal_id {contract.deal_id ?? "not linked"}</div>
+                <div>source_agreement_id {contract.source_agreement_id ?? "not linked"}</div>
+                <div>effective_event_id {contract.effective_event_id ?? "not linked"}</div>
               </TechnicalRecord>
             </article>
           ))
@@ -500,7 +500,7 @@ function UpcomingObligations({
                   </span>
                 </div>
                 <div className="mt-3 grid gap-1 text-xs text-neutral-700">
-                  <p>{dueText(obligation)}</p>
+                  <div>{dueText(obligation)}</div>
                   <div>
                     {obligationAssetText(obligation)}
                     <PropertyReferences game={game} propertyIds={propertyIdsFromText(obligationAssetText(obligation))} />
@@ -527,10 +527,10 @@ function UpcomingObligations({
                   </Button>
                 </div>
                 <TechnicalRecord buttonLabel="Show obligation technical record">
-                  <p>obligation_id {obligation.id}</p>
-                  <p>contract_id {obligation.contract_id}</p>
-                  <p>due_turn {obligation.due_turn ?? "not set"}</p>
-                  <p>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</p>
+                  <div>obligation_id {obligation.id}</div>
+                  <div>contract_id {obligation.contract_id}</div>
+                  <div>due_turn {obligation.due_turn ?? "not set"}</div>
+                  <div>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</div>
                 </TechnicalRecord>
               </article>
             );
@@ -568,15 +568,15 @@ function SettlementHistory({
         ) : (
           settled.map((obligation) => (
             <article key={obligation.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
-              <p className="font-semibold text-neutral-950">Settled {formatDate(obligation.settled_at)}</p>
-              <p className="mt-2 rounded-md bg-white px-3 py-2 leading-5">
+              <div className="font-semibold text-neutral-950">Settled {formatDate(obligation.settled_at)}</div>
+              <div className="mt-2 rounded-md bg-white px-3 py-2 leading-5">
                 {obligation.transfer_summary ?? obligationAssetText(obligation)}
-              </p>
+              </div>
               <TechnicalRecord buttonLabel="Show settlement technical record">
-                <p>obligation_id {obligation.id}</p>
-                <p>contract_id {obligation.contract_id}</p>
-                <p>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</p>
-                <p>settled_at {formatDate(obligation.settled_at)}</p>
+                <div>obligation_id {obligation.id}</div>
+                <div>contract_id {obligation.contract_id}</div>
+                <div>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</div>
+                <div>settled_at {formatDate(obligation.settled_at)}</div>
               </TechnicalRecord>
             </article>
           ))
@@ -621,13 +621,13 @@ function ContractOutcomeExplanations({
                   {String(outcome.decision.status ?? "recorded")}
                 </span>
               </div>
-              <p className="mt-2 rounded-md bg-white px-3 py-2 leading-5 text-neutral-700">
+              <div className="mt-2 rounded-md bg-white px-3 py-2 leading-5 text-neutral-700">
                 {outcome.explanation_text}
-              </p>
+              </div>
               <TechnicalRecord buttonLabel="Show outcome technical record">
-                <p>contract_id {outcome.contract_id}</p>
-                <p>obligation_id {outcome.obligation_id ?? "contract"}</p>
-                <p>source_deal_id {outcome.source_deal_id ?? "not linked"}</p>
+                <div>contract_id {outcome.contract_id}</div>
+                <div>obligation_id {outcome.obligation_id ?? "contract"}</div>
+                <div>source_deal_id {outcome.source_deal_id ?? "not linked"}</div>
               </TechnicalRecord>
             </article>
           ))
@@ -721,7 +721,7 @@ function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game
                 <LogKindIcon kind={entry.kind} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-neutral-950">{entry.title}</p>
+                    <div className="font-semibold text-neutral-950">{entry.title}</div>
                     <span
                       className={cn(
                         "rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-600",
@@ -732,18 +732,18 @@ function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game
                       {entry.badge}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs leading-5 text-neutral-700">{entry.detail}</p>
+                  <div className="mt-1 text-xs leading-5 text-neutral-700">{entry.detail}</div>
                   <PropertyReferences game={game} propertyIds={propertyIdsFromText(entry.detail)} />
                   {entry.sourceAgreementId || entry.dealId || entry.contractId ? (
-                    <p className="mt-1 text-xs text-neutral-500">
+                    <div className="mt-1 text-xs text-neutral-500">
                       {entry.sourceAgreementId ? `Source agreement ${entry.sourceAgreementId}` : null}
                       {entry.sourceAgreementId && entry.dealId ? " / " : null}
                       {entry.dealId ? `deal ${entry.dealId}` : null}
                       {(entry.sourceAgreementId || entry.dealId) && entry.contractId ? " / " : null}
                       {entry.contractId ? `contract ${entry.contractId}` : null}
-                    </p>
+                    </div>
                   ) : null}
-                  <p className="mt-1 text-[11px] text-neutral-500">{formatDate(entry.timestamp)}</p>
+                  <div className="mt-1 text-[11px] text-neutral-500">{formatDate(entry.timestamp)}</div>
                 </div>
               </div>
             </li>

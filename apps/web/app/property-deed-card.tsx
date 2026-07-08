@@ -218,7 +218,7 @@ export function PropertyDeedCard({
         data-property-deed-band=""
         style={{ backgroundColor: bandColor, color: readableTextColor(bandColor) }}
       >
-        <p className="text-[10px] font-black uppercase leading-none">{group?.name ?? property.group}</p>
+        <div className="text-[10px] font-black uppercase leading-none">{group?.name ?? property.group}</div>
         <h3 className={cn("mt-1 break-words font-black uppercase leading-[0.95]", compact ? "text-xs" : "text-lg")}>
           {property.name}
         </h3>
@@ -227,8 +227,8 @@ export function PropertyDeedCard({
       <div className={cn("flex items-start justify-between gap-3", compact ? "mt-2" : "mt-3")}>
         <div className="min-w-0">
           <span className="sr-only">Price {money(property.price)}</span>
-          <p className="text-[10px] font-black uppercase text-[#6f604c]">Price</p>
-          <p className={cn("font-black text-[#173c45]", compact ? "text-sm" : "text-xl")}>{money(property.price)}</p>
+          <div className="text-[10px] font-black uppercase text-[#6f604c]">Price</div>
+          <div className={cn("font-black text-[#173c45]", compact ? "text-sm" : "text-xl")}>{money(property.price)}</div>
         </div>
         <div className="flex items-center gap-1.5">
           {owner ? (

@@ -406,7 +406,7 @@ function ValidationAlert({ errors }: Readonly<{ errors: ValidationError[] }>) {
       <div className="flex gap-2">
         <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-rose-700" />
         <div>
-          <p className="font-semibold text-rose-950">Validation errors</p>
+          <div className="font-semibold text-rose-950">Validation errors</div>
           <ul className="mt-1 list-disc space-y-1 pl-4">
             {errors.map((error) => (
               <li key={`${error.code}-${error.field ?? "field"}-${error.message}`}>
@@ -918,9 +918,9 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               </Button>
             </div>
             {aiNegotiationResult?.decision_type === "open_negotiation" ? (
-              <p className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
+              <div className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
                 AI response {aiNegotiationResult.status}
-              </p>
+              </div>
             ) : null}
           </section>
         ) : null}
@@ -929,9 +929,9 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
           <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <h3 className="text-sm font-semibold text-neutral-950">Threads</h3>
             {negotiationsQuery.isLoading ? (
-              <p className="mt-2 text-sm text-neutral-600">Loading negotiations.</p>
+              <div className="mt-2 text-sm text-neutral-600">Loading negotiations.</div>
             ) : negotiations.length === 0 ? (
-              <p className="mt-2 text-sm text-neutral-600">No negotiations yet.</p>
+              <div className="mt-2 text-sm text-neutral-600">No negotiations yet.</div>
             ) : (
               <div className="mt-3 grid gap-2">
                 {negotiations.map((negotiation) => (
@@ -966,12 +966,12 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               <div>
                 <h3 className="text-sm font-semibold text-neutral-950">Negotiation thread</h3>
                 {selectedNegotiation ? (
-                  <p className="mt-1 text-xs text-neutral-600">
+                  <div className="mt-1 text-xs text-neutral-600">
                     {selectedNegotiation.topic} - {statusLabel(selectedNegotiation.status)} - Round{" "}
                     {selectedNegotiation.round_number}
-                  </p>
+                  </div>
                 ) : (
-                  <p className="mt-1 text-xs text-neutral-600">No negotiation selected.</p>
+                  <div className="mt-1 text-xs text-neutral-600">No negotiation selected.</div>
                 )}
               </div>
               {selectedNegotiation ? (
@@ -1008,10 +1008,10 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                   </div>
                 </dl>
                 <TechnicalRecord buttonLabel="Show negotiation technical record">
-                  <p>negotiation_id {selectedNegotiation.id}</p>
-                  <p>status {selectedNegotiation.status}</p>
-                  <p>round_number {selectedNegotiation.round_number}</p>
-                  <p>participant_player_ids {selectedNegotiation.participant_player_ids.join(", ")}</p>
+                  <div>negotiation_id {selectedNegotiation.id}</div>
+                  <div>status {selectedNegotiation.status}</div>
+                  <div>round_number {selectedNegotiation.round_number}</div>
+                  <div>participant_player_ids {selectedNegotiation.participant_player_ids.join(", ")}</div>
                 </TechnicalRecord>
                 {aiParticipants.length > 0 ? (
                   <section aria-label="AI negotiation controls" className="rounded-md border border-purple-200 bg-purple-50 p-3">
@@ -1073,9 +1073,9 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                       </div>
                     </div>
                     {aiNegotiationResult ? (
-                      <p className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
+                      <div className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
                         AI response {aiNegotiationResult.status}
-                      </p>
+                      </div>
                     ) : null}
                   </section>
                 ) : null}
@@ -1083,15 +1083,15 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                 <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                   <h4 className="text-sm font-semibold text-neutral-950">Messages</h4>
                   {messagesQuery.isLoading ? (
-                    <p className="mt-2 text-sm text-neutral-600">Loading messages.</p>
+                    <div className="mt-2 text-sm text-neutral-600">Loading messages.</div>
                   ) : (messagesQuery.data ?? []).length === 0 ? (
-                    <p className="mt-2 text-sm text-neutral-600">No messages yet.</p>
+                    <div className="mt-2 text-sm text-neutral-600">No messages yet.</div>
                   ) : (
                     <ol className="mt-2 divide-y divide-neutral-200 text-sm">
                       {(messagesQuery.data ?? []).map((message) => (
                         <li key={message.id} className="py-2">
-                          <p className="font-medium text-neutral-950">{playerName(game, message.author_player_id)}</p>
-                          <p className="mt-1 text-neutral-700">{message.body}</p>
+                          <div className="font-medium text-neutral-950">{playerName(game, message.author_player_id)}</div>
+                          <div className="mt-1 text-neutral-700">{message.body}</div>
                         </li>
                       ))}
                     </ol>
@@ -1137,11 +1137,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
 
                 <section aria-label="Selected deal versions" className="grid gap-2">
                   <h4 className="text-sm font-semibold text-neutral-950">Selected deal versions</h4>
-                  {selectedDeals.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-neutral-200 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
-                      No deal versions proposed.
-                    </p>
-                  ) : (
+                  {selectedDeals.length > 0 ? (
                     selectedDeals.map((deal) => {
                       const canExecute = deal.status === "proposed" && isNegotiationOpen;
                       return (
@@ -1154,9 +1150,9 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div>
                               <h5 className="text-sm font-semibold text-neutral-950">Deal v{deal.version}</h5>
-                              <p className="mt-1 text-xs text-neutral-600">
+                              <div className="mt-1 text-xs text-neutral-600">
                                 {deal.parent_deal_id ? "Counteroffer" : "Original proposal"}
-                              </p>
+                              </div>
                             </div>
                             <span
                               className={cn(
@@ -1193,10 +1189,10 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                           </ul>
 
                           <TechnicalRecord buttonLabel="Show deal technical record">
-                            <p>deal_id {deal.id}</p>
-                            <p>parent_deal_id {deal.parent_deal_id ?? "none"}</p>
-                            <p>accepted_at {deal.accepted_at ?? "not accepted"}</p>
-                            <p>validation_errors {deal.validation_errors.length}</p>
+                            <div>deal_id {deal.id}</div>
+                            <div>parent_deal_id {deal.parent_deal_id ?? "none"}</div>
+                            <div>accepted_at {deal.accepted_at ?? "not accepted"}</div>
+                            <div>validation_errors {deal.validation_errors.length}</div>
                           </TechnicalRecord>
 
                           {canExecute ? (
@@ -1242,7 +1238,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         </article>
                       );
                     })
-                  )}
+                  ) : null}
                 </section>
 
                 {isNegotiationOpen ? (
@@ -1432,11 +1428,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               <dd className="mt-1 text-neutral-950">Created from accepted structured terms.</dd>
             </div>
           </dl>
-          {previewTerms.length === 0 ? (
-            <p className="mt-3 rounded-md border border-dashed border-neutral-200 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
-              No terms selected for preview.
-            </p>
-          ) : (
+          {previewTerms.length > 0 ? (
             <ul className="mt-3 grid gap-2 text-sm text-neutral-700">
               {previewTerms.map((term, index) => (
                 <li key={`${term.kind}-${index}`} className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
@@ -1444,7 +1436,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                 </li>
               ))}
             </ul>
-          )}
+          ) : null}
         </section>
       </div>
     </section>

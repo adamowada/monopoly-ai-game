@@ -138,7 +138,7 @@ function legalActionDescription(action: AiDecision["legal_actions"][number]): st
 }
 
 function EmptyState({ text }: Readonly<{ text: string }>) {
-  return <p className="rounded-md border border-dashed border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-600">{text}</p>;
+  return <div className="rounded-md border border-dashed border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-600">{text}</div>;
 }
 
 function ErrorNote({ text }: Readonly<{ text: string }>) {
@@ -265,7 +265,7 @@ function AiNotebookStream({
               <span className="font-semibold text-neutral-950">{playerName(game, item.playerId)}</span>
               <span className="text-[11px] font-medium text-neutral-500">{formatDate(item.createdAt)}</span>
             </div>
-            <p className="mt-1 leading-6">{item.content}</p>
+            <div className="mt-1 leading-6">{item.content}</div>
             {propertyIdsFromText(item.content).length > 0 ? (
               <span className="mt-2 flex flex-wrap gap-1.5" data-ai-notebook-property-references="">
                 {propertyIdsFromText(item.content).map((propertyId) => (
@@ -318,7 +318,7 @@ function ProfilesView({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h4 className="text-sm font-semibold text-neutral-950">{profile.display_name}</h4>
-                <p className="text-xs text-neutral-600">{playerName(game, profile.player_id)}</p>
+                <div className="text-xs text-neutral-600">{playerName(game, profile.player_id)}</div>
               </div>
               <span className="text-xs text-neutral-500">{formatDate(profile.created_at)}</span>
             </div>

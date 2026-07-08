@@ -343,6 +343,7 @@ describe("NegotiationPanel", () => {
     expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("No negotiation selected");
     expect(screen.getByRole("region", { name: "Structured deal builder" })).toHaveTextContent("Structured deal builder");
     expect(screen.getByRole("region", { name: "Contract preview" })).toHaveTextContent("Complex instruments");
+    expect(screen.getByRole("region", { name: "Contract preview" })).not.toHaveTextContent("No terms selected for preview.");
 
     fireEvent.change(screen.getByLabelText("Negotiation topic"), { target: { value: "Opening trade" } });
     fireEvent.change(screen.getByLabelText("Negotiation context"), { target: { value: "Ada wants a railroad swap." } });
@@ -421,6 +422,7 @@ describe("NegotiationPanel", () => {
 
     const counterDeal = await screen.findByRole("region", { name: "Deal v2" });
     expect(counterDeal).toHaveTextContent("Counteroffer");
+    expect(screen.getByRole("region", { name: "Selected deal versions" })).not.toHaveTextContent("No deal versions proposed.");
     expect(counterDeal).not.toHaveTextContent("parent_deal_id");
     const counterSubmission = fetchMock.mock.calls.find(
       ([url, init]) =>
