@@ -10,6 +10,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCT_SMOKE_PATH = REPO_ROOT / "scripts" / "product_smoke.py"
 LIVE_SMOKE_PATH = REPO_ROOT / "services" / "api" / "scripts" / "live_codex_ai_smoke.py"
+LIVE_STRATEGY_SMOKE_PATH = REPO_ROOT / "services" / "api" / "scripts" / "live_codex_ai_strategy_smoke.py"
 API_DOCKERFILE_PATH = REPO_ROOT / "services" / "api" / "Dockerfile"
 
 
@@ -36,6 +37,8 @@ def test_root_smoke_scripts_preserve_scaffold_checks_and_add_product_smoke() -> 
     assert "scripts/product_smoke.py" in scripts["test:smoke"]
     assert "RUN_LIVE_CODEX_AI" in scripts["test:smoke:live"]
     assert "live_codex_ai_smoke.py" in scripts["test:smoke:live"]
+    assert "RUN_LIVE_CODEX_AI" in scripts["test:smoke:live:strategy"]
+    assert "live_codex_ai_strategy_smoke.py" in scripts["test:smoke:live:strategy"]
 
 
 def test_api_container_runs_migrations_before_uvicorn() -> None:
@@ -64,6 +67,23 @@ def test_live_codex_smoke_stays_gated_and_uses_gpt_5_4_mini_light_exec_json() ->
     assert "shell_snapshot" in source
     assert "robinhood-trading" in source
     assert "if process.returncode != 0:" in source
+    assert "treating as pass" not in source
+
+
+def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation() -> None:
+    source = LIVE_STRATEGY_SMOKE_PATH.read_text(encoding="utf-8")
+
+    assert "RUN_LIVE_CODEX_AI" in source
+    assert "codex exec" in source
+    assert "gpt-5.4-mini" in source
+    assert "model_reasoning_effort" in source
+    assert "low" in source
+    assert "orange_monopoly_development" in source
+    assert "orange_near_monopoly_negotiation" in source
+    assert "BUY_HOUSE" in source
+    assert "open_negotiation" in source
+    assert "property_tennessee_avenue" in source
+    assert "participant_player_ids" in source
     assert "treating as pass" not in source
 
 
