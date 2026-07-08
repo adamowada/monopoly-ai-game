@@ -2427,6 +2427,9 @@ def _deal_completion_evaluation(
     actor_receives_total_compensation_value = (
         actor_receives_cash_total + actor_receives_property_value_total
     )
+    actor_receives_net_compensation_value = (
+        actor_receives_total_compensation_value - actor_pays_cash_total
+    )
     actor_completion_opportunities_by_property_id: dict[str, dict[str, Any]] = {}
     for receipt in actor_receives:
         receipt_property_id = _string_or_none(receipt.get("property_id"))
@@ -2503,7 +2506,7 @@ def _deal_completion_evaluation(
                 continue
 
             minimum_cash_value_floor = property_data.price * 3
-            if actor_receives_total_compensation_value >= minimum_cash_value_floor:
+            if actor_receives_net_compensation_value >= minimum_cash_value_floor:
                 continue
 
             risk = {
@@ -2518,6 +2521,17 @@ def _deal_completion_evaluation(
                 "minimum_cash_value_floor": minimum_cash_value_floor,
                 "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
             }
+            if actor_pays_cash_total > 0:
+                risk.update(
+                    {
+                        "total_compensation_value": actor_receives_total_compensation_value,
+                        "net_compensation_value": actor_receives_net_compensation_value,
+                        "net_compensation_value_gap": (
+                            minimum_cash_value_floor
+                            - actor_receives_net_compensation_value
+                        ),
+                    }
+                )
             if actor_receives_property_ids:
                 risk.update(
                     {
@@ -2572,7 +2586,7 @@ def _deal_completion_evaluation(
             else None
         )
         if (
-            actor_receives_total_compensation_value >= minimum_cash_value_floor
+            actor_receives_net_compensation_value >= minimum_cash_value_floor
             and actor_completion_opportunity is not None
             and actor_completion_priority_score < opponent_completion_priority_score
         ):
@@ -2589,6 +2603,10 @@ def _deal_completion_evaluation(
                 "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
                 "actor_receives_property_value_total": actor_receives_property_value_total,
                 "total_compensation_value": actor_receives_total_compensation_value,
+                "net_compensation_value": actor_receives_net_compensation_value,
+                "net_compensation_value_gap": (
+                    minimum_cash_value_floor - actor_receives_net_compensation_value
+                ),
                 "opponent_completion_priority_score": opponent_completion_priority_score,
                 "actor_completion_priority_score": actor_completion_priority_score,
                 "completion_priority_gap": (
@@ -2618,7 +2636,7 @@ def _deal_completion_evaluation(
                 "actor_receives_property_ids": actor_receives_property_ids,
                 "risk": risk,
             }
-        if actor_receives_total_compensation_value >= minimum_cash_value_floor:
+        if actor_receives_net_compensation_value >= minimum_cash_value_floor:
             continue
 
         risk = {
@@ -2633,6 +2651,16 @@ def _deal_completion_evaluation(
             "minimum_cash_value_floor": minimum_cash_value_floor,
             "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
         }
+        if actor_pays_cash_total > 0:
+            risk.update(
+                {
+                    "total_compensation_value": actor_receives_total_compensation_value,
+                    "net_compensation_value": actor_receives_net_compensation_value,
+                    "net_compensation_value_gap": (
+                        minimum_cash_value_floor - actor_receives_net_compensation_value
+                    ),
+                }
+            )
         if actor_receives_property_ids:
             risk.update(
                 {

@@ -903,6 +903,32 @@ def test_context_pack_rejects_lowball_deal_that_completes_opponent_railroad_set(
     assert risk["cash_value_gap"] == 299
 
 
+def test_context_pack_rejects_opponent_completion_when_cash_is_returned_in_same_deal() -> None:
+    state = _state_with_light_blue_near_set_and_opponent_orange_near_set()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_cash_round_trip_tennessee_completion_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_below_floor"
+    )
+    assert guidance["deal_evaluations"][0]["actor_receives_cash_total"] == 320
+    assert guidance["deal_evaluations"][0]["actor_pays_cash_total"] == 200
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["minimum_cash_value_floor"] == 270
+    assert risk["total_compensation_value"] == 320
+    assert risk["net_compensation_value"] == 120
+    assert risk["net_compensation_value_gap"] == 150
+
+
 def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_utility_set() -> None:
     state = _state_with_utility_near_set(ai_cash=400)
     pack = build_ai_context_pack(
@@ -2374,6 +2400,50 @@ def _mutual_light_blue_for_orange_completion_deal() -> dict[str, Any]:
                     "from_player_id": str(OTHER_PLAYER_ID),
                     "to_player_id": str(AI_PLAYER_ID),
                     "property_id": "property_connecticut_avenue",
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _cash_round_trip_tennessee_completion_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "cash-round-trip-tennessee-completion",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "gross-cash-in",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "amount": 320,
+                },
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "cash-returned",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 200,
                 },
                 {
                     "kind": "immediate_property_transfer",
