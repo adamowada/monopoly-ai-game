@@ -105,6 +105,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_active_debt_uses_mortgage,
         ),
         StrategySmokeCase(
+            name="healthy_cash_unmortgages_rent_property",
+            game_id=UUID("00000000-0000-0000-0000-00000000b211"),
+            decision_type="action_decision",
+            state_factory=_healthy_cash_unmortgage_state,
+            verifier=_verify_healthy_cash_unmortgages_rent_property,
+        ),
+        StrategySmokeCase(
             name="auction_bid_within_valuation",
             game_id=UUID("00000000-0000-0000-0000-00000000b206"),
             decision_type="action_decision",
@@ -235,6 +242,17 @@ def _verify_active_debt_uses_mortgage(parsed: dict[str, Any]) -> None:
     assert parsed.get("decision_type") == "action_decision"
     assert action.get("type") == "MORTGAGE_PROPERTY", f"expected MORTGAGE_PROPERTY, got {action.get('type')}"
     assert payload.get("property_id") == "property_b_and_o_railroad"
+
+
+def _verify_healthy_cash_unmortgages_rent_property(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "UNMORTGAGE_PROPERTY", f"expected UNMORTGAGE_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_b_and_o_railroad"
+    if "cost" in payload:
+        assert payload.get("cost") == 110
 
 
 def _verify_auction_bid_within_valuation(parsed: dict[str, Any]) -> None:
@@ -497,6 +515,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "healthy_cash_unmortgages_rent_property":
+        return (
+            {
+                "id": "live-strategy-unmortgage-healthy-cash",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has $900 cash and owns mortgaged "
+                    "property_b_and_o_railroad. UNMORTGAGE_PROPERTY costs $110, leaves "
+                    "$790 cash, and can restore rent collection. Choose UNMORTGAGE_PROPERTY "
+                    "for property_b_and_o_railroad before ROLL_DICE."
+                ),
+            },
+        )
     if case.name == "healthy_cash_avoids_mortgage":
         return (
             {
@@ -652,6 +683,23 @@ def _healthy_cash_mortgage_state(game_id: UUID) -> GameState:
         {
             **item.model_dump(mode="python"),
             "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id == "property_b_and_o_railroad"
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _healthy_cash_unmortgage_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-unmortgage")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 900
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+            "mortgaged": True,
         }
         if item.property_id == "property_b_and_o_railroad"
         else item.model_dump(mode="python")

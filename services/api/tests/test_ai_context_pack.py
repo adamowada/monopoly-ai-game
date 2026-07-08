@@ -366,6 +366,31 @@ def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> 
     assert "only enough" in guidance_text
 
 
+def test_context_pack_prioritizes_unmortgaging_rent_property_when_cash_stays_healthy() -> None:
+    state = _state_with_mortgaged_railroad(cash=900)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    unmortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "UNMORTGAGE_PROPERTY"
+    ]
+    assert len(unmortgage_actions) == 1
+    assert unmortgage_actions[0]["payload"]["property_id"] == "property_b_and_o_railroad"
+    assert unmortgage_actions[0]["payload"]["cost"] == 110
+
+    guidance = pack["action_selection_guidance"]
+    assert "UNMORTGAGE_PROPERTY" in guidance["recommended_action_types_before_roll"]
+    assert "ROLL_DICE" in guidance["lower_priority_action_types"]
+    assert guidance["unmortgage_guidance"]["recommendation"] == "restore_rent_when_cash_healthy"
+    assert guidance["unmortgage_guidance"]["cash_after_cheapest_unmortgage"] == 790
+    assert guidance["unmortgage_guidance"]["unmortgageable_property_ids"] == [
+        "property_b_and_o_railroad"
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "UNMORTGAGE_PROPERTY" in guidance_text
+    assert "restore rent" in guidance_text
+    assert any("UNMORTGAGE_PROPERTY" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
 def test_context_pack_prefers_buying_landed_property_when_cash_is_healthy() -> None:
     state = _state_landed_on_unowned_reading_railroad(cash=1500)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -976,6 +1001,22 @@ def _state_with_active_debt_and_owned_railroad(*, cash: int) -> GameState:
                 "reason": "rent",
                 "negotiation_allowed": False,
             },
+        }
+    )
+
+
+def _state_with_mortgaged_railroad(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID), "mortgaged": True})
+                if ownership.property_id == "property_b_and_o_railroad"
+                else ownership
+                for ownership in state.property_ownership
+            ),
         }
     )
 

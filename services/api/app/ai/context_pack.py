@@ -48,6 +48,7 @@ _FIELD_JOINER = "".join
 AIContextPack: TypeAlias = dict[str, Any]
 MORTGAGE_HEALTHY_CASH_FLOOR = 200
 PURCHASE_HEALTHY_CASH_FLOOR = 300
+UNMORTGAGE_HEALTHY_CASH_FLOOR = 300
 
 
 def build_ai_context_pack(
@@ -706,6 +707,7 @@ def _action_selection_guidance(
     purchase_guidance = _purchase_guidance(state, actor_id, legal_actions)
     auction_guidance = _auction_guidance(state, actor_id, legal_actions)
     mortgage_guidance = _mortgage_guidance(state, actor_id, legal_actions)
+    unmortgage_guidance = _unmortgage_guidance(state, actor_id, legal_actions)
 
     if purchase_guidance is not None:
         recommendation = _string_or_none(purchase_guidance.get("recommendation"))
@@ -767,6 +769,17 @@ def _action_selection_guidance(
                 "liquidation actions."
             )
 
+    if unmortgage_guidance is not None:
+        recommendation = _string_or_none(unmortgage_guidance.get("recommendation"))
+        if recommendation == "restore_rent_when_cash_healthy":
+            recommended_before_roll.append("UNMORTGAGE_PROPERTY")
+            if "ROLL_DICE" in legal_action_types and "ROLL_DICE" not in lower_priority_action_types:
+                lower_priority_action_types.append("ROLL_DICE")
+            turn_guidance.append(
+                "UNMORTGAGE_PROPERTY can restore rent collection on owned property; prefer it "
+                "before ROLL_DICE when cash_after_cost remains healthy."
+            )
+
     return {
         "recommended_action_types": recommended_action_types,
         "recommended_action_types_before_roll": recommended_before_roll,
@@ -775,6 +788,7 @@ def _action_selection_guidance(
         "development_opportunities": development_opportunities,
         "auction_guidance": auction_guidance,
         "mortgage_guidance": mortgage_guidance,
+        "unmortgage_guidance": unmortgage_guidance,
         "turn_guidance": turn_guidance,
     }
 
@@ -906,6 +920,58 @@ def _mortgage_guidance(
         "mortgageable_property_count": len(mortgage_actions),
         "mortgageable_property_ids": mortgageable_property_ids,
         "total_available_proceeds": total_available_proceeds,
+    }
+
+
+def _unmortgage_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    unmortgage_actions = [
+        action for action in legal_actions if action.get("type") == "UNMORTGAGE_PROPERTY"
+    ]
+    if not unmortgage_actions:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    unmortgageable_property_ids: list[str] = []
+    unmortgageable_property_names: list[str] = []
+    unmortgage_costs: list[int] = []
+    for action in unmortgage_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is None:
+            continue
+        unmortgageable_property_ids.append(property_id)
+        property_data = properties_by_id.get(property_id)
+        if property_data is not None:
+            unmortgageable_property_names.append(property_data.name)
+        unmortgage_costs.append(_int_or_zero(payload.get("cost")))
+
+    cheapest_cost = min(unmortgage_costs) if unmortgage_costs else 0
+    cash_after_cheapest = player.cash - cheapest_cost
+    recommendation = (
+        "restore_rent_when_cash_healthy"
+        if cheapest_cost > 0 and cash_after_cheapest >= UNMORTGAGE_HEALTHY_CASH_FLOOR
+        else "defer_until_cash_after_cost_is_healthy"
+    )
+
+    return {
+        "action_available": True,
+        "recommendation": recommendation,
+        "cash_available": player.cash,
+        "healthy_cash_floor": UNMORTGAGE_HEALTHY_CASH_FLOOR,
+        "unmortgageable_property_count": len(unmortgage_actions),
+        "unmortgageable_property_ids": unmortgageable_property_ids,
+        "unmortgageable_property_names": unmortgageable_property_names,
+        "cheapest_unmortgage_cost": cheapest_cost,
+        "cash_after_cheapest_unmortgage": cash_after_cheapest,
     }
 
 
@@ -1408,6 +1474,7 @@ def _instruction_contract() -> dict[str, Any]:
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
             "When purchase_guidance recommends BUY_PROPERTY, choose BUY_PROPERTY over START_AUCTION unless cash_after_price, valuation, or blocking risk gives a concrete reason.",
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
+            "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a street group or blocking an opponent's street group.",
             "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",
