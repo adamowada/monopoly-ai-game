@@ -1061,6 +1061,32 @@ def test_context_pack_recommends_rejecting_deal_that_breaks_actor_monopoly() -> 
     assert risk["cash_value_gap"] == 240
 
 
+def test_context_pack_rejects_property_swap_that_undervalues_actor_monopoly_breakup() -> None:
+    state = _state_with_orange_monopoly_and_opponent_baltic()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_swap_tennessee_for_baltic_from_monopoly_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_breaks_actor_complete_street_group_below_floor"
+    )
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["minimum_cash_value_floor"] == 540
+    assert risk["actor_receives_property_value_total"] == 60
+    assert risk["total_compensation_value"] == 60
+    assert risk["compensation_value_gap"] == 480
+
+
 def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="deal_proposal")
@@ -2371,6 +2397,43 @@ def _sell_tennessee_from_monopoly_deal(*, amount: int) -> dict[str, Any]:
     }
 
 
+def _swap_tennessee_for_baltic_from_monopoly_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "swap-tennessee-from-grace-monopoly-for-baltic",
+            "terms": [
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "baltic-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_baltic_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
 def _active_tennessee_negotiation() -> dict[str, Any]:
     return {
         "id": str(NEGOTIATION_ID),
@@ -2415,6 +2478,20 @@ def _state_with_orange_monopoly(*, cash: int = 3000) -> GameState:
             "property_ownership": tuple(
                 ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
                 if ownership.property_id in orange_property_ids
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_orange_monopoly_and_opponent_baltic() -> GameState:
+    state = _state_with_orange_monopoly()
+    return state.model_copy(
+        update={
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(OTHER_PLAYER_ID)})
+                if ownership.property_id == "property_baltic_avenue"
                 else ownership
                 for ownership in state.property_ownership
             ),

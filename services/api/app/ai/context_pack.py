@@ -2417,6 +2417,14 @@ def _deal_completion_evaluation(
         ownership.property_id: ownership for ownership in state.property_ownership
     }
     player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
+    actor_receives_property_value_total = sum(
+        properties_by_id[property_id].price
+        for property_id in actor_receives_property_ids
+        if property_id in properties_by_id
+    )
+    actor_receives_total_compensation_value = (
+        actor_receives_cash_total + actor_receives_property_value_total
+    )
 
     for transfer in actor_transfers:
         property_id = _string_or_none(transfer.get("property_id"))
@@ -2449,7 +2457,7 @@ def _deal_completion_evaluation(
                 continue
 
             minimum_cash_value_floor = property_data.price * 3
-            if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:
+            if actor_receives_total_compensation_value >= minimum_cash_value_floor:
                 continue
 
             risk = {
@@ -2464,6 +2472,19 @@ def _deal_completion_evaluation(
                 "minimum_cash_value_floor": minimum_cash_value_floor,
                 "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
             }
+            if actor_receives_property_ids:
+                risk.update(
+                    {
+                        "actor_receives_property_value_total": (
+                            actor_receives_property_value_total
+                        ),
+                        "total_compensation_value": actor_receives_total_compensation_value,
+                        "compensation_value_gap": (
+                            minimum_cash_value_floor
+                            - actor_receives_total_compensation_value
+                        ),
+                    }
+                )
             _include_property_group_kind(risk, group_kind)
             return {
                 "deal_id": _string_or_none(deal.get("id")),
@@ -2482,7 +2503,7 @@ def _deal_completion_evaluation(
             }
 
         minimum_cash_value_floor = property_data.price * 3 // 2
-        if actor_receives_cash_total >= minimum_cash_value_floor or actor_receives_property_ids:
+        if actor_receives_total_compensation_value >= minimum_cash_value_floor:
             continue
 
         risk = {
@@ -2497,6 +2518,16 @@ def _deal_completion_evaluation(
             "minimum_cash_value_floor": minimum_cash_value_floor,
             "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
         }
+        if actor_receives_property_ids:
+            risk.update(
+                {
+                    "actor_receives_property_value_total": actor_receives_property_value_total,
+                    "total_compensation_value": actor_receives_total_compensation_value,
+                    "compensation_value_gap": (
+                        minimum_cash_value_floor - actor_receives_total_compensation_value
+                    ),
+                }
+            )
         _include_property_group_kind(risk, group_kind)
         return {
             "deal_id": _string_or_none(deal.get("id")),
