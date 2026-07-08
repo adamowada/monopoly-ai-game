@@ -307,14 +307,6 @@ function buildLogEntries({
   });
 }
 
-function EmptyState({ text }: Readonly<{ text: string }>) {
-  return (
-    <div className="rounded-md border border-dashed border-neutral-200 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
-      {text}
-    </div>
-  );
-}
-
 function ErrorNote({ text }: Readonly<{ text: string }>) {
   return <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{text}</div>;
 }
@@ -402,12 +394,8 @@ function ActiveContracts({
       </div>
 
       <div className="mt-3 grid gap-3">
-        {isLoading ? (
-          <EmptyState text="Loading active contracts." />
-        ) : activeContracts.length === 0 ? (
-          <EmptyState text="No active contracts." />
-        ) : (
-          activeContracts.map((contract) => (
+        {!isLoading
+          ? activeContracts.map((contract) => (
             <article
               key={contract.id}
               aria-label={`Contract between ${playerNames(game, contract.party_player_ids)}`}
@@ -439,7 +427,7 @@ function ActiveContracts({
               </TechnicalRecord>
             </article>
           ))
-        )}
+          : null}
       </div>
     </section>
   );
@@ -473,12 +461,8 @@ function UpcomingObligations({
       </div>
 
       <div className="mt-3 grid gap-3">
-        {isLoading ? (
-          <EmptyState text="Loading upcoming obligations." />
-        ) : upcoming.length === 0 ? (
-          <EmptyState text="No upcoming obligations." />
-        ) : (
-          upcoming.map((obligation) => {
+        {!isLoading
+          ? upcoming.map((obligation) => {
             const canSettle = canSettleObligation(obligation);
             const isCurrentEnforcement = enforcingObligationId === obligation.id;
 
@@ -535,7 +519,7 @@ function UpcomingObligations({
               </article>
             );
           })
-        )}
+          : null}
       </div>
     </section>
   );
@@ -561,12 +545,8 @@ function SettlementHistory({
       </div>
 
       <div className="mt-3 grid gap-2">
-        {isLoading ? (
-          <EmptyState text="Loading obligation settlement history." />
-        ) : settled.length === 0 ? (
-          <EmptyState text="No settled obligations." />
-        ) : (
-          settled.map((obligation) => (
+        {!isLoading
+          ? settled.map((obligation) => (
             <article key={obligation.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
               <div className="font-semibold text-neutral-950">Settled {formatDate(obligation.settled_at)}</div>
               <div className="mt-2 rounded-md bg-white px-3 py-2 leading-5">
@@ -580,7 +560,7 @@ function SettlementHistory({
               </TechnicalRecord>
             </article>
           ))
-        )}
+          : null}
       </div>
     </section>
   );
@@ -608,12 +588,8 @@ function ContractOutcomeExplanations({
       </div>
 
       <div className="mt-3 grid gap-2">
-        {isLoading ? (
-          <EmptyState text="Loading contract outcome explanations." />
-        ) : outcomes.length === 0 ? (
-          <EmptyState text="No contract outcome explanations." />
-        ) : (
-          outcomes.map((outcome) => (
+        {!isLoading
+          ? outcomes.map((outcome) => (
             <article key={outcome.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs">
               <div className="flex flex-wrap items-center gap-2 text-neutral-700">
                 <span className="font-semibold text-neutral-950">Contract outcome</span>
@@ -631,7 +607,7 @@ function ContractOutcomeExplanations({
               </TechnicalRecord>
             </article>
           ))
-        )}
+          : null}
       </div>
     </section>
   );
@@ -713,11 +689,7 @@ function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game
         ))}
       </div>
 
-      {visibleEntries.length === 0 ? (
-        <div className="mt-3">
-          <EmptyState text="No log entries match the selected filters." />
-        </div>
-      ) : (
+      {visibleEntries.length > 0 ? (
         <ol className="mt-3 divide-y divide-neutral-200 text-sm">
           {renderedEntries.map((entry) => (
             <li key={entry.id} className="py-2">
@@ -753,7 +725,7 @@ function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game
             </li>
           ))}
         </ol>
-      )}
+      ) : null}
     </section>
   );
 }

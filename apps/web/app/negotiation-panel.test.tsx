@@ -340,7 +340,7 @@ describe("NegotiationPanel", () => {
 
     const inbox = await screen.findByRole("region", { name: "Negotiation inbox" });
     expect(inbox).toHaveTextContent("Negotiation inbox");
-    expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("No negotiation selected");
+    expect(screen.getByRole("region", { name: "Negotiation thread" })).not.toHaveTextContent("No negotiation selected");
     expect(screen.getByRole("region", { name: "Structured deal builder" })).toHaveTextContent("Structured deal builder");
     expect(screen.getByRole("region", { name: "Contract preview" })).toHaveTextContent("Complex instruments");
     expect(screen.getByRole("region", { name: "Contract preview" })).not.toHaveTextContent("No terms selected for preview.");
@@ -445,7 +445,7 @@ describe("NegotiationPanel", () => {
     const { fetchMock, state } = createNegotiationFetchMock();
     renderPanel(fetchMock);
 
-    expect(await screen.findByRole("region", { name: "Negotiation thread" })).toHaveTextContent(
+    expect(await screen.findByRole("region", { name: "Negotiation thread" })).not.toHaveTextContent(
       "No negotiation selected",
     );
 

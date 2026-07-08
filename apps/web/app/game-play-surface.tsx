@@ -155,6 +155,7 @@ const diceRevealDelayMs = 700;
 const tokenStepDelayMs = 440;
 const tokenSettleDelayMs = 480;
 const cardRevealDelayMs = 320;
+const jailBoardPosition = 10;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -450,7 +451,7 @@ function lastTurnResultFromEvents(events: AcceptedEvent[], game: GameMetadata): 
   if (!event) {
     return {
       badge: "Waiting",
-      detail: "No completed turn result yet.",
+      detail: "",
     };
   }
 
@@ -588,32 +589,17 @@ function latestRollFromEvents(
     if (!dice || dice.length === 0) {
       continue;
     }
-    const playerId = eventPayloadString(event, "player_id") ?? event.actor_player_id ?? null;
+    const playerId = eventPlayerId(event);
     const total = eventPayloadNumber(event, "total") ?? dice.reduce((sum, value) => sum + value, 0);
     const nextDice = events.find(
       (candidate) => candidate.sequence > event.sequence && candidate.event_type === "DICE_ROLLED",
     );
-    const moveEvent = [...events]
-      .filter((candidate) => {
-        if (candidate.sequence <= event.sequence) {
-          return false;
-        }
-        if (nextDice && candidate.sequence >= nextDice.sequence) {
-          return false;
-        }
-        if (candidate.event_type !== "TOKEN_MOVED" && candidate.event_type !== "PLAYER_POSITION_SET") {
-          return false;
-        }
-        const movePlayerId = eventPayloadString(candidate, "player_id") ?? candidate.actor_player_id;
-        return !playerId || !movePlayerId || movePlayerId === playerId;
-      })
-      .at(-1);
-    const landedPosition =
-      moveEvent?.event_type === "TOKEN_MOVED"
-        ? eventPayloadNumber(moveEvent, "to_position")
-        : eventPayloadNumber(moveEvent, "position");
-    const landedSpaceName =
-      landedPosition === null || landedPosition === undefined ? undefined : BOARD_SPACES[normalizedBoardPosition(landedPosition)]?.name;
+    const moveEvent = boardDestinationEvents(
+      events.filter((candidate) => candidate.sequence > event.sequence && (!nextDice || candidate.sequence < nextDice.sequence)),
+      playerId,
+    ).at(-1);
+    const landedPosition = boardDestinationEventPosition(moveEvent);
+    const landedSpaceName = landedPosition === null ? undefined : boardSpaceName(landedPosition);
 
     return {
       dice,
@@ -657,11 +643,87 @@ function boardSpaceName(position: number): string {
   return BOARD_SPACES[normalizedBoardPosition(position)]?.name ?? `position ${position}`;
 }
 
+function boardDestinationEventPosition(event: AcceptedEvent | undefined): number | null {
+  if (!event) {
+    return null;
+  }
+  if (event.event_type === "TOKEN_MOVED") {
+    return eventPayloadNumber(event, "to_position");
+  }
+  if (event.event_type === "PLAYER_POSITION_SET") {
+    return eventPayloadNumber(event, "position");
+  }
+  if (event.event_type === "PLAYER_JAIL_SET" && eventPayloadBoolean(event, "in_jail") === true) {
+    return jailBoardPosition;
+  }
+  return null;
+}
+
+function isBoardDestinationEvent(event: AcceptedEvent): boolean {
+  return boardDestinationEventPosition(event) !== null;
+}
+
+function eventPlayerId(event: AcceptedEvent | undefined): string | null {
+  return eventPayloadString(event, "player_id") ?? event?.actor_player_id ?? null;
+}
+
+function boardDestinationEvents(events: AcceptedEvent[], playerId: string | null | undefined): AcceptedEvent[] {
+  const destinations = events.filter((event) => {
+    if (!isBoardDestinationEvent(event)) {
+      return false;
+    }
+    const destinationPlayerId = eventPlayerId(event);
+    return !playerId || !destinationPlayerId || destinationPlayerId === playerId;
+  });
+
+  return destinations.filter((event, index) => {
+    if (event.event_type !== "PLAYER_POSITION_SET" || eventPayloadNumber(event, "position") !== jailBoardPosition) {
+      return true;
+    }
+    return !destinations
+      .slice(index + 1)
+      .some((candidate) => candidate.event_type === "PLAYER_JAIL_SET" && eventPayloadBoolean(candidate, "in_jail") === true);
+  });
+}
+
+function boardMotionPath(destinationEvents: AcceptedEvent[], fromPosition: number): number[] {
+  const path = [normalizedBoardPosition(fromPosition)];
+  let currentPosition = normalizedBoardPosition(fromPosition);
+
+  for (const event of destinationEvents) {
+    const nextPosition = boardDestinationEventPosition(event);
+    if (nextPosition === null) {
+      continue;
+    }
+    const normalizedNextPosition = normalizedBoardPosition(nextPosition);
+    if (event.event_type === "PLAYER_JAIL_SET") {
+      if (path[path.length - 1] !== normalizedNextPosition) {
+        path.push(normalizedNextPosition);
+      }
+      currentPosition = normalizedNextPosition;
+      continue;
+    }
+    const segment = boardPath(currentPosition, normalizedNextPosition);
+    path.push(...segment.slice(1));
+    currentPosition = normalizedNextPosition;
+  }
+
+  return path;
+}
+
 function playerNameForMotion(players: GameMetadata["players"], playerId: string): string | undefined {
   return players.find((player) => player.id === playerId)?.name;
 }
 
-function playerBoardPositionForMotion(players: GameMetadata["players"], playerId: string): number {
+function playerBoardPositionForMotion(
+  players: GameMetadata["players"],
+  snapshot: GameStateResponse | undefined,
+  playerId: string,
+): number {
+  const snapshotPosition = snapshotPlayerRecord(snapshot, playerId)?.position;
+  if (typeof snapshotPosition === "number" && Number.isInteger(snapshotPosition)) {
+    return snapshotPosition;
+  }
   return readInteger(players.find((player) => player.id === playerId)?.state.position, 0);
 }
 
@@ -669,21 +731,23 @@ function boardMotionFromAcceptedEvents(
   events: AcceptedEvent[],
   fallbackPlayerId: string,
   players: GameMetadata["players"],
+  snapshot?: GameStateResponse,
 ): BoardMotionState | null {
   const diceEvent = events.find((event) => event.event_type === "DICE_ROLLED");
-  const moveEvent = events.find((event) => event.event_type === "TOKEN_MOVED" || event.event_type === "PLAYER_POSITION_SET");
+  const dicePlayerId = eventPlayerId(diceEvent) ?? fallbackPlayerId;
+  const destinationEvents = boardDestinationEvents(events, dicePlayerId);
+  const moveEvent = destinationEvents.at(-1);
   const dice = diceFromEvent(diceEvent);
   const total = eventPayloadNumber(diceEvent, "total") ?? undefined;
 
   if (moveEvent) {
-    const playerId = eventPayloadString(moveEvent, "player_id") ?? moveEvent.actor_player_id ?? fallbackPlayerId;
-    const fromPosition = eventPayloadNumber(moveEvent, "from_position") ?? playerBoardPositionForMotion(players, playerId);
-    const toPosition =
-      moveEvent.event_type === "TOKEN_MOVED"
-        ? eventPayloadNumber(moveEvent, "to_position")
-        : eventPayloadNumber(moveEvent, "position");
+    const playerId = eventPlayerId(moveEvent) ?? dicePlayerId;
+    const firstDestination = destinationEvents[0] ?? moveEvent;
+    const fromPosition =
+      eventPayloadNumber(firstDestination, "from_position") ?? playerBoardPositionForMotion(players, snapshot, playerId);
+    const toPosition = boardDestinationEventPosition(moveEvent);
     if (fromPosition !== null && toPosition !== null) {
-      const path = boardPath(fromPosition, toPosition);
+      const path = boardMotionPath(destinationEvents, fromPosition);
       return {
         dice,
         displayPosition: path[0] ?? fromPosition,
@@ -1086,7 +1150,8 @@ function GameLogChatPanel({
         className="flex max-h-[min(58vh,38rem)] min-h-[22rem] flex-col gap-2 overflow-y-auto rounded-md border border-[#2f2418]/20 bg-white/65 p-3"
         data-game-log-scroll-region=""
       >
-        {entries.length > 0 ? (
+        {entries.length > 0
+          ? (
           entries.map((entry) => {
             const player = entry.playerId ? game.players.find((candidate) => candidate.id === entry.playerId) : null;
             const playerColor = player ? getPlayerColor(game, player.seat_order) : "#173c45";
@@ -1115,11 +1180,8 @@ function GameLogChatPanel({
               </li>
             );
           })
-        ) : (
-          <li className="rounded border border-dashed border-[#2f2418]/25 bg-[#fffbea] px-3 py-2 text-sm font-semibold text-[#6f604c]">
-            No matching log events yet.
-          </li>
-        )}
+        )
+          : null}
         <li ref={logEndRef} aria-hidden="true" className="h-px shrink-0" role="presentation" />
       </ol>
     </section>
@@ -1393,6 +1455,10 @@ function ActivePlayerPanel({
   player: GameMetadata["players"][number] | null;
   phase: string;
 }>) {
+  if (!player) {
+    return null;
+  }
+
   return (
     <section aria-label="Active player" className="rounded-md border border-neutral-200 bg-white p-4">
       <div className="flex items-start justify-between gap-3">
@@ -1405,8 +1471,7 @@ function ActivePlayerPanel({
         </span>
       </div>
 
-      {player ? (
-        <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+      <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
           <div>
             <dt className="text-xs font-medium uppercase text-neutral-500">Name</dt>
             <dd className="mt-1 font-medium text-neutral-950">{player.name}</dd>
@@ -1430,10 +1495,7 @@ function ActivePlayerPanel({
             <dt className="text-xs font-medium uppercase text-neutral-500">Space</dt>
             <dd className="mt-1 font-medium text-neutral-950">{playerPosition(player)}</dd>
           </div>
-        </dl>
-      ) : (
-        <div className="mt-4 text-sm text-neutral-600">No active player assigned.</div>
-      )}
+      </dl>
     </section>
   );
 }
@@ -1710,7 +1772,7 @@ function LastTurnResultPanel({ summary }: Readonly<{ summary: TurnResultSummary 
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Last turn result</h2>
-          <div className="mt-1 text-sm text-neutral-700">{summary.detail}</div>
+          {summary.detail ? <div className="mt-1 text-sm text-neutral-700">{summary.detail}</div> : null}
         </div>
         <span className="inline-flex w-fit shrink-0 items-center rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-700">
           {summary.badge}
@@ -2070,8 +2132,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
     onSuccess: (result, action) => {
       if (result.status === "accepted") {
-        setAcceptedEvents(result.accepted_events);
-        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, action.actor_id, game.players));
+        setAcceptedEvents((current) => mergeEvents(current, result.accepted_events));
+        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, action.actor_id, game.players, stateQuery.data));
         queryClient.setQueryData<GameStateResponse>(["game-state", gameId], {
           game_id: gameId,
           state: result.state,
@@ -2158,8 +2220,8 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     onSuccess: (result) => {
       setAiStepResult(result);
       if (result.accepted_events.length > 0) {
-        setAcceptedEvents(result.accepted_events);
-        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, result.player_id, game.players));
+        setAcceptedEvents((current) => mergeEvents(current, result.accepted_events));
+        playBoardMotion(boardMotionFromAcceptedEvents(result.accepted_events, result.player_id, game.players, stateQuery.data));
       }
       void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
     },
@@ -2248,6 +2310,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${autoAiStepMode}:${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
+  const boardMotionInProgress = boardMotion?.status === "rolling" || boardMotion?.status === "moving";
   const auctionActionsLoading =
     Boolean(activeAuction) && auctionLegalActionsQueries.some((query) => query.isLoading);
   const auctionControlsDisabled = controlsDisabled || auctionActionsLoading;
@@ -2311,7 +2374,15 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   }
 
   useEffect(() => {
-    if (gameAiBlocked || !autoStepAi || !activeAiPlayer || !autoStepKey || aiStep.isPending || submitAction.isPending) {
+    if (
+      gameAiBlocked ||
+      !autoStepAi ||
+      !activeAiPlayer ||
+      !autoStepKey ||
+      aiStep.isPending ||
+      submitAction.isPending ||
+      boardMotionInProgress
+    ) {
       return;
     }
     if (stateQuery.isFetching || gameQuery.isFetching || lastAutoStepKey === autoStepKey) {
@@ -2325,6 +2396,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     autoAiStepMode,
     autoStepAi,
     autoStepKey,
+    boardMotionInProgress,
     gameQuery.isFetching,
     gameAiBlocked,
     lastAutoStepKey,

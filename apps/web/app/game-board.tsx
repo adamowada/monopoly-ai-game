@@ -541,10 +541,14 @@ function DiceMotionStatus({ lastRoll, motion }: Readonly<{ lastRoll?: LastRollVi
     lastRoll && !motion && lastRoll.isDoubles && lastRoll.dice.length >= 2
       ? `Double ${lastRoll.dice[0]}s`
       : null;
-  const lastRollLabel =
+  const rollDestinationLabel =
     !motion && lastRoll
       ? `${lastRoll.playerName ? `${lastRoll.playerName} rolled` : "Last roll"}${lastRoll.landedSpaceName ? ` to ${lastRoll.landedSpaceName}` : ""}`
       : null;
+  const lastRollLabel =
+    doublesLabel && rollDestinationLabel
+      ? `${doublesLabel} - ${rollDestinationLabel}`
+      : (doublesLabel ?? rollDestinationLabel);
   const movementLabel =
     motion?.status === "rolling"
       ? "Dice in motion"
@@ -552,7 +556,7 @@ function DiceMotionStatus({ lastRoll, motion }: Readonly<{ lastRoll?: LastRollVi
         ? "Token moving"
         : motion?.status === "settled"
           ? "Dice resolved"
-          : doublesLabel ?? lastRollLabel ?? "Last roll";
+          : lastRollLabel ?? "Last roll";
 
   return (
     <div

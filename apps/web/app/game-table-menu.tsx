@@ -177,27 +177,21 @@ export function GameTableMenu({
             </div>
           ) : null}
 
-          {showLoadGames ? (
+          {showLoadGames && savedGames.length > 0 ? (
             <div aria-label="Saved games" className="mt-3 grid gap-2" role="group">
-              {savedGames.length > 0 ? (
-                savedGames.map((savedGame) => (
-                  <button
-                    key={savedGame.id}
-                    aria-label={`Open ${savedGame.label}`}
-                    className="rounded border border-[#b99768]/60 bg-white px-3 py-2 text-left text-xs text-[#6f604c] transition hover:bg-[#fffbea] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]"
-                    onClick={() => onLoadGame?.(savedGame.id)}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <span className="block font-black text-[#2f2418]">Open {savedGame.label}</span>
-                    <span className="mt-0.5 block uppercase">{formatSavedStatus(savedGame.status)}</span>
-                  </button>
-                ))
-              ) : (
-                <div className="rounded border border-[#b99768]/60 bg-white px-3 py-2 text-xs text-[#6f604c]">
-                  No saved games yet.
-                </div>
-              )}
+              {savedGames.map((savedGame) => (
+                <button
+                  key={savedGame.id}
+                  aria-label={`Open ${savedGame.label}`}
+                  className="rounded border border-[#b99768]/60 bg-white px-3 py-2 text-left text-xs text-[#6f604c] transition hover:bg-[#fffbea] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0f766e]"
+                  onClick={() => onLoadGame?.(savedGame.id)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <span className="block font-black text-[#2f2418]">Open {savedGame.label}</span>
+                  <span className="mt-0.5 block uppercase">{formatSavedStatus(savedGame.status)}</span>
+                </button>
+              ))}
             </div>
           ) : null}
 

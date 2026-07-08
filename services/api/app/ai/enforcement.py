@@ -310,6 +310,8 @@ async def _enforce_action_decision(
                         payload=_rejection_payload(decision, parsed_output=parsed_output),
                         validation_errors=[_game_ai_blocked_issue()],
                     )
+                action = _canonicalize_current_debt_action_payload(state, action)
+                action = _canonicalize_current_legal_action_metadata(state, action)
                 execution = execute_action(
                     state,
                     action,
@@ -1094,6 +1096,75 @@ def _game_action_from_ai_output(parsed_output: Mapping[str, Any]) -> GameAction:
         payload=action_payload["payload"],
         expected_state_hash=str(parsed_output["expected_state_hash"]),
         expected_event_sequence=int(parsed_output["expected_event_sequence"]),
+    )
+
+
+def _canonicalize_current_debt_action_payload(state: GameState, action: GameAction) -> GameAction:
+    if action.type != "SETTLE_DEBT" or not isinstance(action.payload, Mapping):
+        return action
+
+    payload = action.payload
+    allowed_fields = {"amount", "debt_id", "creditor_player_id"}
+    if "amount" not in payload or any(field not in allowed_fields for field in payload):
+        return action
+
+    if (
+        action.expected_event_sequence != state.event_sequence
+        or action.expected_state_hash != state.state_hash()
+    ):
+        return action
+
+    legal_matches = [
+        legal_action
+        for legal_action in list_legal_actions(state, action.actor_id)
+        if legal_action.type == "SETTLE_DEBT"
+        and legal_action.expected_event_sequence == action.expected_event_sequence
+        and legal_action.expected_state_hash == action.expected_state_hash
+    ]
+    if len(legal_matches) != 1:
+        return action
+
+    authoritative_payload = dict(legal_matches[0].payload)
+    authoritative_payload["amount"] = payload["amount"]
+    return GameAction(
+        actor_id=action.actor_id,
+        type=action.type,
+        payload=authoritative_payload,
+        expected_state_hash=action.expected_state_hash,
+        expected_event_sequence=action.expected_event_sequence,
+    )
+
+
+def _canonicalize_current_legal_action_metadata(state: GameState, action: GameAction) -> GameAction:
+    if action.expected_event_sequence != state.event_sequence:
+        return action
+
+    legal_matches = [
+        legal_action
+        for legal_action in list_legal_actions(state, action.actor_id)
+        if legal_action.type == action.type
+        and _json_equivalent(legal_action.payload, action.payload)
+        and legal_action.expected_event_sequence == state.event_sequence
+    ]
+    if len(legal_matches) != 1:
+        return action
+
+    legal_action = legal_matches[0]
+    return GameAction(
+        actor_id=action.actor_id,
+        type=action.type,
+        payload=legal_action.payload,
+        expected_state_hash=legal_action.expected_state_hash,
+        expected_event_sequence=legal_action.expected_event_sequence,
+    )
+
+
+def _json_equivalent(left: Mapping[str, object], right: Mapping[str, object]) -> bool:
+    return json.dumps(left, sort_keys=True, separators=(",", ":"), default=str) == json.dumps(
+        right,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
     )
 
 

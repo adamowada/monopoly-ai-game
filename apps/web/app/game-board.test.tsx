@@ -448,6 +448,27 @@ describe("ClassicGameBoard", () => {
     );
   });
 
+  it("keeps the landed space visible when the latest roll was doubles", () => {
+    render(
+      <ClassicGameBoard
+        game={gameFixture([10, 0])}
+        lastRoll={{
+          dice: [1, 1],
+          eventId: "double-roll",
+          isDoubles: true,
+          landedSpaceName: "Jail / Just Visiting",
+          playerName: "Ada",
+          total: 2,
+        }}
+      />,
+    );
+
+    const diceStatus = screen.getByRole("status", { name: "Dice roll animation" });
+    expect(diceStatus).toHaveTextContent("1 + 1 = 2");
+    expect(diceStatus).toHaveTextContent("Double 1s");
+    expect(diceStatus).toHaveTextContent("Ada rolled to Jail / Just Visiting");
+  });
+
   it("presents drawn cards with deck art and keyboard dismissal", () => {
     const onDismiss = vi.fn();
     render(

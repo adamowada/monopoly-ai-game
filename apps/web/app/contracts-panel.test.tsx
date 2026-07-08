@@ -412,7 +412,8 @@ describe("ContractsPanel", () => {
 
     fireEvent.click(within(log).getByLabelText("Rejections"));
     expect(log).not.toHaveTextContent("Rejected action");
-    expect(log).toHaveTextContent("No log entries match the selected filters.");
+    expect(log).not.toHaveTextContent("No log entries match the selected filters.");
+    expect(log.querySelector("ol")).not.toBeInTheDocument();
   });
 
   it("caps mounted log rows for long browser play sessions while preserving the full count", async () => {

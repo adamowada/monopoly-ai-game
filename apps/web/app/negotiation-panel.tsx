@@ -928,11 +928,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
         <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
           <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <h3 className="text-sm font-semibold text-neutral-950">Threads</h3>
-            {negotiationsQuery.isLoading ? (
-              <div className="mt-2 text-sm text-neutral-600">Loading negotiations.</div>
-            ) : negotiations.length === 0 ? (
-              <div className="mt-2 text-sm text-neutral-600">No negotiations yet.</div>
-            ) : (
+            {negotiations.length > 0 ? (
               <div className="mt-3 grid gap-2">
                 {negotiations.map((negotiation) => (
                   <button
@@ -958,7 +954,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
 
           <section aria-label="Negotiation thread" className="rounded-md border border-neutral-200 bg-white p-3">
@@ -970,9 +966,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                     {selectedNegotiation.topic} - {statusLabel(selectedNegotiation.status)} - Round{" "}
                     {selectedNegotiation.round_number}
                   </div>
-                ) : (
-                  <div className="mt-1 text-xs text-neutral-600">No negotiation selected.</div>
-                )}
+                ) : null}
               </div>
               {selectedNegotiation ? (
                 <span
@@ -1082,11 +1076,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
 
                 <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                   <h4 className="text-sm font-semibold text-neutral-950">Messages</h4>
-                  {messagesQuery.isLoading ? (
-                    <div className="mt-2 text-sm text-neutral-600">Loading messages.</div>
-                  ) : (messagesQuery.data ?? []).length === 0 ? (
-                    <div className="mt-2 text-sm text-neutral-600">No messages yet.</div>
-                  ) : (
+                  {(messagesQuery.data ?? []).length > 0 ? (
                     <ol className="mt-2 divide-y divide-neutral-200 text-sm">
                       {(messagesQuery.data ?? []).map((message) => (
                         <li key={message.id} className="py-2">
@@ -1095,7 +1085,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         </li>
                       ))}
                     </ol>
-                  )}
+                  ) : null}
                 </div>
 
                 <form
@@ -1422,10 +1412,6 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
             <div>
               <dt className="text-xs font-medium uppercase text-neutral-500">Complex instruments</dt>
               <dd className="mt-1 text-neutral-950">{previewTerms.length} terms</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-medium uppercase text-neutral-500">Obligations</dt>
-              <dd className="mt-1 text-neutral-950">Created from accepted structured terms.</dd>
             </div>
           </dl>
           {previewTerms.length > 0 ? (

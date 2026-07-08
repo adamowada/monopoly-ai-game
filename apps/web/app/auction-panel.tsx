@@ -156,11 +156,7 @@ function latestAuctionResultEvent(events: AcceptedEvent[]): AcceptedEvent | null
   return [...resultEvents].sort((left, right) => right.sequence - left.sequence)[0] ?? null;
 }
 
-function auctionResultText(game: GameMetadata, event: AcceptedEvent | null): string {
-  if (!event) {
-    return "No auction result yet.";
-  }
-
+function auctionResultText(game: GameMetadata, event: AcceptedEvent): string {
   if (event.event_type === "AUCTION_RESULT") {
     const propertyId = readString(event.payload.property_id);
     const winnerId = readString(event.payload.winner_id);
@@ -170,7 +166,7 @@ function auctionResultText(game: GameMetadata, event: AcceptedEvent | null): str
     return `Winner ${winner}. ${winner} won ${propertyName(propertyId)} for ${bidText}.`;
   }
 
-  return "No auction result yet.";
+  return "";
 }
 
 function playerAuctionStatus(playerId: string, auction: AuctionStateView): string {
@@ -438,9 +434,7 @@ export function AuctionPanel({
                           />
                         ) : null}
                       </div>
-                    ) : (
-                      <span className="text-xs font-medium text-neutral-500">No legal auction action</span>
-                    )}
+                    ) : null}
                   </li>
                 );
               })}
@@ -448,13 +442,15 @@ export function AuctionPanel({
           </section>
         ) : null}
 
-        <section aria-label="Auction result" className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
-          <div className="flex items-center gap-2">
-            <Trophy aria-hidden="true" className="size-4 text-teal-700" />
-            <h3 className="text-sm font-semibold text-neutral-950">Auction result</h3>
-          </div>
-          <div className="mt-2 text-sm text-neutral-700">{auctionResultText(game, resultEvent)}</div>
-        </section>
+        {resultEvent ? (
+          <section aria-label="Auction result" className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <div className="flex items-center gap-2">
+              <Trophy aria-hidden="true" className="size-4 text-teal-700" />
+              <h3 className="text-sm font-semibold text-neutral-950">Auction result</h3>
+            </div>
+            <div className="mt-2 text-sm text-neutral-700">{auctionResultText(game, resultEvent)}</div>
+          </section>
+        ) : null}
       </div>
     </section>
   );

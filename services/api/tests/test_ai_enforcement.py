@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -53,7 +53,9 @@ from app.db.metadata import (
     players,
     rejected_actions,
 )
+from app.db.persistence import EventPersistence
 from app.rules.actions import GameAction, execute_action, list_legal_actions
+from app.rules.phases import TurnPhase
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
@@ -240,6 +242,99 @@ async def test_legal_ai_action_commits_exactly_like_human_action_and_attempts_on
 
 
 @pytest.mark.asyncio
+async def test_ai_settle_debt_canonicalizes_current_debt_identity_fields(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory, state_transform=_active_debt_state)
+    legal_settle = next(
+        action
+        for action in list_legal_actions(fixture.state, str(AI_PLAYER_ID))
+        if action.type == "SETTLE_DEBT"
+    )
+    copied_creditor_id = str(HUMAN_PLAYER_ID).replace("7503", "75-03")
+    copied_payload = {
+        **dict(legal_settle.payload),
+        "creditor_player_id": copied_creditor_id,
+        "debt_id": str(legal_settle.payload["debt_id"]).replace(
+            str(HUMAN_PLAYER_ID),
+            copied_creditor_id,
+        ),
+    }
+    ai_output = valid_action_output(fixture.state)
+    ai_output["action"] = {"type": "SETTLE_DEBT", "payload": copied_payload}
+    runner = FakeCodexRunner(final_output=ai_output)
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="action_decision",
+                mandatory=True,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        replayed = await EventPersistence(session_factory).replay_from_event_zero(GAME_ID)
+        decisions = await fetch_rows(session_factory, ai_decisions)
+
+        assert result.status == "accepted"
+        assert result.rejected_action_id is None
+        assert replayed.active_payment is None
+        assert replayed.players[0].cash == 1480
+        assert replayed.players[1].cash == 1520
+        assert decisions[0]["status"] == "accepted"
+        assert await table_count(session_factory, rejected_actions) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
+async def test_ai_action_canonicalizes_exact_current_legal_action_state_metadata(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory)
+    ai_output = valid_action_output(fixture.state)
+    ai_output["expected_state_hash"] = fixture.state.state_hash().replace("a", "b", 1)
+    assert ai_output["expected_state_hash"] != fixture.state.state_hash()
+    runner = FakeCodexRunner(final_output=ai_output)
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="action_decision",
+                mandatory=True,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        decisions = await fetch_rows(session_factory, ai_decisions)
+
+        assert result.status == "accepted"
+        assert result.rejected_action_id is None
+        assert decisions[0]["status"] == "accepted"
+        assert decisions[0]["parsed_output"]["expected_state_hash"] == ai_output["expected_state_hash"]
+        assert await table_count(session_factory, game_events) > 0
+        assert await table_count(session_factory, rejected_actions) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_request_once_forwards_codex_home_to_codex_decision_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -417,6 +512,7 @@ async def test_ai_blocked_after_codex_returns_rejects_valid_action_without_event
             lambda state: {
                 **valid_action_output(state),
                 "expected_state_hash": "not-the-current-state",
+                "expected_event_sequence": state.event_sequence + 1,
             },
             "stale_action",
         ),
@@ -462,7 +558,10 @@ async def test_illegal_stale_and_mistimed_ai_actions_are_rejected_like_human_act
         assert result.accepted_event_id is None
         assert result.rejected_action_id == rejections[0]["id"]
         assert rejections[0]["reason_code"] == expected_reason
-        assert rejections[0]["legal_action_context"]["legal_actions"]
+        if label == "mistimed":
+            assert rejections[0]["legal_action_context"]["legal_actions"] == []
+        else:
+            assert rejections[0]["legal_action_context"]["legal_actions"]
         assert rejections[0]["payload"]["no_substitute_move"] is True
         assert rejections[0]["payload"]["substitute_move"] is None
         assert decisions[0]["rejected_action_id"] == rejections[0]["id"]
@@ -639,6 +738,7 @@ async def create_ai_game(
     session_factory: async_sessionmaker,
     *,
     ai_current: bool = True,
+    state_transform: Callable[[GameState], GameState] | None = None,
 ) -> EnforcementFixture:
     player_setup = (
         (
@@ -656,6 +756,8 @@ async def create_ai_game(
         game_id=str(GAME_ID),
         players=player_setup,
     )
+    if state_transform is not None:
+        state = state_transform(state)
     async with session_factory() as session:
         async with session.begin():
             await session.execute(games.delete().where(games.c.id == GAME_ID))
@@ -697,6 +799,26 @@ async def create_ai_game(
         human_player_id=HUMAN_PLAYER_ID,
         ai_profile_id=AI_PROFILE_ID,
         state=state,
+    )
+
+
+def _active_debt_state(state: GameState) -> GameState:
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(HUMAN_PLAYER_ID),
+                "amount_owed": 20,
+                "amount_paid": 0,
+                "reason": "rent:property_illinois_avenue",
+                "negotiation_allowed": True,
+            },
+        }
     )
 
 

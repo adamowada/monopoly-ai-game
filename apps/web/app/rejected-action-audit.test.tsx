@@ -52,10 +52,11 @@ describe("RejectedActionAuditView", () => {
     expect(within(row).getByText(/player is not on property_boardwalk/)).toBeInTheDocument();
   });
 
-  it("renders an empty state without interactive affordance when no rejected actions exist", () => {
+  it("renders only the count when no rejected actions exist", () => {
     render(<RejectedActionAuditView records={[]} />);
 
-    expect(screen.getByText("No rejected actions recorded.")).toBeInTheDocument();
+    expect(screen.queryByText("No rejected actions recorded.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });

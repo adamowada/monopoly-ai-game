@@ -65,11 +65,7 @@ export function RejectedActionAuditView({ records }: RejectedActionAuditViewProp
         </div>
       </div>
 
-      {records.length === 0 ? (
-        <div className="mt-5 border-y border-neutral-200 bg-white px-4 py-6 text-sm text-neutral-600 sm:px-6">
-          No rejected actions recorded.
-        </div>
-      ) : (
+      {records.length > 0 ? (
         <div className="mt-5 overflow-hidden border-y border-neutral-200 bg-white">
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
@@ -125,7 +121,7 @@ export function RejectedActionAuditView({ records }: RejectedActionAuditViewProp
             </table>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

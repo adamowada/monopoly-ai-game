@@ -177,7 +177,7 @@ describe("AuctionPanel", () => {
     expect(auction).toHaveTextContent("Mediterranean Avenue");
     expect(auction).toHaveTextContent("Current high bid");
     expect(auction).toHaveTextContent("Remaining bidders");
-    expect(auction).toHaveTextContent("Auction result");
+    expect(auction).not.toHaveTextContent("Auction result");
 
     fireEvent.click(within(auction).getByRole("button", { name: "Start auction" }));
 
@@ -273,7 +273,7 @@ describe("AuctionPanel", () => {
     );
   });
 
-  it("does not report a normal property purchase as an auction result", () => {
+  it("hides auction result until an auction result event exists", () => {
     renderPanel({
       events: [
         {
@@ -290,7 +290,7 @@ describe("AuctionPanel", () => {
     });
 
     const auction = screen.getByRole("region", { name: "Auction" });
-    expect(within(auction).getByRole("region", { name: "Auction result" })).toHaveTextContent("No auction result yet.");
+    expect(within(auction).queryByRole("region", { name: "Auction result" })).not.toBeInTheDocument();
     expect(auction).not.toHaveTextContent("Winner Ada");
   });
 

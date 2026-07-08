@@ -263,28 +263,6 @@ function monopolyGroupStatus(
   };
 }
 
-function hotelConversionText(
-  property: StaticDataProperty,
-  ownership: PropertyOwnershipView,
-  buyAction: LegalAction | null,
-  sellAction: LegalAction | null,
-): string {
-  if (property.kind !== "street") {
-    return "Hotel conversion: Not available for railroads or utilities.";
-  }
-  if (ownership.hotel || ownership.hotels > 0) {
-    return sellAction
-      ? "Hotel conversion: hotel-to-houses ready. Sell house converts one hotel to four houses."
-      : "Hotel conversion: hotel-to-houses unavailable because SELL_HOUSE was not returned.";
-  }
-  if (ownership.houses === 4) {
-    return buyAction
-      ? "Hotel conversion: four-house-to-hotel ready. Build house converts four houses to one hotel."
-      : "Hotel conversion: four-house-to-hotel unavailable because BUY_HOUSE was not returned.";
-  }
-  return "Hotel conversion: Not at conversion threshold.";
-}
-
 function ManagementActionButton({
   action,
   label,
@@ -452,10 +430,6 @@ function PropertyDetailCard({
     >
       <span className="sr-only">Property detail</span>
       <PropertyDeedCard game={game} ownership={ownership} property={property} />
-
-      <div className="mt-3 grid gap-1.5 text-xs text-neutral-700">
-        <div>{hotelConversionText(property, ownership, buyAction, sellAction)}</div>
-      </div>
 
       {hasAnyAction ? (
         <div className="mt-3 flex flex-wrap gap-2">

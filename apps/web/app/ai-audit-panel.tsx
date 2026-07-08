@@ -137,10 +137,6 @@ function legalActionDescription(action: AiDecision["legal_actions"][number]): st
   return action.description ?? null;
 }
 
-function EmptyState({ text }: Readonly<{ text: string }>) {
-  return <div className="rounded-md border border-dashed border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-600">{text}</div>;
-}
-
 function ErrorNote({ text }: Readonly<{ text: string }>) {
   return (
     <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">
@@ -208,12 +204,10 @@ function StatusBadge({ status }: Readonly<{ status: AiDecision["status"] }>) {
 function AiNotebookStream({
   dialogue,
   game,
-  isLoading,
   memory,
 }: Readonly<{
   dialogue: AiSelfDialogueRecord[];
   game: GameMetadata;
-  isLoading: boolean;
   memory: AiMemoryEntry[];
 }>) {
   const items = useMemo<AiNotebookFeedItem[]>(
@@ -251,8 +245,6 @@ function AiNotebookStream({
       </div>
 
       <ol className="mt-3 flex max-h-[min(54vh,36rem)] min-h-64 flex-col gap-2 overflow-y-auto rounded-md border border-neutral-200 bg-neutral-50 p-3">
-        {isLoading ? <EmptyState text="Loading notebook stream." /> : null}
-        {!isLoading && items.length === 0 ? <EmptyState text="No AI thoughts or memories." /> : null}
         {items.map((item) => (
           <li
             key={item.id}
@@ -292,12 +284,10 @@ function AiNotebookStream({
 
 function ProfilesView({
   game,
-  isLoading,
   profiles,
 }: Readonly<{
   game: GameMetadata;
   profiles: AiProfile[];
-  isLoading: boolean;
 }>) {
   return (
     <section className="rounded-md border border-neutral-200 bg-white p-3" aria-labelledby="ai-profiles-title">
@@ -311,8 +301,6 @@ function ProfilesView({
       </div>
 
       <div className="mt-3 grid max-h-[min(58vh,38rem)] gap-3 overflow-y-auto pr-1">
-        {isLoading ? <EmptyState text="Loading AI profiles." /> : null}
-        {!isLoading && profiles.length === 0 ? <EmptyState text="No AI profiles." /> : null}
         {profiles.map((profile) => (
           <article key={profile.ai_profile_id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -758,7 +746,6 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
           <AiNotebookStream
             dialogue={selfDialogue}
             game={game}
-            isLoading={selfDialogueQuery.isLoading || memoryQuery.isLoading}
             memory={memory}
           />
         </div>
@@ -766,7 +753,7 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
 
       {activeView === "profiles" ? (
         <div aria-labelledby="ai-notebook-profiles-tab" id="ai-notebook-profiles-panel" role="tabpanel">
-          <ProfilesView game={game} isLoading={profilesQuery.isLoading} profiles={profiles} />
+          <ProfilesView game={game} profiles={profiles} />
         </div>
       ) : null}
 
@@ -785,10 +772,6 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
           </div>
 
           <div className="mt-3 grid max-h-[min(62vh,42rem)] gap-3 overflow-y-auto pr-1">
-            {decisionsQuery.isLoading ? <EmptyState text="Loading decision history." /> : null}
-            {!decisionsQuery.isLoading && decisions.length === 0 ? (
-              <EmptyState text="No AI decisions." />
-            ) : null}
             {decisions.map((decision) => (
               <DecisionCard
                 key={decision.ai_decision_id}
@@ -821,8 +804,6 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
             </h3>
             <Database aria-hidden="true" className="size-4 text-violet-700" />
           </div>
-          {memoryQuery.isLoading ? <EmptyState text="Loading memory entries." /> : null}
-          {!memoryQuery.isLoading && memory.length === 0 ? <EmptyState text="No memory records." /> : null}
           {memory.length > 0 ? (
             <ul className="mt-3 grid max-h-[min(62vh,42rem)] gap-2 overflow-y-auto pr-1 text-sm text-neutral-700">
               {memory.map((entry) => (
@@ -863,10 +844,6 @@ export function AiAuditPanel({ apiBaseUrl, game, gameId }: AiAuditPanelProps) {
             </h3>
             <Search aria-hidden="true" className="size-4 text-violet-700" />
           </div>
-          {retrievalQuery.isLoading ? <EmptyState text="Loading retrieved context." /> : null}
-          {!retrievalQuery.isLoading && retrieval.length === 0 ? (
-            <EmptyState text="No retrieved context." />
-          ) : null}
           {retrieval.length > 0 ? (
             <ul className="mt-3 grid max-h-[min(62vh,42rem)] gap-2 overflow-y-auto pr-1 text-sm text-neutral-700">
               {retrieval.map((record) => (

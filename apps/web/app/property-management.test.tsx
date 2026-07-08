@@ -445,7 +445,7 @@ describe("PropertyManagementPanel", () => {
     expect(within(boardwalk).queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("shows Hotel conversion text for four-house and hotel cases using BUY_HOUSE and SELL_HOUSE controls", () => {
+  it("uses BUY_HOUSE and SELL_HOUSE controls without hotel-conversion explainer copy", () => {
     renderPanel({
       snapshot: stateFixture({
         ownership: ownershipFixture([
@@ -460,13 +460,13 @@ describe("PropertyManagementPanel", () => {
     });
 
     const mediterranean = screen.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
-    expect(mediterranean).toHaveTextContent("Hotel conversion");
-    expect(mediterranean).toHaveTextContent("Build house converts four houses to one hotel");
+    expect(mediterranean).not.toHaveTextContent("Hotel conversion");
+    expect(mediterranean).not.toHaveTextContent("Build house converts four houses to one hotel");
     expect(within(mediterranean).getByRole("button", { name: "Build house" })).toBeEnabled();
 
     const boardwalk = screen.getByRole("region", { name: "Property detail: Boardwalk" });
-    expect(boardwalk).toHaveTextContent("Hotel conversion");
-    expect(boardwalk).toHaveTextContent("Sell house converts one hotel to four houses");
+    expect(boardwalk).not.toHaveTextContent("Hotel conversion");
+    expect(boardwalk).not.toHaveTextContent("Sell house converts one hotel to four houses");
     expect(within(boardwalk).getByRole("button", { name: "Sell house" })).toBeEnabled();
   });
 });
@@ -492,8 +492,8 @@ describe("GamePlaySurface property management integration", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Contracts" }));
     const log = screen.getByRole("region", { name: "Game log" });
-    expect(within(log).getByText(/BANK_INVENTORY_SET/)).toBeInTheDocument();
-    expect(within(log).getByText(/PROPERTY_IMPROVEMENTS_SET/)).toBeInTheDocument();
+    expect(within(log).getByText("Baltic Avenue now has 2 houses.")).toBeInTheDocument();
+    expect(within(log).queryByText(/BANK_INVENTORY_SET/)).not.toBeInTheDocument();
   });
 
   it("displays Rejected action and leaves visible mortgage, houses, hotels, and bank_inventory state intact", async () => {
