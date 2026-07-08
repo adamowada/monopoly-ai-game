@@ -3193,6 +3193,114 @@ describe("GamePlaySurface turn controls", () => {
     });
   });
 
+  it("auto-step executes an accepted all-AI negotiation before ordinary actions", async () => {
+    const game = metadataFallbackAiGame();
+    const state = aiStateFixture();
+    const negotiation = {
+      id: "neg-auto-accepted",
+      game_id: gameId,
+      opened_by_player_id: adaId,
+      participant_player_ids: [adaId, graceId],
+      topic: "Orange completion",
+      context: "Ada AI should receive Tennessee Avenue.",
+      status: "accepted",
+      round_number: 1,
+      pending_deal_id: null,
+      current_deal_id: "deal-auto-accepted",
+      acceptances: { "deal-auto-accepted": [adaId, graceId] },
+      invalidated_acceptances: {},
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+    const acceptedDeal = {
+      id: "deal-auto-accepted",
+      game_id: gameId,
+      negotiation_id: "neg-auto-accepted",
+      proposer_player_id: adaId,
+      participant_player_ids: [adaId, graceId],
+      parent_deal_id: null,
+      version: 1,
+      status: "accepted",
+      terms: [
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: graceId,
+          to_player_id: adaId,
+          property_id: "property_tennessee_avenue",
+        },
+      ],
+      validation_errors: [],
+      accepted_at: createdAt,
+      rejected_at: null,
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+    const executedNegotiation = {
+      ...negotiation,
+      status: "executed",
+      updated_at: "2026-07-04T00:02:00.000Z",
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(game);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(state);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [aiLegalAction("ROLL_DICE", {}, state.state_hash, state.event_sequence)],
+          state_hash: state.state_hash,
+          event_sequence: state.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/negotiations`) {
+        return Response.json({ negotiations: [negotiation] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/deals`) {
+        return Response.json({ deals: [acceptedDeal] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/negotiations/neg-auto-accepted/execute` && init?.method === "POST") {
+        return Response.json(executedNegotiation);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock, game);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Auto-step AI" }));
+
+    await waitFor(() => {
+      const executeCalls = fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url) === `${apiBaseUrl}/games/${gameId}/negotiations/neg-auto-accepted/execute` &&
+          init?.method === "POST",
+      );
+      expect(executeCalls).toHaveLength(1);
+    });
+    const executeCallIndex = fetchMock.mock.calls.findIndex(
+      ([url, init]) =>
+        String(url) === `${apiBaseUrl}/games/${gameId}/negotiations/neg-auto-accepted/execute` &&
+        init?.method === "POST",
+    );
+    const firstAiStepIndex = fetchMock.mock.calls.findIndex(
+      ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+    );
+    expect(firstAiStepIndex === -1 || executeCallIndex < firstAiStepIndex).toBe(true);
+  });
+
   it("does not auto-step the AI again while dice and token motion are still running", async () => {
     let aiStepCount = 0;
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {

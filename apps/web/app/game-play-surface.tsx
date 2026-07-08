@@ -46,7 +46,7 @@ import {
   type LegalAction,
 } from "../lib/api/gameplay";
 import { endGame, readGame, type GameMetadata } from "../lib/api/games";
-import { readDeals, readNegotiations, type Deal, type Negotiation } from "../lib/api/negotiations";
+import { executeNegotiation, readDeals, readNegotiations, type Deal, type Negotiation } from "../lib/api/negotiations";
 import { readRejectedActions, type RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
 import { AiAuditPanel } from "./ai-audit-panel";
@@ -1065,6 +1065,18 @@ function autoNegotiationLifecycleRequestFor(
     negotiationId: activeNegotiation.id,
     selectedDealId: currentDeal.id,
   };
+}
+
+function autoExecutableNegotiationFor(game: GameMetadata, negotiations: Negotiation[], deals: Deal[]): Negotiation | null {
+  return (
+    negotiations.find((negotiation) => {
+      if (negotiation.status !== "accepted" || !isAllAiNegotiation(game, negotiation) || !negotiation.current_deal_id) {
+        return false;
+      }
+      const currentDeal = deals.find((deal) => deal.id === negotiation.current_deal_id);
+      return currentDeal?.status === "accepted";
+    }) ?? null
+  );
 }
 
 function groupedPlayerProperties(properties: CurrentPlayerProperty[]): Array<{
@@ -2173,6 +2185,7 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [revealedCardEventId, setRevealedCardEventId] = useState<string | null>(null);
   const [lastAutoStepKey, setLastAutoStepKey] = useState<string | null>(null);
   const [lastAutoNegotiationStepKey, setLastAutoNegotiationStepKey] = useState<string | null>(null);
+  const [lastAutoNegotiationExecuteKey, setLastAutoNegotiationExecuteKey] = useState<string | null>(null);
   const [savedGames, setSavedGames] = useState<SavedGameRecord[]>(() => readSavedGames());
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [showLoadGames, setShowLoadGames] = useState(false);
@@ -2542,6 +2555,24 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     },
   });
 
+  const executeAiNegotiation = useMutation({
+    mutationFn: (negotiationId: string) => executeNegotiation({ gameId, negotiationId, baseUrl }),
+    onMutate: () => {
+      setSessionMessage(null);
+    },
+    onSuccess: (result) => {
+      if (result.status === "rejected") {
+        setSessionMessage(result.validation_errors[0]?.message ?? "Accepted AI negotiation could not execute.");
+        return;
+      }
+      setSessionMessage("AI deal executed");
+      void Promise.all([invalidateGameplayData(), invalidateAiAuditData()]);
+    },
+    onError: (error) => {
+      setSessionMessage(error instanceof Error ? error.message : "Accepted AI negotiation could not execute.");
+    },
+  });
+
   const legalActions = legalActionsQuery.data?.legal_actions ?? [];
   const auctionLegalActions = useMemo(
     () =>
@@ -2610,7 +2641,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       : null;
   const legalActionsLoading = stateQuery.isLoading || legalActionsQuery.isLoading;
   const controlsDisabled =
-    gameEnded || gameAiBlocked || legalActionsLoading || submitAction.isPending || aiStep.isPending || aiNegotiationStep.isPending;
+    gameEnded ||
+    gameAiBlocked ||
+    legalActionsLoading ||
+    submitAction.isPending ||
+    aiStep.isPending ||
+    aiNegotiationStep.isPending ||
+    executeAiNegotiation.isPending;
   const turnAiPlayer = stateActivePlayer?.controller_type === "ai" ? stateActivePlayer : null;
   const auctionAiStepPlayer =
     game.players.find(
@@ -2629,6 +2666,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     () => autoNegotiationLifecycleRequestFor(game, negotiationsQuery.data ?? [], dealsQuery.data ?? []),
     [dealsQuery.data, game, negotiationsQuery.data],
   );
+  const autoExecutableNegotiation = useMemo(
+    () => autoExecutableNegotiationFor(game, negotiationsQuery.data ?? [], dealsQuery.data ?? []),
+    [dealsQuery.data, game, negotiationsQuery.data],
+  );
+  const autoNegotiationExecuteKey = autoExecutableNegotiation
+    ? `execute_negotiation:${autoExecutableNegotiation.id}:${autoExecutableNegotiation.current_deal_id ?? "none"}:${stateHash}:${eventSequence}`
+    : null;
   const autoOpenNegotiationRequest: AiNegotiationStepRequest | null =
     activeAiPlayer && autoTradeOpportunity
       ? {
@@ -2653,7 +2697,13 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
       : null;
   const directActionControlsDisabled = controlsDisabled || Boolean(turnAiPlayer);
   const aiStepStateBlocked =
-    gameEnded || gameAiBlocked || !stateQuery.data || stateQuery.isFetching || aiStep.isPending || aiNegotiationStep.isPending;
+    gameEnded ||
+    gameAiBlocked ||
+    !stateQuery.data ||
+    stateQuery.isFetching ||
+    aiStep.isPending ||
+    aiNegotiationStep.isPending ||
+    executeAiNegotiation.isPending;
   const aiStepBlocked = !activeAiPlayer || aiStepStateBlocked;
   const manualAiStepDisabled = controlsDisabled || aiStepBlocked;
   const autoStepKey = activeAiPlayer && stateQuery.data ? `${autoAiStepMode}:${activeAiPlayer.id}:${stateHash}:${eventSequence}` : null;
@@ -2731,15 +2781,25 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     if (
       gameAiBlocked ||
       !autoStepAi ||
-      (!activeAiPlayer && !autoNegotiationRequest) ||
+      (!activeAiPlayer && !autoNegotiationRequest && !autoExecutableNegotiation) ||
       aiStep.isPending ||
       aiNegotiationStep.isPending ||
+      executeAiNegotiation.isPending ||
       submitAction.isPending ||
       boardMotionInProgress
     ) {
       return;
     }
     if (stateQuery.isFetching || gameQuery.isFetching || negotiationsQuery.isLoading || dealsQuery.isLoading) {
+      return;
+    }
+    if (
+      autoExecutableNegotiation &&
+      autoNegotiationExecuteKey &&
+      lastAutoNegotiationExecuteKey !== autoNegotiationExecuteKey
+    ) {
+      setLastAutoNegotiationExecuteKey(autoNegotiationExecuteKey);
+      executeAiNegotiation.mutate(autoExecutableNegotiation.id);
       return;
     }
     if (
@@ -2764,14 +2824,19 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     aiStep.isPending,
     aiNegotiationStep.isPending,
     autoAiStepMode,
+    autoExecutableNegotiation,
+    autoNegotiationExecuteKey,
     autoNegotiationRequest,
     autoNegotiationStepKey,
     autoStepAi,
     autoStepKey,
     boardMotionInProgress,
     dealsQuery.isLoading,
+    executeAiNegotiation,
+    executeAiNegotiation.isPending,
     gameQuery.isFetching,
     gameAiBlocked,
+    lastAutoNegotiationExecuteKey,
     lastAutoNegotiationStepKey,
     lastAutoStepKey,
     negotiationsQuery.isLoading,
