@@ -690,17 +690,10 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
         }
     if case.decision_type != "deal_proposal":
         return {}
-    deal_terms_template = _deal_terms_template()
     return {
         "mode": "live_strategy_smoke",
         "negotiation_id": str(NEGOTIATION_ID),
         "requested_decision": "Propose a structured deal to acquire Tennessee Avenue.",
-        "deal_terms_template": deal_terms_template,
-        "deal_terms_json_string_example": json.dumps(
-            deal_terms_template,
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
     }
 
 
@@ -1202,35 +1195,12 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 "For this deal_proposal, propose structured_deal terms containing "
                 "immediate_cash_transfer from Grace to Ada and immediate_property_transfer "
                 "of property_tennessee_avenue from Ada to Grace. Offer cash between $180 and $270. "
-                "Set deal.terms to a valid JSON string that decodes to the provided "
-                "deal_terms_template; do not prefix it with structured_deal: or any other label."
+                "Use deal_proposal_guidance.deal_payload_template as the base proposal. "
+                "Set deal.terms to a valid JSON string; do not prefix it with structured_deal: "
+                "or any other label."
             ),
         },
     )
-
-
-def _deal_terms_template() -> dict[str, Any]:
-    return {
-        "kind": "structured_deal",
-        "deal_schema_version": 1,
-        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
-        "terms": [
-            {
-                "kind": "immediate_cash_transfer",
-                "instrument_id": "live-strategy-cash-for-tennessee",
-                "from_player_id": str(AI_PLAYER_ID),
-                "to_player_id": str(OTHER_PLAYER_ID),
-                "amount": 240,
-            },
-            {
-                "kind": "immediate_property_transfer",
-                "instrument_id": "live-strategy-tennessee-transfer",
-                "from_player_id": str(OTHER_PLAYER_ID),
-                "to_player_id": str(AI_PLAYER_ID),
-                "property_id": "property_tennessee_avenue",
-            },
-        ],
-    }
 
 
 BAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b302")

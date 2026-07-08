@@ -907,6 +907,57 @@ def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> Non
     assert "terms array" in instruction_text
 
 
+def test_context_pack_builds_deal_proposal_template_from_targeted_negotiation() -> None:
+    state = _state_with_orange_near_monopoly()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="deal_proposal",
+        negotiations=[_active_tennessee_negotiation()],
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == ["deal_proposal"]
+    assert guidance["guidance"] == [
+        "Use the highest-priority deal_payload_template for deal_proposal unless visible terms require a safer counter."
+    ]
+    template = guidance["proposal_templates"][0]
+    deal_payload = template["deal_payload_template"]
+    terms = deal_payload["terms"]
+
+    assert template["negotiation_id"] == str(NEGOTIATION_ID)
+    assert template["target_property_id"] == "property_tennessee_avenue"
+    assert template["target_owner_id"] == str(OTHER_PLAYER_ID)
+    assert template["recommended_cash_offer"] == 225
+    assert deal_payload == {
+        "recipient_player_ids": [str(OTHER_PLAYER_ID)],
+        "message": "I can offer $225 for Tennessee Avenue to complete Orange.",
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 225,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+    }
+    assert json.loads(template["terms_json_string_example"]) == terms
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "deal_proposal_guidance" in instruction_text
+    assert "deal_payload_template" in instruction_text
+
+
 def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt() -> None:
     state = _state_with_owned_railroad(cash=900)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -1962,6 +2013,36 @@ def _sell_tennessee_from_monopoly_deal(*, amount: int) -> dict[str, Any]:
         "created_at": "2026-07-08T00:00:03Z",
         "updated_at": "2026-07-08T00:00:03Z",
         "accepted_at": None,
+    }
+
+
+def _active_tennessee_negotiation() -> dict[str, Any]:
+    return {
+        "id": str(NEGOTIATION_ID),
+        "game_id": str(GAME_ID),
+        "opened_by_player_id": str(AI_PLAYER_ID),
+        "status": "active",
+        "phase": "START_TURN",
+        "round_number": 1,
+        "context": {
+            "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "current_deal_id": None,
+            "context": {
+                "topic": "Trade for Tennessee Avenue to complete Orange",
+                "target_property_id": "property_tennessee_avenue",
+                "target_property_name": "Tennessee Avenue",
+                "target_owner_id": str(OTHER_PLAYER_ID),
+                "target_owner_name": "Ada",
+                "suggested_offer": {
+                    "cash_budget_floor": 180,
+                    "cash_budget_ceiling": 270,
+                    "avoid_trading_away_group_property_ids": [
+                        "property_st_james_place",
+                        "property_new_york_avenue",
+                    ],
+                },
+            },
+        },
     }
 
 

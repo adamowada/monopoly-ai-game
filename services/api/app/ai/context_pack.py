@@ -93,6 +93,7 @@ def build_ai_context_pack(
             actor_id,
             negotiations,
         ),
+        "deal_proposal_guidance": _deal_proposal_guidance(state, actor_id, negotiations),
         "negotiation_context": {
             "active_negotiations": [_public_negotiation(row) for row in _sorted_rows(negotiations)],
             "public_messages": [
@@ -1693,6 +1694,146 @@ def _open_negotiation_payload_template(opportunity: Mapping[str, Any]) -> dict[s
     }
 
 
+def _deal_proposal_guidance(
+    state: GameState,
+    actor_id: str,
+    negotiations: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    templates = [
+        template
+        for row in _sorted_rows(negotiations)
+        if (template := _deal_proposal_template_from_negotiation(
+            row,
+            actor_id=actor_id,
+            ownership_by_property_id=ownership_by_property_id,
+        ))
+        is not None
+    ]
+    guidance_messages: list[str] = []
+    if templates:
+        guidance_messages.append(
+            "Use the highest-priority deal_payload_template for deal_proposal unless visible terms require a safer counter."
+        )
+
+    return {
+        "recommended_decision_types": ["deal_proposal"] if templates else [],
+        "proposal_templates": templates,
+        "guidance": guidance_messages,
+    }
+
+
+def _deal_proposal_template_from_negotiation(
+    row: Mapping[str, Any],
+    *,
+    actor_id: str,
+    ownership_by_property_id: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if _string_or_none(row.get("status")) not in ACTIVE_NEGOTIATION_STATUSES:
+        return None
+
+    stored_context = _mapping(row.get("context"))
+    participant_player_ids = _string_list(stored_context.get("participant_player_ids"))
+    if actor_id not in participant_player_ids:
+        return None
+    if _string_or_none(stored_context.get("current_deal_id")) is not None:
+        return None
+
+    context = _mapping(stored_context.get("context"))
+    target_property_id = _string_or_none(context.get("target_property_id"))
+    target_owner_id = _string_or_none(context.get("target_owner_id"))
+    if target_property_id is None or target_owner_id is None:
+        return None
+    if target_owner_id == actor_id or target_owner_id not in participant_player_ids:
+        return None
+
+    target_ownership = ownership_by_property_id.get(target_property_id)
+    if target_ownership is not None and target_ownership.owner_id != target_owner_id:
+        return None
+
+    suggested_offer = _mapping(context.get("suggested_offer"))
+    cash_budget_floor = _int_or_zero(suggested_offer.get("cash_budget_floor"))
+    cash_budget_ceiling = _int_or_zero(suggested_offer.get("cash_budget_ceiling"))
+    if cash_budget_floor <= 0 or cash_budget_ceiling < cash_budget_floor:
+        return None
+
+    recommended_cash_offer = cash_budget_floor + (cash_budget_ceiling - cash_budget_floor) // 2
+    target_property_name = (
+        _string_or_none(context.get("target_property_name")) or target_property_id
+    )
+    recipient_player_ids = [
+        player_id for player_id in participant_player_ids if player_id != actor_id
+    ]
+    terms = {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": participant_player_ids,
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "from_player_id": actor_id,
+                "to_player_id": target_owner_id,
+                "amount": recommended_cash_offer,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "from_player_id": target_owner_id,
+                "to_player_id": actor_id,
+                "property_id": target_property_id,
+            },
+        ],
+    }
+    template = {
+        "negotiation_id": _string_or_none(row.get("id")),
+        "target_property_id": target_property_id,
+        "target_property_name": target_property_name,
+        "target_owner_id": target_owner_id,
+        "target_owner_name": _string_or_none(context.get("target_owner_name")),
+        "cash_budget_floor": cash_budget_floor,
+        "cash_budget_ceiling": cash_budget_ceiling,
+        "recommended_cash_offer": recommended_cash_offer,
+        "deal_payload_template": {
+            "recipient_player_ids": recipient_player_ids,
+            "message": _deal_proposal_message(
+                topic=_string_or_none(context.get("topic")),
+                target_property_name=target_property_name,
+                cash_offer=recommended_cash_offer,
+            ),
+            "terms": terms,
+        },
+        "terms_json_string_example": json.dumps(
+            terms,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    }
+    avoid_trading_away = _string_list(
+        suggested_offer.get("avoid_trading_away_group_property_ids")
+    )
+    if avoid_trading_away:
+        template["avoid_trading_away_group_property_ids"] = avoid_trading_away
+    do_not_trade_to_opponent_id = _string_or_none(
+        suggested_offer.get("do_not_trade_target_to_opponent_player_id")
+    )
+    if do_not_trade_to_opponent_id is not None:
+        template["do_not_trade_target_to_opponent_player_id"] = do_not_trade_to_opponent_id
+    return template
+
+
+def _deal_proposal_message(
+    *,
+    topic: str | None,
+    target_property_name: str,
+    cash_offer: int,
+) -> str:
+    prefix = f"Trade for {target_property_name} to "
+    if topic is not None and topic.startswith(prefix):
+        return f"I can offer ${cash_offer} for {target_property_name} to {topic[len(prefix):]}."
+    return f"I can offer ${cash_offer} for {target_property_name}."
+
+
 def _deal_evaluation_guidance(
     state: GameState,
     actor_id: str,
@@ -2546,6 +2687,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a color group, railroad set, utility set, or blocking an opponent's set.",
             "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",
             "For open_negotiation, open_negotiation.negotiation.context must be a JSON object encoded as a JSON string, not prose text.",
+            "When deal_proposal_guidance provides a deal_payload_template, use it for deal_proposal unless visible negotiation terms require a safer cash amount or counter structure.",
             "For deal_proposal, deal_proposal.deal.terms must be a valid JSON object string. Do not prefix the string with labels such as structured_deal:.",
             "For deal_proposal, the decoded deal_proposal.deal.terms object must use kind structured_deal, deal_schema_version 1, participants, and a terms array of financial instrument objects.",
             "For counteroffer, counteroffer.terms must follow the same valid JSON object string structured_deal shape.",

@@ -425,6 +425,39 @@ def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance(
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 269
 
 
+def test_live_codex_strategy_smoke_deal_proposal_uses_context_pack_template() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_near_monopoly_deal_proposal"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == ["deal_proposal"]
+    template = guidance["proposal_templates"][0]
+    assert template["target_property_id"] == "property_tennessee_avenue"
+    assert template["recommended_cash_offer"] == 225
+    deal_payload = template["deal_payload_template"]
+    assert deal_payload["recipient_player_ids"] == [str(module.OTHER_PLAYER_ID)]
+    assert deal_payload["terms"]["participants"] == [
+        str(module.AI_PLAYER_ID),
+        str(module.OTHER_PLAYER_ID),
+    ]
+    assert [
+        term["kind"] for term in deal_payload["terms"]["terms"]
+    ] == [
+        "immediate_cash_transfer",
+        "immediate_property_transfer",
+    ]
+
+
 def test_live_codex_strategy_smoke_good_deal_has_context_pack_acceptance_guidance() -> None:
     module = _load_live_strategy_smoke_module()
     cases = {case.name: case for case in module._strategy_cases()}
