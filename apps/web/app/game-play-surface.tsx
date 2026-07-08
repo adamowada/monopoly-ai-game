@@ -606,11 +606,30 @@ function latestRollFromEvents(
       eventId: event.id,
       isDoubles: dice.length >= 2 && dice.every((value) => value === dice[0]),
       landedSpaceName,
+      playerId: playerId ?? undefined,
       playerName: playerId ? playersById.get(playerId)?.name : undefined,
       total,
     };
   }
   return null;
+}
+
+function shouldDisplayLatestRoll(
+  latestRoll: LastRollView | null,
+  phase: string,
+  currentPlayerId: string | null | undefined,
+  motion: BoardMotionState | null,
+): latestRoll is LastRollView {
+  if (!latestRoll) {
+    return false;
+  }
+  if (motion) {
+    return true;
+  }
+  if (phase !== "START_TURN") {
+    return true;
+  }
+  return Boolean(currentPlayerId && latestRoll.playerId === currentPlayerId);
 }
 
 function diceFromEvent(event: AcceptedEvent | undefined): number[] | undefined {
@@ -1986,7 +2005,9 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
     () => latestRollFromEvents(visibleEvents, playersById),
     [playersById, visibleEvents],
   );
-  const displayedLastRoll = phase === "START_TURN" && !boardMotion ? null : latestRoll;
+  const displayedLastRoll = shouldDisplayLatestRoll(latestRoll, phase, currentPlayer?.id, boardMotion)
+    ? latestRoll
+    : null;
   const latestDrawnCardEventId = latestDrawnCard?.eventId ?? null;
 
   const endGameMutation = useMutation({
@@ -2576,7 +2597,10 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
         showLoadGames={showLoadGames}
         status={formatGameStatus(game.status)}
       />
-      <div className="grid gap-4 xl:grid-cols-[minmax(420px,500px)_minmax(0,1fr)] xl:items-start">
+      <div
+        className="grid gap-4 xl:grid-cols-[minmax(520px,640px)_minmax(0,1fr)] xl:items-start"
+        data-testid="game-table-layout"
+      >
         <aside className="order-4 min-h-0 xl:sticky xl:top-4 xl:order-1 xl:row-span-2 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
           {runningLogPanel}
         </aside>

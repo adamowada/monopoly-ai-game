@@ -38,20 +38,26 @@ test("desktop play surface is board-first and keeps secondary systems behind tab
   await expect(deals).toBeHidden();
   await expect(aiAudit).toBeHidden();
 
+  const logPanel = page.getByTestId("running-log-panel");
+  const layout = page.getByTestId("game-table-layout");
   const boardBox = await board.boundingBox();
   const controlsBox = await controls.boundingBox();
+  const logBox = await logPanel.boundingBox();
   expect(boardBox).not.toBeNull();
   expect(controlsBox).not.toBeNull();
+  expect(logBox).not.toBeNull();
+  await expect(layout).toHaveClass(/xl:grid-cols-\[minmax\(520px,640px\)_minmax\(0,1fr\)\]/);
+  expect(logBox?.width ?? 0).toBeGreaterThan(500);
   expect((boardBox?.width ?? 0) * (boardBox?.height ?? 0)).toBeGreaterThan(
     (controlsBox?.width ?? 0) * (controlsBox?.height ?? 0),
   );
 
-  await expect(page.getByRole("button", { name: "Open game menu" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Open game menu" })).toBeVisible();
   await page.getByRole("tab", { name: "AI notebook" }).click();
   await expect(page.getByRole("region", { name: "AI audit" })).toBeVisible();
 });
 
-test("mobile play surface puts current turn immediately after the board", async ({ page }) => {
+test("mobile play surface keeps player trays before secondary turn panels", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createGame(page, "art-plan-mobile-layout");
 
@@ -68,6 +74,6 @@ test("mobile play surface puts current turn immediately after the board", async 
   await expect(controls.getByRole("button", { name: "Roll dice" })).toBeInViewport();
 
   expect(await top(board)).toBeLessThan(await top(controls));
+  expect(await top(trays)).toBeLessThan(await top(controls));
   expect(await top(controls)).toBeLessThan(await top(activePlayer));
-  expect(await top(controls)).toBeLessThan(await top(trays));
 });

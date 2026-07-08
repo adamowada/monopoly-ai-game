@@ -226,6 +226,26 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
     assert "Ada secretly wants the orange group." not in memory_text
 
 
+def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> None:
+    state = _state_with_orange_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    build_actions = [action for action in pack["legal_actions"] if action["type"] == "BUY_HOUSE"]
+    assert len(build_actions) == 3
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
+    assert guidance["lower_priority_action_types"] == ["ROLL_DICE"]
+    assert [opportunity["property_id"] for opportunity in guidance["development_opportunities"]] == [
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    ]
+    assert all(opportunity["cash_after_cost"] == 2900 for opportunity in guidance["development_opportunities"])
+    assert "complete color group" in guidance["turn_guidance"][0]
+    assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
 def test_context_pack_redacts_profile_seed_source_from_prompt() -> None:
     state = _state()
     hidden_seed = "hidden-profile-seed-must-not-reach-prompt"
@@ -676,6 +696,27 @@ def _valid_action_output(state: GameState) -> dict[str, Any]:
         "confidence": 0.82,
         "rationale": "The backend legal action list includes ROLL_DICE.",
     }
+
+
+def _state_with_orange_monopoly() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 3000})
+    orange_property_ids = {
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id in orange_property_ids
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
 
 
 async def _fetch_ai_decision_rows(session_factory: async_sessionmaker) -> list[dict[str, Any]]:

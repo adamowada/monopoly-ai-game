@@ -1033,6 +1033,9 @@ describe("GamePlaySurface turn controls", () => {
   it("keeps a running log beside the board and secondary systems below the player trays", async () => {
     renderSurface(baseFetchMock());
 
+    const layout = await screen.findByTestId("game-table-layout");
+    expect(layout).toHaveClass("xl:grid-cols-[minmax(520px,640px)_minmax(0,1fr)]");
+
     const views = await screen.findByRole("tablist", { name: "Table views" });
     expect(within(views).queryByRole("tab", { name: "Game log" })).not.toBeInTheDocument();
     expect(within(views).getByRole("tab", { name: "Properties" })).toHaveAttribute("aria-selected", "true");
@@ -1551,6 +1554,46 @@ describe("GamePlaySurface turn controls", () => {
     await waitFor(() => expect(screen.getByRole("region", { name: "Active player" })).toHaveTextContent("Grace"));
     await waitFor(() => expect(within(board).queryByRole("status", { name: "Dice roll animation" })).not.toBeInTheDocument());
   }, 14_000);
+
+  it("keeps the AI dice result centered if refreshed state still belongs to the same AI turn", async () => {
+    const postRollEvents = acceptedAiReadingRailroadStepResponse().accepted_events;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(gameFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(aiStateFixture(2));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${graceId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: graceId,
+          legal_actions: [aiLegalAction("END_TURN", {}, "ai-state-2", 2)],
+          state_hash: "ai-state-2",
+          event_sequence: 2,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture(postRollEvents));
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock);
+
+    const board = await screen.findByRole("region", { name: "Classic Monopoly-style board" });
+    const diceStatus = await within(board).findByRole("status", { name: "Dice roll animation" });
+    expect(diceStatus).toHaveTextContent("2 + 3 = 5");
+    expect(diceStatus).toHaveClass("left-1/2");
+    expect(diceStatus).not.toHaveClass("right-3");
+  });
 
   it("shows chance and community chest draws as a modal over the board", async () => {
     let accepted = false;

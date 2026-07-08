@@ -81,6 +81,7 @@ def build_ai_context_pack(
         "public_game_state": public_game_state_summary(state),
         "timing": _timing_context(state, legal_actions),
         "legal_actions": legal_actions,
+        "action_selection_guidance": _action_selection_guidance(state, actor_id, legal_actions),
         "negotiation_context": {
             "active_negotiations": [
                 _public_negotiation(row) for row in _sorted_rows(negotiations)
@@ -682,6 +683,107 @@ def _timing_context(
     }
 
 
+def _action_selection_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    legal_action_types = [
+        str(action["type"]) for action in legal_actions if isinstance(action.get("type"), str)
+    ]
+    development_opportunities = _development_opportunities(state, actor_id, legal_actions)
+    recommended_before_roll: list[str] = []
+    lower_priority_action_types: list[str] = []
+    turn_guidance: list[str] = []
+
+    if development_opportunities:
+        recommended_before_roll.append("BUY_HOUSE")
+        if "ROLL_DICE" in legal_action_types:
+            lower_priority_action_types.append("ROLL_DICE")
+        turn_guidance.append(
+            "BUY_HOUSE is legal on a complete color group; prefer even monopoly "
+            "development before ROLL_DICE when cash_after_cost remains healthy."
+        )
+
+    return {
+        "recommended_action_types_before_roll": recommended_before_roll,
+        "lower_priority_action_types": lower_priority_action_types,
+        "development_opportunities": development_opportunities,
+        "turn_guidance": turn_guidance,
+    }
+
+
+def _development_opportunities(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    build_actions = [action for action in legal_actions if action.get("type") == "BUY_HOUSE"]
+    if not build_actions:
+        return []
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return []
+
+    opportunities: list[dict[str, Any]] = []
+    for action in build_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is None:
+            continue
+        property_data = properties_by_id.get(property_id)
+        if property_data is None or property_data.kind != "street":
+            continue
+        group = groups_by_id.get(property_data.group)
+        if group is None:
+            continue
+        group_ownerships = [
+            ownership_by_property_id.get(group_property_id)
+            for group_property_id in group.property_ids
+        ]
+        if not all(
+            ownership is not None
+            and ownership.owner_id == actor_id
+            and not ownership.mortgaged
+            for ownership in group_ownerships
+        ):
+            continue
+
+        cost = _int_or_zero(payload.get("cost"))
+        group_improvement_levels = {
+            ownership.property_id: 5 if ownership.hotel else ownership.houses
+            for ownership in group_ownerships
+            if ownership is not None
+        }
+        opportunities.append(
+            {
+                "action_type": "BUY_HOUSE",
+                "property_id": property_id,
+                "property_name": property_data.name,
+                "group": property_data.group,
+                "group_name": group.name,
+                "cost": cost,
+                "cash_before": player.cash,
+                "cash_after_cost": player.cash - cost,
+                "current_improvement_level": group_improvement_levels.get(property_id, 0),
+                "group_improvement_levels": group_improvement_levels,
+                "recommendation": (
+                    "Prefer this legal BUY_HOUSE action before rolling unless a "
+                    "specific liquidity risk outweighs development."
+                ),
+            }
+        )
+
+    return opportunities
+
+
 def _owned_property_ids_by_player(state: GameState) -> dict[str, list[str]]:
     owned: dict[str, list[str]] = {player.id: [] for player in state.players}
     for ownership in state.property_ownership:
@@ -878,6 +980,7 @@ def _instruction_contract() -> dict[str, Any]:
         "instructions": [
             "Choose action_decision.action only from legal_actions when making a game action.",
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
+            "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",

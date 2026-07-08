@@ -69,6 +69,7 @@ export type LastRollView = {
   eventId: string;
   isDoubles: boolean;
   landedSpaceName?: string;
+  playerId?: string;
   playerName?: string;
   total: number;
 };
