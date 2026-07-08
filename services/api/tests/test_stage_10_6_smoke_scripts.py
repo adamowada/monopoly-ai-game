@@ -92,6 +92,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "auction_bid_to_complete_color_group" in source
     assert "orange_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
+    assert "multiple_near_monopolies_prioritizes_orange_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
     assert "orange_bad_deal_rejection" in source
     assert "FOURTH_PLAYER_ID" in source
@@ -122,6 +123,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "immediate_cash_transfer" in source
     assert "immediate_property_transfer" in source
     assert "property_tennessee_avenue" in source
+    assert "property_connecticut_avenue" in source
     assert "participant_player_ids" in source
     assert "accept_reject" in source
     assert "expected reject" in source

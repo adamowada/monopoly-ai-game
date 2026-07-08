@@ -313,6 +313,22 @@ def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
     assert "open_negotiation.negotiation.context must be a JSON object" in instruction_text
 
 
+def test_context_pack_prioritizes_stronger_near_monopoly_trade_opportunity() -> None:
+    state = _state_with_multiple_near_monopolies()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"]["context"]["target_property_id"] == (
+        "property_tennessee_avenue"
+    )
+    assert [opportunity["target_property_id"] for opportunity in guidance["trade_opportunities"]] == [
+        "property_tennessee_avenue",
+        "property_connecticut_avenue",
+    ]
+
+
 def test_context_pack_defers_near_monopoly_trade_when_cash_cannot_support_offer() -> None:
     state = _state_with_orange_near_monopoly(ai_cash=350)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
@@ -1082,6 +1098,31 @@ def _state_with_orange_near_monopoly(*, ai_cash: int = 1500) -> GameState:
     ai_player = state.players[0].model_copy(update={"cash": ai_cash})
     other_player = state.players[1].model_copy(update={"cash": 1500})
     owner_by_property_id = {
+        "property_st_james_place": str(AI_PLAYER_ID),
+        "property_new_york_avenue": str(AI_PLAYER_ID),
+        "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": owner_by_property_id[ownership.property_id]})
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_multiple_near_monopolies() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_oriental_avenue": str(AI_PLAYER_ID),
+        "property_vermont_avenue": str(AI_PLAYER_ID),
+        "property_connecticut_avenue": str(OTHER_PLAYER_ID),
         "property_st_james_place": str(AI_PLAYER_ID),
         "property_new_york_avenue": str(AI_PLAYER_ID),
         "property_tennessee_avenue": str(OTHER_PLAYER_ID),

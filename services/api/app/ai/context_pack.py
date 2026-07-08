@@ -1363,7 +1363,7 @@ def _street_group_trade_opportunities(
     player_name_by_id = {player.id: player.name for player in state.players}
     player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
     active_participant_sets = _active_negotiation_participant_sets(negotiations)
-    opportunities: list[dict[str, Any]] = []
+    opportunities: list[tuple[int, dict[str, Any]]] = []
     deferred_opportunities: list[dict[str, Any]] = []
 
     for group in data.property_groups:
@@ -1423,35 +1423,62 @@ def _street_group_trade_opportunities(
             )
             continue
         opportunities.append(
-            {
-                "kind": "complete_street_group",
-                "priority": "high",
-                "group": group.id,
-                "group_name": group.name,
-                "actor_owned_property_ids": actor_owned_property_ids,
-                "actor_owned_property_names": [
-                    properties_by_id[property_id].name for property_id in actor_owned_property_ids
-                ],
-                "target_property_id": target_property.id,
-                "target_property_name": target_property.name,
-                "target_owner_id": target_owner_id,
-                "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
-                "participants": participants,
-                "strategic_reason": (
-                    f"Completing {group.name} unlocks BUY_HOUSE development and materially raises rent pressure."
-                ),
-                "suggested_offer": {
-                    "cash_budget_floor": target_property.price,
-                    "cash_budget_ceiling": cash_budget_ceiling,
-                    "avoid_trading_away_group_property_ids": actor_owned_property_ids,
+            (
+                _street_group_completion_priority_score(group_properties, group.house_cost),
+                {
+                    "kind": "complete_street_group",
+                    "priority": "high",
+                    "group": group.id,
+                    "group_name": group.name,
+                    "actor_owned_property_ids": actor_owned_property_ids,
+                    "actor_owned_property_names": [
+                        properties_by_id[property_id].name for property_id in actor_owned_property_ids
+                    ],
+                    "target_property_id": target_property.id,
+                    "target_property_name": target_property.name,
+                    "target_owner_id": target_owner_id,
+                    "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
+                    "participants": participants,
+                    "strategic_reason": (
+                        f"Completing {group.name} unlocks BUY_HOUSE development and materially raises rent pressure."
+                    ),
+                    "suggested_offer": {
+                        "cash_budget_floor": target_property.price,
+                        "cash_budget_ceiling": cash_budget_ceiling,
+                        "avoid_trading_away_group_property_ids": actor_owned_property_ids,
+                    },
                 },
-            }
+            )
         )
 
     def sort_key(opportunity: Mapping[str, Any]) -> tuple[Any, Any]:
         return opportunity["group"], opportunity["target_property_id"]
 
-    return sorted(opportunities, key=sort_key), sorted(deferred_opportunities, key=sort_key)
+    sorted_opportunities = [
+        opportunity
+        for _, opportunity in sorted(
+            opportunities,
+            key=lambda scored_opportunity: (
+                -scored_opportunity[0],
+                scored_opportunity[1]["group"],
+                scored_opportunity[1]["target_property_id"],
+            ),
+        )
+    ]
+    return sorted_opportunities, sorted(deferred_opportunities, key=sort_key)
+
+
+def _street_group_completion_priority_score(
+    group_properties: Sequence[Any],
+    house_cost: int | None,
+) -> int:
+    total_three_house_rent = sum(
+        property_data.rents[3]
+        for property_data in group_properties
+        if property_data.rents is not None and len(property_data.rents) > 3
+    )
+    development_cost = (house_cost or 0) * len(group_properties)
+    return total_three_house_rent - development_cost
 
 
 def _active_negotiation_participant_sets(

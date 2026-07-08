@@ -175,6 +175,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_near_monopoly_negotiation,
         ),
         StrategySmokeCase(
+            name="multiple_near_monopolies_prioritizes_orange_negotiation",
+            game_id=UUID("00000000-0000-0000-0000-00000000b216"),
+            decision_type="open_negotiation",
+            state_factory=_multiple_near_monopolies_state,
+            verifier=_verify_orange_near_monopoly_negotiation,
+        ),
+        StrategySmokeCase(
             name="orange_near_monopoly_deal_proposal",
             game_id=UUID("00000000-0000-0000-0000-00000000b203"),
             decision_type="deal_proposal",
@@ -700,6 +707,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "multiple_near_monopolies_prioritizes_orange_negotiation":
+        return (
+            {
+                "id": "live-strategy-prioritize-orange-near-monopoly",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this open_negotiation decision, Grace has two possible color-group "
+                    "completion trades: Connecticut Avenue for Light Blue and Tennessee Avenue "
+                    "for Orange. Prioritize Tennessee Avenue because Orange has stronger "
+                    "developed-rent pressure. Open negotiation with Ada for property_tennessee_avenue."
+                ),
+            },
+        )
     if case.decision_type == "accept_reject":
         return (
             {
@@ -1081,6 +1101,34 @@ def _orange_near_monopoly_state(game_id: UUID) -> GameState:
     players[0]["cash"] = 1500
     players[1]["cash"] = 1500
     owner_by_property_id = {
+        "property_st_james_place": str(AI_PLAYER_ID),
+        "property_new_york_avenue": str(AI_PLAYER_ID),
+        "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": owner_by_property_id[item.property_id],
+            "mortgaged": False,
+            "houses": 0,
+            "hotel": False,
+        }
+        if item.property_id in owner_by_property_id
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _multiple_near_monopolies_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-multiple-near-monopolies")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 1500
+    players[1]["cash"] = 1500
+    owner_by_property_id = {
+        "property_oriental_avenue": str(AI_PLAYER_ID),
+        "property_vermont_avenue": str(AI_PLAYER_ID),
+        "property_connecticut_avenue": str(OTHER_PLAYER_ID),
         "property_st_james_place": str(AI_PLAYER_ID),
         "property_new_york_avenue": str(AI_PLAYER_ID),
         "property_tennessee_avenue": str(OTHER_PLAYER_ID),
