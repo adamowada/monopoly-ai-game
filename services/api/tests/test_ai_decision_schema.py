@@ -488,6 +488,39 @@ def test_stage_8_2_memory_canonical_categories_are_accepted(category: str) -> No
     assert parsed.root.memory_updates[0].category == category
 
 
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ("", {}),
+        ("not-json", {}),
+        (json.dumps(["not", "an", "object"]), {}),
+        (json.dumps("not an object"), {}),
+        (json.dumps({"source": "ai-note", "turn": 3}), {"source": "ai-note", "turn": 3}),
+    ],
+)
+def test_memory_metadata_strings_are_audit_safe_optional_objects(
+    metadata: str,
+    expected: dict[str, Any],
+) -> None:
+    raw_output = {
+        **_base("memory_update"),
+        "self_dialogue": {"status": "empty", "reason": "No private reasoning."},
+        "memory_updates": [
+            {
+                "visibility": "private",
+                "category": "strategic_belief",
+                "importance": 5,
+                "content": "Optional metadata should not block a legal AI action.",
+                "metadata": metadata,
+            }
+        ],
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert parsed.root.memory_updates[0].metadata == expected
+
+
 def test_stage_8_2_memory_invalid_category_is_rejected_before_persistence() -> None:
     raw_output = {
         **_base("memory_update"),

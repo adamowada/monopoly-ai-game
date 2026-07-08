@@ -793,7 +793,61 @@ def test_empty_action_payload_string_normalizes_to_empty_object() -> None:
     assert parsed.root.action.payload == {}
 
 
-def test_non_json_action_payload_string_still_rejected() -> None:
+def test_slash_action_payload_placeholder_normalizes_to_empty_object() -> None:
+    state = create_initial_game_state(
+        seed="slash-payload-normalization",
+        game_id=str(GAME_ID),
+        players=(
+            PlayerSetup(id=str(AI_PLAYER_ID), name="Ada", kind="ai"),
+            PlayerSetup(id=str(HUMAN_PLAYER_ID), name="Grace", kind="human"),
+        ),
+    )
+    output = valid_action_output(state)
+    output["action"] = {"type": "ROLL_DICE", "payload": "/"}
+
+    parsed = validate_ai_decision_output(output)
+
+    assert isinstance(parsed.root, ActionDecisionOutput)
+    assert parsed.root.action.payload == {}
+
+
+def test_empty_action_payload_comment_placeholder_normalizes_to_empty_object() -> None:
+    state = create_initial_game_state(
+        seed="comment-payload-normalization",
+        game_id=str(GAME_ID),
+        players=(
+            PlayerSetup(id=str(AI_PLAYER_ID), name="Ada", kind="ai"),
+            PlayerSetup(id=str(HUMAN_PLAYER_ID), name="Grace", kind="human"),
+        ),
+    )
+    output = valid_action_output(state)
+    output["action"] = {"type": "END_TURN", "payload": "/** END_TURN **/"}
+
+    parsed = validate_ai_decision_output(output)
+
+    assert isinstance(parsed.root, ActionDecisionOutput)
+    assert parsed.root.action.payload == {}
+
+
+def test_empty_action_payload_blank_comment_placeholder_normalizes_to_empty_object() -> None:
+    state = create_initial_game_state(
+        seed="blank-comment-payload-normalization",
+        game_id=str(GAME_ID),
+        players=(
+            PlayerSetup(id=str(AI_PLAYER_ID), name="Ada", kind="ai"),
+            PlayerSetup(id=str(HUMAN_PLAYER_ID), name="Grace", kind="human"),
+        ),
+    )
+    output = valid_action_output(state)
+    output["action"] = {"type": "END_TURN", "payload": "/**/"}
+
+    parsed = validate_ai_decision_output(output)
+
+    assert isinstance(parsed.root, ActionDecisionOutput)
+    assert parsed.root.action.payload == {}
+
+
+def test_non_json_payload_string_for_payload_required_action_still_rejected() -> None:
     state = create_initial_game_state(
         seed="invalid-payload-normalization",
         game_id=str(GAME_ID),
@@ -803,7 +857,7 @@ def test_non_json_action_payload_string_still_rejected() -> None:
         ),
     )
     output = valid_action_output(state)
-    output["action"] = {"type": "ROLL_DICE", "payload": "not-json"}
+    output["action"] = {"type": "BUY_PROPERTY", "payload": "not-json"}
 
     with pytest.raises(AIDecisionValidationError):
         validate_ai_decision_output(output)
