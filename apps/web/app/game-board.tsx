@@ -495,11 +495,12 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-[80] mx-auto w-fit max-w-[5.75rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[80] mx-auto w-fit max-w-[5.25rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-layer="top"
+      data-board-motion-overlap="separate-from-dice"
       data-board-motion-placement="upper-center"
-      data-board-motion-size="narrow"
+      data-board-motion-size="compact-narrow"
       role="status"
     >
       <div className="break-words text-[9px] font-black leading-[1.05]">{message}</div>
@@ -522,12 +523,13 @@ function CenterMotionStack({
   return (
     <div
       className="pointer-events-none absolute inset-0 z-[65] px-2"
-      data-center-motion-layout="upper-banner-centered-dice-lanes"
+      data-center-motion-gap="separated"
+      data-center-motion-layout="stacked-nonoverlap-dice-below"
       data-center-motion-stack=""
     >
       {showMotionBanner ? (
         <div
-          className="absolute left-1/2 top-[34%] z-[80] w-fit max-w-[5.75rem] -translate-x-1/2 -translate-y-1/2"
+          className="absolute left-1/2 top-[25%] z-[80] w-fit max-w-[5.25rem] -translate-x-1/2 -translate-y-1/2"
           data-center-motion-banner-layer=""
           data-center-motion-lane="movement"
         >
@@ -537,7 +539,7 @@ function CenterMotionStack({
       <div
         className={cn(
           "absolute left-1/2 z-30 w-fit max-w-[7.5rem] -translate-x-1/2 -translate-y-1/2",
-          showMotionBanner ? "top-[58%]" : "top-1/2",
+          showMotionBanner ? "top-[69%]" : "top-1/2",
         )}
         data-center-dice-layer=""
         data-center-motion-lane="dice"
@@ -673,7 +675,7 @@ function DiceMotionStatus({
       )}
       data-dice-placement={placement}
       data-dice-motion={motion?.status ?? "last-roll"}
-      data-dice-layer={placement === "center-board" ? "lower-center" : undefined}
+      data-dice-layer={placement === "center-board" ? "below-motion-banner" : undefined}
       data-dice-size={placement === "center-board" ? "compact-center" : undefined}
       role="status"
     >
@@ -863,8 +865,10 @@ function BoardOwnerMarker({
         ownerMarkerSideClasses[perimeterEdge],
       )}
       data-marker-anchor="perimeter-price-edge"
+      data-marker-board-zone="perimeter"
       data-marker-edge="perimeter"
       data-marker-placement="owner-perimeter"
+      data-marker-role="ownership"
       data-marker-side={perimeterEdge}
       data-owner-marker=""
       data-token-icon={icon}
@@ -916,8 +920,10 @@ function DevelopmentMarker({
       )}
       data-development-marker=""
       data-marker-anchor="interior-development-edge"
+      data-marker-board-zone="interior"
       data-marker-edge="interior"
       data-marker-placement="development-interior"
+      data-marker-role="development"
       data-marker-side={interiorEdge}
       role="img"
       title={label.replace("Development marker: ", "")}

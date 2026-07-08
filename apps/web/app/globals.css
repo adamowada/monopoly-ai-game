@@ -55,19 +55,19 @@ textarea {
 }
 
 .dice-motion-panel[data-dice-size="compact-center"] .dice-motion-face {
-  width: 2rem;
-  height: 2rem;
-  font-size: 0.875rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: 0.8125rem;
 }
 
 .dice-motion-panel[data-dice-size="compact-center"] [data-dice-pips] {
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.15rem;
+  height: 1.15rem;
 }
 
 .dice-motion-panel[data-dice-size="compact-center"] [data-dice-pip] {
-  width: 0.3125rem;
-  height: 0.3125rem;
+  width: 0.25rem;
+  height: 0.25rem;
 }
 
 .dice-motion-panel[data-dice-motion="rolling"] .dice-motion-ring {

@@ -270,6 +270,8 @@ describe("ClassicGameBoard", () => {
       "Owner marker: Grace owns Boardwalk",
     );
     expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-edge", "perimeter");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-role", "ownership");
+    expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-board-zone", "perimeter");
     expect(boardwalk?.querySelector("[data-owner-marker]")).toHaveAttribute(
       "data-marker-placement",
       "owner-perimeter",
@@ -283,6 +285,11 @@ describe("ClassicGameBoard", () => {
       "Development marker: Boardwalk has a hotel",
     );
     expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-edge", "interior");
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-role", "development");
+    expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "data-marker-board-zone",
+      "interior",
+    );
     expect(boardwalk?.querySelector("[data-development-marker]")).toHaveAttribute(
       "data-marker-placement",
       "development-interior",
@@ -306,6 +313,11 @@ describe("ClassicGameBoard", () => {
       "Owner marker: Ada owns Mediterranean Avenue",
     );
     expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-edge", "perimeter");
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-role", "ownership");
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute(
+      "data-marker-board-zone",
+      "perimeter",
+    );
     expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute(
       "data-marker-placement",
       "owner-perimeter",
@@ -322,6 +334,14 @@ describe("ClassicGameBoard", () => {
     );
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
       "data-marker-edge",
+      "interior",
+    );
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "data-marker-role",
+      "development",
+    );
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "data-marker-board-zone",
       "interior",
     );
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
@@ -470,9 +490,11 @@ describe("ClassicGameBoard", () => {
     const movementBanner = screen.getByRole("status", { name: "Board movement" });
     expect(movementBanner).toHaveTextContent("Ada moving to Baltic Avenue");
     expect(movementBanner).toHaveAttribute("data-board-motion-placement", "upper-center");
-    expect(movementBanner).toHaveAttribute("data-board-motion-size", "narrow");
+    expect(movementBanner).toHaveAttribute("data-board-motion-size", "compact-narrow");
     expect(movementBanner).toHaveAttribute("data-board-motion-layer", "top");
-    expect(movementBanner).toHaveClass("max-w-[5.75rem]");
+    expect(movementBanner).toHaveAttribute("data-board-motion-overlap", "separate-from-dice");
+    expect(movementBanner).toHaveClass("max-w-[5.25rem]");
+    expect(movementBanner).not.toHaveClass("max-w-[5.75rem]");
     expect(movementBanner).not.toHaveClass("max-w-[7rem]");
     expect(movementBanner).not.toHaveClass("max-w-[8.25rem]");
     expect(movementBanner).not.toHaveClass("max-w-[10rem]");
@@ -480,7 +502,8 @@ describe("ClassicGameBoard", () => {
     const centerBoard = screen.getByTestId("center-board-art");
     const motionStack = centerBoard.querySelector("[data-center-motion-stack]");
     expect(motionStack).toBeInTheDocument();
-    expect(motionStack).toHaveAttribute("data-center-motion-layout", "upper-banner-centered-dice-lanes");
+    expect(motionStack).toHaveAttribute("data-center-motion-layout", "stacked-nonoverlap-dice-below");
+    expect(motionStack).toHaveAttribute("data-center-motion-gap", "separated");
     expect(centerBoard.querySelector("[data-center-motion-lane='movement']")).toBeInTheDocument();
     expect(centerBoard.querySelector("[data-center-motion-lane='dice']")).toBeInTheDocument();
     const centeredDiceStatus = within(centerBoard).getByRole("status", { name: "Dice roll animation" });
@@ -489,7 +512,7 @@ describe("ClassicGameBoard", () => {
       "data-dice-placement",
       "center-board",
     );
-    expect(centeredDiceStatus).toHaveAttribute("data-dice-layer", "lower-center");
+    expect(centeredDiceStatus).toHaveAttribute("data-dice-layer", "below-motion-banner");
     expect(centeredDiceStatus).toHaveAttribute("data-dice-size", "compact-center");
     expect(screen.queryByLabelText("Ada token at GO, position 0")).not.toBeInTheDocument();
   });
