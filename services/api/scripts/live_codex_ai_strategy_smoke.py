@@ -84,6 +84,13 @@ def main() -> int:
 def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
     return (
         StrategySmokeCase(
+            name="railroad_purchase_with_healthy_cash",
+            game_id=UUID("00000000-0000-0000-0000-00000000b205"),
+            decision_type="action_decision",
+            state_factory=_railroad_purchase_state,
+            verifier=_verify_railroad_purchase_with_healthy_cash,
+        ),
+        StrategySmokeCase(
             name="orange_monopoly_development",
             game_id=UUID("00000000-0000-0000-0000-00000000b201"),
             decision_type="action_decision",
@@ -168,6 +175,17 @@ def _run_strategy_case(case: StrategySmokeCase) -> dict[str, Any]:
         return validate_ai_decision_output(final_output).root.model_dump(mode="json")
 
 
+def _verify_railroad_purchase_with_healthy_cash(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BUY_PROPERTY", f"expected BUY_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_reading_railroad"
+    if "price" in payload:
+        assert payload.get("price") == 200
+
+
 def _verify_orange_monopoly_development(parsed: dict[str, Any]) -> None:
     action = _dict(parsed.get("action"))
     payload = _dict(action.get("payload"))
@@ -228,7 +246,13 @@ def _verify_orange_bad_deal_rejection(parsed: dict[str, Any]) -> None:
 def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, Any]:
     if case.decision_type == "action_decision":
         action = _dict(parsed.get("action"))
-        return {"case": case.name, "status": "ok", "action_type": action.get("type")}
+        payload = _dict(action.get("payload"))
+        return {
+            "case": case.name,
+            "status": "ok",
+            "action_type": action.get("type"),
+            "property_id": payload.get("property_id"),
+        }
     if case.decision_type == "deal_proposal":
         terms = _dict(_dict(parsed.get("deal")).get("terms"))
         return {
@@ -366,6 +390,18 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
 
 
 def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ...]:
+    if case.name == "railroad_purchase_with_healthy_cash":
+        return (
+            {
+                "id": "live-strategy-buy-railroad-over-auction",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has healthy cash and landed on unowned "
+                    "property_reading_railroad. Prefer BUY_PROPERTY over START_AUCTION because "
+                    "auctioning gives competitors a chance to win the railroad."
+                ),
+            },
+        )
     if case.decision_type == "accept_reject":
         return (
             {
@@ -445,6 +481,23 @@ def _bad_deal_terms() -> dict[str, Any]:
             },
         ],
     }
+
+
+def _railroad_purchase_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-railroad-purchase")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 1500
+    players[0]["position"] = 5
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
 
 
 def _orange_monopoly_state(game_id: UUID) -> GameState:

@@ -78,6 +78,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "gpt-5.4-mini" in source
     assert "model_reasoning_effort" in source
     assert "low" in source
+    assert "railroad_purchase_with_healthy_cash" in source
     assert "orange_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
@@ -85,6 +86,9 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "FOURTH_PLAYER_ID" in source
     assert 'PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai")' in source
     assert "BUY_HOUSE" in source
+    assert "BUY_PROPERTY" in source
+    assert "START_AUCTION" in source
+    assert "property_reading_railroad" in source
     assert "open_negotiation" in source
     assert "deal_proposal" in source
     assert "immediate_cash_transfer" in source
