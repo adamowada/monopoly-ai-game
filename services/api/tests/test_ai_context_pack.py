@@ -416,6 +416,66 @@ def test_context_pack_defers_near_monopoly_trade_when_cash_cannot_support_offer(
     assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
 
 
+def test_context_pack_surfaces_blocking_opponent_near_monopoly_trade_opportunity() -> None:
+    state = _state_with_opponent_orange_near_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"] == {
+        "participant_player_ids": [str(AI_PLAYER_ID), str(THIRD_PLAYER_ID)],
+        "context": {
+            "topic": "Trade for Tennessee Avenue to block Ada's Orange monopoly",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "strategic_reason": (
+                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves monopoly defense."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "do_not_trade_target_to_opponent_player_id": str(OTHER_PLAYER_ID),
+            },
+        },
+    }
+    assert guidance["trade_opportunities"] == [
+        {
+            "kind": "block_opponent_street_group",
+            "priority": "medium",
+            "group": "orange",
+            "group_name": "Orange",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "opponent_owned_property_ids": [
+                "property_st_james_place",
+                "property_new_york_avenue",
+            ],
+            "opponent_owned_property_names": [
+                "St. James Place",
+                "New York Avenue",
+            ],
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "participants": [str(AI_PLAYER_ID), str(THIRD_PLAYER_ID)],
+            "strategic_reason": (
+                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves monopoly defense."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "do_not_trade_target_to_opponent_player_id": str(OTHER_PLAYER_ID),
+            },
+        }
+    ]
+
+
 def test_context_pack_recommends_rejecting_lowball_deal_that_completes_opponent_monopoly() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(
@@ -1508,6 +1568,29 @@ def _state_with_multiple_near_monopolies() -> GameState:
     return state.model_copy(
         update={
             "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": owner_by_property_id[ownership.property_id]})
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_opponent_orange_near_monopoly() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    third_player = state.players[2].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_st_james_place": str(OTHER_PLAYER_ID),
+        "property_new_york_avenue": str(OTHER_PLAYER_ID),
+        "property_tennessee_avenue": str(THIRD_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, third_player),
             "property_ownership": tuple(
                 ownership.model_copy(update={"owner_id": owner_by_property_id[ownership.property_id]})
                 if ownership.property_id in owner_by_property_id

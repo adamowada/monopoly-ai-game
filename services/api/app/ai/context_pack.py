@@ -1406,8 +1406,13 @@ def _negotiation_strategy_guidance(
 def _open_negotiation_payload_template(opportunity: Mapping[str, Any]) -> dict[str, Any]:
     target_property_name = _string_or_none(opportunity.get("target_property_name")) or "target property"
     group_name = _string_or_none(opportunity.get("group_name")) or "property group"
+    opponent_player_name = _string_or_none(opportunity.get("opponent_player_name"))
+    if opportunity.get("kind") == "block_opponent_street_group" and opponent_player_name is not None:
+        topic = f"Trade for {target_property_name} to block {opponent_player_name}'s {group_name} monopoly"
+    else:
+        topic = f"Trade for {target_property_name} to complete {group_name}"
     context = {
-        "topic": f"Trade for {target_property_name} to complete {group_name}",
+        "topic": topic,
         "target_property_id": _string_or_none(opportunity.get("target_property_id")),
         "target_property_name": target_property_name,
         "target_owner_id": _string_or_none(opportunity.get("target_owner_id")),
@@ -1415,6 +1420,11 @@ def _open_negotiation_payload_template(opportunity: Mapping[str, Any]) -> dict[s
         "strategic_reason": _string_or_none(opportunity.get("strategic_reason")),
         "suggested_offer": _mapping(opportunity.get("suggested_offer")),
     }
+    opponent_player_id = _string_or_none(opportunity.get("opponent_player_id"))
+    if opponent_player_id is not None:
+        context["opponent_player_id"] = opponent_player_id
+    if opponent_player_name is not None:
+        context["opponent_player_name"] = opponent_player_name
     return {
         "participant_player_ids": _string_list(opportunity.get("participants")),
         "context": context,
@@ -1732,70 +1742,156 @@ def _street_group_trade_opportunities(
             elif ownership.owner_id is not None:
                 target_ownerships.append(ownership)
 
-        if len(actor_owned_property_ids) != len(group.property_ids) - 1 or len(target_ownerships) != 1:
-            continue
+        if len(actor_owned_property_ids) == len(group.property_ids) - 1 and len(target_ownerships) == 1:
+            target_ownership = target_ownerships[0]
+            target_owner_id = target_ownership.owner_id
+            if target_owner_id is not None and target_owner_id != actor_id:
+                participants = [actor_id, target_owner_id]
+                target_property = properties_by_id[target_ownership.property_id]
+                cash_budget_ceiling = min(
+                    max(player_cash - PURCHASE_HEALTHY_CASH_FLOOR, 0),
+                    target_property.price * 3 // 2,
+                )
+                if frozenset(participants) not in active_participant_sets:
+                    if cash_budget_ceiling < target_property.price:
+                        deferred_opportunities.append(
+                            {
+                                "kind": "complete_street_group",
+                                "priority": "deferred_until_cash_offer_is_credible",
+                                "group": group.id,
+                                "group_name": group.name,
+                                "target_property_id": target_property.id,
+                                "target_property_name": target_property.name,
+                                "target_owner_id": target_owner_id,
+                                "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
+                                "cash_budget_floor": target_property.price,
+                                "cash_budget_ceiling": cash_budget_ceiling,
+                                "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                                "reason": (
+                                    "Available cash above the healthy reserve cannot cover the target property list price."
+                                ),
+                            }
+                        )
+                    else:
+                        opportunities.append(
+                            (
+                                _street_group_completion_priority_score(group_properties, group.house_cost),
+                                {
+                                    "kind": "complete_street_group",
+                                    "priority": "high",
+                                    "group": group.id,
+                                    "group_name": group.name,
+                                    "actor_owned_property_ids": actor_owned_property_ids,
+                                    "actor_owned_property_names": [
+                                        properties_by_id[property_id].name for property_id in actor_owned_property_ids
+                                    ],
+                                    "target_property_id": target_property.id,
+                                    "target_property_name": target_property.name,
+                                    "target_owner_id": target_owner_id,
+                                    "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
+                                    "participants": participants,
+                                    "strategic_reason": (
+                                        f"Completing {group.name} unlocks BUY_HOUSE development and materially raises rent pressure."
+                                    ),
+                                    "suggested_offer": {
+                                        "cash_budget_floor": target_property.price,
+                                        "cash_budget_ceiling": cash_budget_ceiling,
+                                        "avoid_trading_away_group_property_ids": actor_owned_property_ids,
+                                    },
+                                },
+                            )
+                        )
 
-        target_ownership = target_ownerships[0]
-        target_owner_id = target_ownership.owner_id
-        if target_owner_id is None or target_owner_id == actor_id:
-            continue
-        participants = [actor_id, target_owner_id]
-        if frozenset(participants) in active_participant_sets:
-            continue
+        owned_by_player: dict[str, list[str]] = {}
+        for group_property in group_properties:
+            ownership = ownership_by_property_id.get(group_property.id)
+            if ownership is None or ownership.owner_id is None or ownership.owner_id == actor_id:
+                continue
+            owned_by_player.setdefault(ownership.owner_id, []).append(group_property.id)
 
-        target_property = properties_by_id[target_ownership.property_id]
-        cash_budget_ceiling = min(
-            max(player_cash - PURCHASE_HEALTHY_CASH_FLOOR, 0),
-            target_property.price * 3 // 2,
-        )
-        if cash_budget_ceiling < target_property.price:
-            deferred_opportunities.append(
-                {
-                    "kind": "complete_street_group",
-                    "priority": "deferred_until_cash_offer_is_credible",
-                    "group": group.id,
-                    "group_name": group.name,
-                    "target_property_id": target_property.id,
-                    "target_property_name": target_property.name,
-                    "target_owner_id": target_owner_id,
-                    "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
-                    "cash_budget_floor": target_property.price,
-                    "cash_budget_ceiling": cash_budget_ceiling,
-                    "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
-                    "reason": (
-                        "Available cash above the healthy reserve cannot cover the target property list price."
-                    ),
-                }
+        for opponent_id, opponent_owned_property_ids in owned_by_player.items():
+            if len(opponent_owned_property_ids) != len(group.property_ids) - 1:
+                continue
+            target_property_ids = [
+                property_id
+                for property_id in group.property_ids
+                if property_id not in set(opponent_owned_property_ids)
+            ]
+            if len(target_property_ids) != 1:
+                continue
+            target_property_id = target_property_ids[0]
+            target_ownership = ownership_by_property_id.get(target_property_id)
+            if (
+                target_ownership is None
+                or target_ownership.owner_id is None
+                or target_ownership.owner_id in {actor_id, opponent_id}
+            ):
+                continue
+            target_owner_id = target_ownership.owner_id
+            participants = [actor_id, target_owner_id]
+            if frozenset(participants) in active_participant_sets:
+                continue
+
+            target_property = properties_by_id[target_property_id]
+            cash_budget_ceiling = min(
+                max(player_cash - PURCHASE_HEALTHY_CASH_FLOOR, 0),
+                target_property.price * 3 // 2,
             )
-            continue
-        opportunities.append(
-            (
-                _street_group_completion_priority_score(group_properties, group.house_cost),
-                {
-                    "kind": "complete_street_group",
-                    "priority": "high",
-                    "group": group.id,
-                    "group_name": group.name,
-                    "actor_owned_property_ids": actor_owned_property_ids,
-                    "actor_owned_property_names": [
-                        properties_by_id[property_id].name for property_id in actor_owned_property_ids
-                    ],
-                    "target_property_id": target_property.id,
-                    "target_property_name": target_property.name,
-                    "target_owner_id": target_owner_id,
-                    "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
-                    "participants": participants,
-                    "strategic_reason": (
-                        f"Completing {group.name} unlocks BUY_HOUSE development and materially raises rent pressure."
-                    ),
-                    "suggested_offer": {
+            if cash_budget_ceiling < target_property.price:
+                deferred_opportunities.append(
+                    {
+                        "kind": "block_opponent_street_group",
+                        "priority": "deferred_until_cash_offer_is_credible",
+                        "group": group.id,
+                        "group_name": group.name,
+                        "opponent_player_id": opponent_id,
+                        "opponent_player_name": player_name_by_id.get(opponent_id, "Unknown player"),
+                        "target_property_id": target_property.id,
+                        "target_property_name": target_property.name,
+                        "target_owner_id": target_owner_id,
+                        "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
                         "cash_budget_floor": target_property.price,
                         "cash_budget_ceiling": cash_budget_ceiling,
-                        "avoid_trading_away_group_property_ids": actor_owned_property_ids,
+                        "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                        "reason": (
+                            "Available cash above the healthy reserve cannot cover the target property's blocking value."
+                        ),
+                    }
+                )
+                continue
+
+            opportunities.append(
+                (
+                    _street_group_completion_priority_score(group_properties, group.house_cost) - 1,
+                    {
+                        "kind": "block_opponent_street_group",
+                        "priority": "medium",
+                        "group": group.id,
+                        "group_name": group.name,
+                        "opponent_player_id": opponent_id,
+                        "opponent_player_name": player_name_by_id.get(opponent_id, "Unknown player"),
+                        "opponent_owned_property_ids": opponent_owned_property_ids,
+                        "opponent_owned_property_names": [
+                            properties_by_id[property_id].name for property_id in opponent_owned_property_ids
+                        ],
+                        "target_property_id": target_property.id,
+                        "target_property_name": target_property.name,
+                        "target_owner_id": target_owner_id,
+                        "target_owner_name": player_name_by_id.get(target_owner_id, "Unknown player"),
+                        "participants": participants,
+                        "strategic_reason": (
+                            f"Acquiring {target_property.name} blocks "
+                            f"{player_name_by_id.get(opponent_id, 'Unknown player')} from completing "
+                            f"{group.name} and preserves monopoly defense."
+                        ),
+                        "suggested_offer": {
+                            "cash_budget_floor": target_property.price,
+                            "cash_budget_ceiling": cash_budget_ceiling,
+                            "do_not_trade_target_to_opponent_player_id": opponent_id,
+                        },
                     },
-                },
+                )
             )
-        )
 
     def sort_key(opportunity: Mapping[str, Any]) -> tuple[Any, Any]:
         return opportunity["group"], opportunity["target_property_id"]

@@ -96,6 +96,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "low_cash_defers_monopoly_development" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "multiple_near_monopolies_prioritizes_orange_negotiation" in source
+    assert "block_opponent_orange_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
     assert "orange_bad_deal_rejection" in source
     assert "orange_good_deal_acceptance" in source
@@ -135,6 +136,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "immediate_property_transfer" in source
     assert "property_tennessee_avenue" in source
     assert "property_connecticut_avenue" in source
+    assert "Linus owns property_tennessee_avenue" in source
     assert "participant_player_ids" in source
     assert "accept_reject" in source
     assert "expected reject" in source
@@ -249,6 +251,32 @@ def test_live_codex_strategy_smoke_defers_low_cash_development() -> None:
     assert len(guidance["deferred_development_opportunities"]) == 3
     assert guidance["deferred_development_opportunities"][0]["cash_after_cost"] == 250
     assert "cash reserve floor" in " ".join(guidance["turn_guidance"])
+
+
+def test_live_codex_strategy_smoke_blocks_opponent_near_monopoly() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["block_opponent_orange_near_monopoly_negotiation"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["negotiation_strategy_guidance"]
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"]["participant_player_ids"] == [
+        str(module.AI_PLAYER_ID),
+        str(module.THIRD_PLAYER_ID),
+    ]
+    context = guidance["open_negotiation_payload_template"]["context"]
+    assert context["target_property_id"] == "property_tennessee_avenue"
+    assert context["target_owner_id"] == str(module.THIRD_PLAYER_ID)
+    assert context["opponent_player_id"] == str(module.OTHER_PLAYER_ID)
+    assert guidance["trade_opportunities"][0]["kind"] == "block_opponent_street_group"
 
 
 def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance() -> None:
