@@ -196,6 +196,29 @@ class SelfDialoguePayload(_SchemaModel):
     text: str | None = Field(default=None, min_length=1)
     reason: str | None = Field(default=None, min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_missing_provided_text(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+
+        if value.get("status") != "provided":
+            return value
+
+        text = value.get("text")
+        if isinstance(text, str) and text.strip():
+            return value
+        if text is not None and not isinstance(text, str):
+            return value
+
+        reason = value.get("reason")
+        normalized = dict(value)
+        normalized["status"] = "empty"
+        normalized.pop("text", None)
+        if not isinstance(reason, str) or not reason.strip():
+            normalized["reason"] = "No self-dialogue text provided."
+        return normalized
+
     @model_validator(mode="after")
     def validate_payload_shape(self) -> SelfDialoguePayload:
         if self.status == "provided":

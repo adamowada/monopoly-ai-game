@@ -163,6 +163,25 @@ def test_valid_ai_decision_shapes_parse_before_mutation() -> None:
         assert parsed.root.rationale == raw_output["rationale"]
 
 
+def test_provided_self_dialogue_without_text_normalizes_to_empty_dialogue() -> None:
+    raw_output = {
+        **_base("action_decision"),
+        "expected_state_hash": "state-hash-empty-dialogue",
+        "expected_event_sequence": 12,
+        "action": {
+            "type": "END_TURN",
+            "payload": {},
+        },
+        "self_dialogue": {"status": "provided"},
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert parsed.root.self_dialogue.status == "empty"
+    assert parsed.root.self_dialogue.text is None
+    assert parsed.root.self_dialogue.reason == "No self-dialogue text provided."
+
+
 def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
     # schema is used by codex exec --json --output-schema
     serialized = json.dumps(AI_OUTPUT_SCHEMA)
