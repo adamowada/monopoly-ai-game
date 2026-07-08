@@ -1990,6 +1990,17 @@ export function GamePlaySurface({ gameId, initialGame, apiBaseUrl }: GamePlaySur
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [showLoadGames, setShowLoadGames] = useState(false);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.scrollTo !== "function") {
+      return;
+    }
+    if (window.scrollX === 0 && window.scrollY === 0) {
+      return;
+    }
+
+    window.scrollTo({ behavior: "auto", left: 0, top: 0 });
+  }, [gameId]);
+
   const gameQuery = useQuery({
     queryKey: ["game", gameId],
     queryFn: () => loadGame(gameId, baseUrl),
