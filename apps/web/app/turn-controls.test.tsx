@@ -3877,6 +3877,116 @@ describe("GamePlaySurface turn controls", () => {
     });
   });
 
+  it("auto-step asks an AI to counter a cash-draining monopoly-completion offer", async () => {
+    const game = metadataFallbackAiGame();
+    const state = aiLowCashNearMonopolyStateFixture();
+    const negotiation = {
+      id: "neg-auto-cash-counter",
+      game_id: gameId,
+      opened_by_player_id: graceId,
+      participant_player_ids: [adaId, graceId],
+      topic: "Orange completion",
+      context: "Grace AI offered Tennessee Avenue to Ada AI, but the ask would drain Ada's cash.",
+      status: "active",
+      round_number: 1,
+      pending_deal_id: null,
+      current_deal_id: "deal-cash-draining-tennessee",
+      acceptances: {},
+      invalidated_acceptances: {},
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+    const cashDrainingDeal = {
+      id: "deal-cash-draining-tennessee",
+      game_id: gameId,
+      negotiation_id: "neg-auto-cash-counter",
+      proposer_player_id: graceId,
+      participant_player_ids: [adaId, graceId],
+      parent_deal_id: null,
+      version: 1,
+      status: "proposed",
+      terms: {
+        kind: "structured_deal",
+        deal_schema_version: 1,
+        participants: [adaId, graceId],
+        terms: [
+          {
+            kind: "immediate_cash_transfer",
+            from_player_id: adaId,
+            to_player_id: graceId,
+            amount: 260,
+          },
+          {
+            kind: "immediate_property_transfer",
+            from_player_id: graceId,
+            to_player_id: adaId,
+            property_id: "property_tennessee_avenue",
+          },
+        ],
+      },
+      validation_errors: [],
+      accepted_at: null,
+      rejected_at: null,
+      created_at: createdAt,
+      updated_at: createdAt,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === `${apiBaseUrl}/games/${gameId}`) {
+        return Response.json(game);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/state`) {
+        return Response.json(state);
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/legal-actions?actor_player_id=${adaId}`) {
+        return Response.json({
+          game_id: gameId,
+          actor_player_id: adaId,
+          legal_actions: [aiLegalAction("ROLL_DICE", {}, state.state_hash, state.event_sequence)],
+          state_hash: state.state_hash,
+          event_sequence: state.event_sequence,
+        });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/events`) {
+        return Response.json(eventsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/rejected-actions`) {
+        return Response.json(rejectedActionsFixture());
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/negotiations`) {
+        return Response.json({ negotiations: [negotiation] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/deals`) {
+        return Response.json({ deals: [cashDrainingDeal] });
+      }
+      if (url === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST") {
+        return Response.json(aiStepResponse("done"));
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+
+    renderSurface(fetchMock, game);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Auto-step AI" }));
+
+    await waitFor(() => {
+      const aiStepCalls = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/ai/step` && init?.method === "POST",
+      );
+      expect(aiStepCalls.length).toBeGreaterThanOrEqual(1);
+      expect(JSON.parse(String(aiStepCalls[0]?.[1]?.body))).toMatchObject({
+        player_id: adaId,
+        decision_type: "counteroffer",
+        negotiation_id: "neg-auto-cash-counter",
+        mandatory: false,
+        request_context: {
+          mode: "auto_negotiation",
+          selected_deal_id: "deal-cash-draining-tennessee",
+        },
+      });
+    });
+  });
+
   it("auto-step executes an accepted all-AI negotiation before ordinary actions", async () => {
     const game = metadataFallbackAiGame();
     const state = aiStateFixture();
