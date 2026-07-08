@@ -282,6 +282,48 @@ async def test_legal_ai_action_with_missing_self_dialogue_text_does_not_block_ga
 
 
 @pytest.mark.asyncio
+async def test_legal_jail_fine_with_malformed_string_payload_does_not_block_game(
+    session_factory: async_sessionmaker,
+    tmp_path: Path,
+) -> None:
+    fixture = await create_ai_game(session_factory, state_transform=_jailed_ai_state)
+    ai_output = valid_action_output(fixture.state)
+    ai_output["action"] = {"type": "PAY_JAIL_FINE", "payload": ":{"}
+    runner = FakeCodexRunner(final_output=ai_output)
+
+    try:
+        result = await enforce_ai_output(
+            session_factory,
+            AIOutputEnforcementRequest(
+                game_id=GAME_ID,
+                player_id=AI_PLAYER_ID,
+                ai_profile_id=AI_PROFILE_ID,
+                decision_type="action_decision",
+                mandatory=True,
+                timeout_seconds=7,
+            ),
+            runner=runner,
+            schema_file=tmp_path / "schema.json",
+            sandbox_dir=tmp_path / "sandbox",
+            work_dir=tmp_path / "work",
+        )
+        replayed = await EventPersistence(session_factory).replay_from_event_zero(GAME_ID)
+        decisions = await fetch_rows(session_factory, ai_decisions)
+        game = await fetch_game(session_factory)
+
+        assert result.status == "accepted"
+        assert result.rejected_action_id is None
+        assert game["status"] == "active"
+        assert not replayed.players[0].in_jail
+        assert replayed.players[0].cash == 1450
+        assert decisions[0]["status"] == "accepted"
+        assert decisions[0]["parsed_output"]["action"] == {"type": "PAY_JAIL_FINE", "payload": {}}
+        assert await table_count(session_factory, rejected_actions) == 0
+    finally:
+        await delete_game(session_factory)
+
+
+@pytest.mark.asyncio
 async def test_ai_settle_debt_canonicalizes_current_debt_identity_fields(
     session_factory: async_sessionmaker,
     tmp_path: Path,
@@ -909,6 +951,31 @@ def _active_debt_state(state: GameState) -> GameState:
                 "amount_paid": 0,
                 "reason": "rent:property_illinois_avenue",
                 "negotiation_allowed": True,
+            },
+        }
+    )
+
+
+def _jailed_ai_state(state: GameState) -> GameState:
+    players = [
+        (
+            {
+                **player.model_dump(mode="python"),
+                "in_jail": True,
+                "jail_turns": 1,
+            }
+            if player.id == str(AI_PLAYER_ID)
+            else player.model_dump(mode="python")
+        )
+        for player in state.players
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.START_TURN,
             },
         }
     )

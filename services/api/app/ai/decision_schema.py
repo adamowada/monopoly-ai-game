@@ -31,7 +31,7 @@ from pydantic import (
 
 MALFORMED_AI_OUTPUT_REASON_CODE = "malformed_ai_output"
 _FIELD_JOINER = "".join
-_EMPTY_ACTION_PAYLOAD_TYPES = frozenset({"ROLL_DICE", "END_TURN"})
+_EMPTY_ACTION_PAYLOAD_TYPES = frozenset({"ROLL_DICE", "END_TURN", "PAY_JAIL_FINE"})
 
 
 def _normalize_codex_json_object(value: Any) -> Any:

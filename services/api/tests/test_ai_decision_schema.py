@@ -182,6 +182,22 @@ def test_provided_self_dialogue_without_text_normalizes_to_empty_dialogue() -> N
     assert parsed.root.self_dialogue.reason == "No self-dialogue text provided."
 
 
+def test_jail_fine_payload_string_normalizes_to_empty_object() -> None:
+    raw_output = {
+        **_base("action_decision"),
+        "expected_state_hash": "state-hash-jail-fine",
+        "expected_event_sequence": 12,
+        "action": {
+            "type": "PAY_JAIL_FINE",
+            "payload": ":{",
+        },
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert parsed.root.action.payload == {}
+
+
 def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
     # schema is used by codex exec --json --output-schema
     serialized = json.dumps(AI_OUTPUT_SCHEMA)
