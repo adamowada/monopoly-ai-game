@@ -1125,6 +1125,60 @@ def test_context_pack_builds_deal_proposal_template_from_targeted_negotiation() 
     assert "deal_payload_template" in instruction_text
 
 
+def test_context_pack_clamps_deal_proposal_offer_to_current_cash() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=500)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="deal_proposal",
+        negotiations=[_active_tennessee_negotiation()],
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == ["deal_proposal"]
+    template = guidance["proposal_templates"][0]
+    deal_payload = template["deal_payload_template"]
+
+    assert template["cash_available"] == 500
+    assert template["cash_budget_ceiling"] == 270
+    assert template["current_cash_budget_ceiling"] == 200
+    assert template["recommended_cash_offer"] == 190
+    assert deal_payload["message"] == (
+        "I can offer $190 for Tennessee Avenue to complete Orange."
+    )
+    assert deal_payload["terms"]["terms"][0]["amount"] == 190
+
+
+def test_context_pack_skips_deal_proposal_when_current_cash_cannot_support_offer() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=450)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="deal_proposal",
+        negotiations=[_active_tennessee_negotiation()],
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["proposal_templates"] == []
+    assert guidance["deferred_proposal_opportunities"] == [
+        {
+            "negotiation_id": str(NEGOTIATION_ID),
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 270,
+            "current_cash_budget_ceiling": 150,
+            "cash_available": 450,
+            "healthy_cash_floor": 300,
+            "reason": "Current cash above reserve cannot support the saved offer floor.",
+        }
+    ]
+    assert "Wait on deal_proposal" in guidance["guidance"][0]
+
+
 def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt() -> None:
     state = _state_with_owned_railroad(cash=900)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)

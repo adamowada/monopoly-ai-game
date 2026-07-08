@@ -1976,35 +1976,47 @@ def _deal_proposal_guidance(
     ownership_by_property_id = {
         ownership.property_id: ownership for ownership in state.property_ownership
     }
-    templates = [
-        template
+    player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
+    candidates = [
+        candidate
         for row in _sorted_rows(negotiations)
-        if (template := _deal_proposal_template_from_negotiation(
+        if (candidate := _deal_proposal_candidate_from_negotiation(
             row,
             actor_id=actor_id,
             ownership_by_property_id=ownership_by_property_id,
+            cash_available=player_cash,
         ))
         is not None
+    ]
+    templates = [payload for kind, payload in candidates if kind == "template"]
+    deferred_proposal_opportunities = [
+        payload for kind, payload in candidates if kind == "deferred"
     ]
     guidance_messages: list[str] = []
     if templates:
         guidance_messages.append(
             "Use the highest-priority deal_payload_template for deal_proposal unless visible terms require a safer counter."
         )
+    if deferred_proposal_opportunities:
+        guidance_messages.append(
+            "Wait on deal_proposal when current cash can no longer support the saved offer floor above reserve."
+        )
 
     return {
         "recommended_decision_types": ["deal_proposal"] if templates else [],
         "proposal_templates": templates,
+        "deferred_proposal_opportunities": deferred_proposal_opportunities,
         "guidance": guidance_messages,
     }
 
 
-def _deal_proposal_template_from_negotiation(
+def _deal_proposal_candidate_from_negotiation(
     row: Mapping[str, Any],
     *,
     actor_id: str,
     ownership_by_property_id: Mapping[str, Any],
-) -> dict[str, Any] | None:
+    cash_available: int,
+) -> tuple[str, dict[str, Any]] | None:
     if _string_or_none(row.get("status")) not in ACTIVE_NEGOTIATION_STATUSES:
         return None
 
@@ -2033,9 +2045,32 @@ def _deal_proposal_template_from_negotiation(
     if cash_budget_floor <= 0 or cash_budget_ceiling < cash_budget_floor:
         return None
 
-    recommended_cash_offer = cash_budget_floor + (cash_budget_ceiling - cash_budget_floor) // 2
+    current_cash_budget_ceiling = min(
+        cash_budget_ceiling,
+        max(cash_available - PURCHASE_HEALTHY_CASH_FLOOR, 0),
+    )
     target_property_name = (
         _string_or_none(context.get("target_property_name")) or target_property_id
+    )
+    if current_cash_budget_ceiling < cash_budget_floor:
+        return (
+            "deferred",
+            {
+                "negotiation_id": _string_or_none(row.get("id")),
+                "target_property_id": target_property_id,
+                "target_property_name": target_property_name,
+                "target_owner_id": target_owner_id,
+                "cash_budget_floor": cash_budget_floor,
+                "cash_budget_ceiling": cash_budget_ceiling,
+                "current_cash_budget_ceiling": current_cash_budget_ceiling,
+                "cash_available": cash_available,
+                "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                "reason": "Current cash above reserve cannot support the saved offer floor.",
+            },
+        )
+
+    recommended_cash_offer = (
+        cash_budget_floor + (current_cash_budget_ceiling - cash_budget_floor) // 2
     )
     recipient_player_ids = [
         player_id for player_id in participant_player_ids if player_id != actor_id
@@ -2067,6 +2102,9 @@ def _deal_proposal_template_from_negotiation(
         "target_owner_name": _string_or_none(context.get("target_owner_name")),
         "cash_budget_floor": cash_budget_floor,
         "cash_budget_ceiling": cash_budget_ceiling,
+        "current_cash_budget_ceiling": current_cash_budget_ceiling,
+        "cash_available": cash_available,
+        "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
         "recommended_cash_offer": recommended_cash_offer,
         "deal_payload_template": {
             "recipient_player_ids": recipient_player_ids,
@@ -2093,7 +2131,7 @@ def _deal_proposal_template_from_negotiation(
     )
     if do_not_trade_to_opponent_id is not None:
         template["do_not_trade_target_to_opponent_player_id"] = do_not_trade_to_opponent_id
-    return template
+    return ("template", template)
 
 
 def _deal_proposal_message(
