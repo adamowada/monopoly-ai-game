@@ -81,6 +81,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "low" in source
     assert "railroad_purchase_with_healthy_cash" in source
     assert "purchase_completes_color_group_with_thin_cash" in source
+    assert "purchase_blocks_opponent_color_group_with_thin_cash" in source
     assert "healthy_cash_avoids_mortgage" in source
     assert "active_debt_uses_mortgage" in source
     assert "active_debt_settles_cash" in source
@@ -126,6 +127,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "above the valuation ceiling" in source
     assert "cash reserve floor" in source
     assert "buy_property_to_complete_group" in source
+    assert "buy_property_to_block_opponent_group_completion" in source
     assert "property_group_completion_premium" in source
     assert "block_opponent_group_completion_premium" in source
     assert "development_priority_score" in source
@@ -272,6 +274,34 @@ def test_live_codex_strategy_smoke_auction_blocks_opponent_group_completion() ->
     assert guidance["property_id"] == "property_virginia_avenue"
     assert guidance["valuation_basis"] == "block_opponent_group_completion_premium"
     assert guidance["strategic_valuation_ceiling"] == 240
+    assert guidance["opponent_group_completion_threats"] == [
+        {
+            "opponent_player_id": str(module.OTHER_PLAYER_ID),
+            "opponent_owned_property_ids": [
+                "property_st_charles_place",
+                "property_states_avenue",
+            ],
+        }
+    ]
+
+
+def test_live_codex_strategy_smoke_purchase_blocks_opponent_group_completion() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["purchase_blocks_opponent_color_group_with_thin_cash"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["action_selection_guidance"]["purchase_guidance"]
+    assert guidance["property_id"] == "property_virginia_avenue"
+    assert guidance["recommendation"] == "buy_property_to_block_opponent_group_completion"
+    assert guidance["cash_after_price"] == 240
     assert guidance["opponent_group_completion_threats"] == [
         {
             "opponent_player_id": str(module.OTHER_PLAYER_ID),

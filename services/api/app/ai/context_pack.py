@@ -743,6 +743,15 @@ def _action_selection_guidance(
                 "START_AUCTION risks losing monopoly leverage and should need an immediate "
                 "cash-survival reason."
             )
+        elif recommendation == "buy_property_to_block_opponent_group_completion":
+            recommended_action_types.append("BUY_PROPERTY")
+            if "START_AUCTION" in legal_action_types:
+                lower_priority_action_types.append("START_AUCTION")
+            turn_guidance.append(
+                "Prefer BUY_PROPERTY because this landed property blocks an opponent from "
+                "completing a color group; START_AUCTION risks handing monopoly leverage to "
+                "a competitor and should need an immediate cash-survival reason."
+            )
         elif recommendation == "consider_auction_for_liquidity":
             turn_guidance.append(
                 "START_AUCTION may be reasonable because BUY_PROPERTY cash_after_price would "
@@ -922,6 +931,7 @@ def _purchase_guidance(
     group = groups_by_id.get(property_data.group)
     same_group_owned_property_ids: list[str] = []
     same_group_other_owner_ids: list[str] = []
+    opponent_group_completion_threats: list[dict[str, Any]] = []
     completes_property_group = False
     if group is not None:
         for group_property_id in group.property_ids:
@@ -938,9 +948,27 @@ def _purchase_guidance(
             property_data.kind == "street"
             and len(same_group_owned_property_ids) == len(group.property_ids) - 1
         )
+        if property_data.kind == "street" and property_id in group.property_ids:
+            for other_owner_id in sorted(same_group_other_owner_ids):
+                opponent_owned_property_ids = [
+                    group_property_id
+                    for group_property_id in group.property_ids
+                    if group_property_id != property_id
+                    and ownership_by_property_id.get(group_property_id) is not None
+                    and ownership_by_property_id[group_property_id].owner_id == other_owner_id
+                ]
+                if len(opponent_owned_property_ids) == len(group.property_ids) - 1:
+                    opponent_group_completion_threats.append(
+                        {
+                            "opponent_player_id": other_owner_id,
+                            "opponent_owned_property_ids": opponent_owned_property_ids,
+                        }
+                    )
 
     if completes_property_group and cash_after_price >= GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
         recommendation = "buy_property_to_complete_group"
+    elif opponent_group_completion_threats and cash_after_price >= GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
+        recommendation = "buy_property_to_block_opponent_group_completion"
     elif cash_after_price >= PURCHASE_HEALTHY_CASH_FLOOR:
         recommendation = "buy_property_at_list_price"
     else:
@@ -963,6 +991,7 @@ def _purchase_guidance(
         "same_group_owned_property_ids": sorted(same_group_owned_property_ids),
         "same_group_other_owner_ids": sorted(same_group_other_owner_ids),
         "completes_property_group": completes_property_group,
+        "opponent_group_completion_threats": opponent_group_completion_threats,
     }
 
 
