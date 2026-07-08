@@ -2073,6 +2073,11 @@ def _deal_evaluation_guidance(
         for evaluation in evaluations
         if evaluation.get("recommendation") in {"accept", "reject"}
     }
+    recommended_accept_reject_actions = [
+        template
+        for evaluation in evaluations
+        if (template := _accept_reject_template_from_evaluation(evaluation)) is not None
+    ]
     guidance_messages: list[str] = []
     if any(evaluation.get("recommendation") == "reject" for evaluation in evaluations):
         guidance_messages.append(
@@ -2088,9 +2093,46 @@ def _deal_evaluation_guidance(
 
     return {
         "recommended_accept_reject_by_deal_id": recommended_accept_reject_by_deal_id,
+        "recommended_accept_reject_actions": recommended_accept_reject_actions,
         "deal_evaluations": evaluations,
         "guidance": guidance_messages,
     }
+
+
+def _accept_reject_template_from_evaluation(
+    evaluation: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    deal_id = _string_or_none(evaluation.get("deal_id"))
+    decision = _string_or_none(evaluation.get("recommendation"))
+    if deal_id is None or decision not in {"accept", "reject"}:
+        return None
+    reason_code = _string_or_none(evaluation.get("reason_code")) or decision
+    payload = {
+        "deal_id": deal_id,
+        "decision": decision,
+        "message": _accept_reject_message(
+            decision=decision,
+            reason_code=reason_code,
+        ),
+    }
+    return {
+        "deal_id": deal_id,
+        "decision": decision,
+        "reason_code": reason_code,
+        "accept_reject_payload_template": payload,
+    }
+
+
+def _accept_reject_message(*, decision: str, reason_code: str) -> str:
+    if decision == "accept":
+        return "I accept because this deal completes my set within value and liquidity limits."
+    if reason_code.endswith("_below_cash_floor"):
+        return "I reject because this deal would leave my cash below the liquidity floor."
+    if reason_code.endswith("_above_value_ceiling"):
+        return "I reject because the cash ask is above my strategic value ceiling."
+    if "breaks_actor_complete" in reason_code:
+        return "I reject because this would break up my complete set below fair value."
+    return "I reject because this offer undervalues set leverage."
 
 
 def _counteroffer_guidance(
@@ -3052,6 +3094,7 @@ def _instruction_contract() -> dict[str, Any]:
             "When counteroffer_guidance provides a counteroffer_payload_template, use it for counteroffer unless visible negotiation terms make rejection strategically better.",
             "For counteroffer, counteroffer.terms must follow the same valid JSON object string structured_deal shape.",
             "When deal_evaluation_guidance recommends reject for accept_reject, reject that deal unless visible terms clearly offset the listed strategic risk.",
+            "When deal_evaluation_guidance provides recommended_accept_reject_actions, use the highest-priority accept_reject_payload_template for accept_reject.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",

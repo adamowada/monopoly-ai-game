@@ -516,6 +516,11 @@ def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance(
 
     guidance = pack["deal_evaluation_guidance"]
     assert guidance["recommended_accept_reject_by_deal_id"] == {str(module.BAD_DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"] == {
+        "deal_id": str(module.BAD_DEAL_ID),
+        "decision": "reject",
+        "message": "I reject because this offer undervalues set leverage.",
+    }
     assert guidance["deal_evaluations"][0]["risk"]["property_id"] == "property_tennessee_avenue"
     assert guidance["deal_evaluations"][0]["risk"]["minimum_cash_value_floor"] == 270
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 269
@@ -572,6 +577,11 @@ def test_live_codex_strategy_smoke_good_deal_has_context_pack_acceptance_guidanc
 
     guidance = pack["deal_evaluation_guidance"]
     assert guidance["recommended_accept_reject_by_deal_id"] == {str(module.GOOD_DEAL_ID): "accept"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"] == {
+        "deal_id": str(module.GOOD_DEAL_ID),
+        "decision": "accept",
+        "message": "I accept because this deal completes my set within value and liquidity limits.",
+    }
     assert guidance["deal_evaluations"][0]["opportunity"]["property_id"] == (
         "property_tennessee_avenue"
     )
@@ -598,6 +608,9 @@ def test_live_codex_strategy_smoke_bad_completion_deals_have_rejection_guidance(
     assert overpriced_guidance["recommended_accept_reject_by_deal_id"] == {
         str(module.OVERPRICED_DEAL_ID): "reject"
     }
+    assert overpriced_guidance["recommended_accept_reject_actions"][0][
+        "accept_reject_payload_template"
+    ]["decision"] == "reject"
     assert overpriced_guidance["deal_evaluations"][0]["reason_code"] == (
         "receives_property_that_completes_actor_street_group_above_value_ceiling"
     )
@@ -620,6 +633,9 @@ def test_live_codex_strategy_smoke_bad_completion_deals_have_rejection_guidance(
     assert draining_guidance["recommended_accept_reject_by_deal_id"] == {
         str(module.CASH_DRAINING_DEAL_ID): "reject"
     }
+    assert draining_guidance["recommended_accept_reject_actions"][0][
+        "accept_reject_payload_template"
+    ]["decision"] == "reject"
     assert draining_guidance["deal_evaluations"][0]["reason_code"] == (
         "receives_property_that_completes_actor_street_group_below_cash_floor"
     )
@@ -699,6 +715,9 @@ def test_live_codex_strategy_smoke_monopoly_breakup_deal_has_rejection_guidance(
     assert guidance["recommended_accept_reject_by_deal_id"] == {
         str(module.BREAKUP_DEAL_ID): "reject"
     }
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
     assert guidance["deal_evaluations"][0]["reason_code"] == (
         "transfers_property_that_breaks_actor_complete_street_group_below_floor"
     )

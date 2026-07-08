@@ -660,6 +660,15 @@ def test_context_pack_recommends_rejecting_lowball_deal_that_completes_opponent_
     guidance = pack["deal_evaluation_guidance"]
 
     assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    recommended_action = guidance["recommended_accept_reject_actions"][0]
+    assert recommended_action["deal_id"] == str(DEAL_ID)
+    assert recommended_action["decision"] == "reject"
+    assert recommended_action["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_below_floor"
+    )
+    assert recommended_action["accept_reject_payload_template"]["deal_id"] == str(DEAL_ID)
+    assert recommended_action["accept_reject_payload_template"]["decision"] == "reject"
+    assert "undervalues set leverage" in recommended_action["accept_reject_payload_template"]["message"]
     assert guidance["deal_evaluations"] == [
         {
             "deal_id": str(DEAL_ID),
@@ -692,6 +701,10 @@ def test_context_pack_recommends_rejecting_lowball_deal_that_completes_opponent_
         "deal_evaluation_guidance recommends reject" in instruction
         for instruction in pack["instruction_contract"]["instructions"]
     )
+    assert any(
+        "recommended_accept_reject_actions" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
 
 
 def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopoly() -> None:
@@ -706,6 +719,15 @@ def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopo
     guidance = pack["deal_evaluation_guidance"]
 
     assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    recommended_action = guidance["recommended_accept_reject_actions"][0]
+    assert recommended_action["deal_id"] == str(DEAL_ID)
+    assert recommended_action["decision"] == "accept"
+    assert recommended_action["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_with_affordable_cash"
+    )
+    assert recommended_action["accept_reject_payload_template"]["deal_id"] == str(DEAL_ID)
+    assert recommended_action["accept_reject_payload_template"]["decision"] == "accept"
+    assert "completes my set" in recommended_action["accept_reject_payload_template"]["message"]
     assert guidance["deal_evaluations"] == [
         {
             "deal_id": str(DEAL_ID),
@@ -791,6 +813,9 @@ def test_context_pack_rejects_lowball_deal_that_completes_opponent_railroad_set(
     guidance = pack["deal_evaluation_guidance"]
 
     assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
     assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
     assert guidance["deal_evaluations"][0]["reason_code"] == (
         "transfers_property_that_completes_opponent_railroad_group_below_floor"
@@ -847,6 +872,9 @@ def test_context_pack_recommends_rejecting_overpriced_deal_that_completes_actor_
     guidance = pack["deal_evaluation_guidance"]
 
     assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
     assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
     assert guidance["deal_evaluations"][0]["reason_code"] == (
         "receives_property_that_completes_actor_street_group_above_value_ceiling"
