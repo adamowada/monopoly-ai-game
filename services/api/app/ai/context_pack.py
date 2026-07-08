@@ -2430,6 +2430,8 @@ def _deal_completion_evaluation(
     actor_receives_net_compensation_value = (
         actor_receives_total_compensation_value - actor_pays_cash_total
     )
+    actor_net_cash_payment = max(actor_pays_cash_total - actor_receives_cash_total, 0)
+    actor_cash_after_net_payment = player_cash - actor_net_cash_payment
     actor_completion_opportunities_by_property_id: dict[str, dict[str, Any]] = {}
     for receipt in actor_receives:
         receipt_property_id = _string_or_none(receipt.get("property_id"))
@@ -2723,11 +2725,13 @@ def _deal_completion_evaluation(
             "sender_player_id": sender_player_id,
             "actor_already_owned_property_ids": actor_already_owned_property_ids,
             "maximum_cash_value_ceiling": maximum_cash_value_ceiling,
+            "net_cash_payment": actor_net_cash_payment,
             "cash_after_payment": cash_after_payment,
+            "cash_after_net_payment": actor_cash_after_net_payment,
             "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
         }
         _include_property_group_kind(opportunity, group_kind)
-        if actor_pays_cash_total > maximum_cash_value_ceiling:
+        if actor_net_cash_payment > maximum_cash_value_ceiling:
             return {
                 "deal_id": _string_or_none(deal.get("id")),
                 "recommendation": "reject",
@@ -2743,10 +2747,12 @@ def _deal_completion_evaluation(
                 "actor_receives_property_ids": actor_receives_property_ids,
                 "opportunity": {
                     **opportunity,
-                    "cash_over_value_ceiling": actor_pays_cash_total - maximum_cash_value_ceiling,
+                    "cash_over_value_ceiling": (
+                        actor_net_cash_payment - maximum_cash_value_ceiling
+                    ),
                 },
             }
-        if cash_after_payment < GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
+        if actor_cash_after_net_payment < GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
             return {
                 "deal_id": _string_or_none(deal.get("id")),
                 "recommendation": "reject",
@@ -2762,7 +2768,10 @@ def _deal_completion_evaluation(
                 "actor_receives_property_ids": actor_receives_property_ids,
                 "opportunity": {
                     **opportunity,
-                    "cash_floor_gap": GROUP_COMPLETION_PURCHASE_CASH_FLOOR - cash_after_payment,
+                    "cash_floor_gap": (
+                        GROUP_COMPLETION_PURCHASE_CASH_FLOOR
+                        - actor_cash_after_net_payment
+                    ),
                 },
             }
 
