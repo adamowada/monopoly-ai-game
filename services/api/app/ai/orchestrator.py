@@ -238,7 +238,6 @@ def build_codex_exec_command(
     ]
     if output_last_message_path is not None:
         command.extend(["--output-last-message", str(Path(output_last_message_path))])
-    command.append("-")
     return command
 
 

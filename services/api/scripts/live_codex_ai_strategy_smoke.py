@@ -186,6 +186,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_monopoly_development,
         ),
         StrategySmokeCase(
+            name="low_cash_defers_monopoly_development",
+            game_id=UUID("00000000-0000-0000-0000-00000000b219"),
+            decision_type="action_decision",
+            state_factory=_low_cash_orange_monopoly_state,
+            verifier=_verify_low_cash_defers_monopoly_development,
+        ),
+        StrategySmokeCase(
             name="orange_near_monopoly_negotiation",
             game_id=UUID("00000000-0000-0000-0000-00000000b202"),
             decision_type="open_negotiation",
@@ -388,6 +395,12 @@ def _verify_orange_monopoly_development(parsed: dict[str, Any]) -> None:
     assert action.get("type") == "BUY_HOUSE", f"expected BUY_HOUSE, got {action.get('type')}"
     assert payload.get("property_id") == "property_new_york_avenue"
     assert payload.get("cost") == 100
+
+
+def _verify_low_cash_defers_monopoly_development(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "ROLL_DICE", f"expected ROLL_DICE, got {action.get('type')}"
 
 
 def _verify_orange_near_monopoly_negotiation(parsed: dict[str, Any]) -> None:
@@ -763,6 +776,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "pressure. Within Orange, property_new_york_avenue has the highest "
                     "marginal_rent_gain for the next house. Choose BUY_HOUSE on "
                     "property_new_york_avenue before rolling."
+                ),
+            },
+        )
+    if case.name == "low_cash_defers_monopoly_development":
+        return (
+            {
+                "id": "live-strategy-defer-low-cash-development",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace owns the Orange monopoly but has only "
+                    "$350 cash. Each BUY_HOUSE action costs $100 and leaves $250, below "
+                    "the $300 cash reserve floor. BUY_HOUSE remains legally available, but "
+                    "action_selection_guidance defers every development opportunity. Choose "
+                    "ROLL_DICE instead of BUY_HOUSE."
                 ),
             },
         )
@@ -1177,6 +1204,25 @@ def _brown_and_orange_monopolies_state(game_id: UUID) -> GameState:
             "hotel": False,
         }
         if item.property_id in owned_property_ids
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _low_cash_orange_monopoly_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-low-cash-orange-monopoly")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 350
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+            "mortgaged": False,
+            "houses": 0,
+            "hotel": False,
+        }
+        if item.property_id in ORANGE_PROPERTY_IDS
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]

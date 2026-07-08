@@ -250,6 +250,41 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
 
 
+def test_context_pack_defers_monopoly_development_when_cash_after_cost_breaches_reserve() -> None:
+    state = _state_with_orange_monopoly(cash=350)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    build_actions = [action for action in pack["legal_actions"] if action["type"] == "BUY_HOUSE"]
+    assert len(build_actions) == 3
+
+    guidance = pack["action_selection_guidance"]
+    assert "BUY_HOUSE" not in guidance["recommended_action_types_before_roll"]
+    assert "ROLL_DICE" not in guidance["lower_priority_action_types"]
+    assert "BUY_HOUSE" in guidance["lower_priority_action_types"]
+    assert [opportunity["property_id"] for opportunity in guidance["development_opportunities"]] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+    ]
+    assert guidance["recommended_development_opportunities"] == []
+    assert [opportunity["cash_after_cost"] for opportunity in guidance["deferred_development_opportunities"]] == [
+        250,
+        250,
+        250,
+    ]
+    assert all(
+        opportunity["cash_reserve_floor"] == 300
+        for opportunity in guidance["deferred_development_opportunities"]
+    )
+    assert all(
+        opportunity["cash_after_cost_is_healthy"] is False
+        for opportunity in guidance["deferred_development_opportunities"]
+    )
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "Wait on BUY_HOUSE" in guidance_text
+    assert "cash reserve floor" in guidance_text
+
+
 def test_context_pack_prioritizes_stronger_monopoly_development_group_before_roll() -> None:
     state = _state_with_brown_and_orange_monopolies()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -1114,9 +1149,9 @@ def _valid_action_output(state: GameState) -> dict[str, Any]:
     }
 
 
-def _state_with_orange_monopoly() -> GameState:
+def _state_with_orange_monopoly(*, cash: int = 3000) -> GameState:
     state = _state()
-    ai_player = state.players[0].model_copy(update={"cash": 3000})
+    ai_player = state.players[0].model_copy(update={"cash": cash})
     orange_property_ids = {
         "property_st_james_place",
         "property_tennessee_avenue",

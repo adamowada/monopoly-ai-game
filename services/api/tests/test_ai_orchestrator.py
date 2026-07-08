@@ -401,7 +401,8 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
     assert command[command.index("--output-schema") + 1] == str(schema_path)
     assert command[command.index("-C") + 1] == str(sandbox_dir)
     assert command[command.index("--output-last-message") + 1] == str(last_message_path)
-    assert command[-1] == "-"
+    assert "-" not in command
+    assert command[-1] == str(last_message_path)
     written_schema = json.loads(schema_path.read_text(encoding="utf-8"))
     assert written_schema["type"] == "object"
     assert written_schema["properties"]["decision_type"]["const"] == "action_decision"

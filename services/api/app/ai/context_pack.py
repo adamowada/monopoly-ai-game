@@ -701,6 +701,16 @@ def _action_selection_guidance(
         str(action["type"]) for action in legal_actions if isinstance(action.get("type"), str)
     ]
     development_opportunities = _development_opportunities(state, actor_id, legal_actions)
+    recommended_development_opportunities = [
+        opportunity
+        for opportunity in development_opportunities
+        if bool(opportunity.get("cash_after_cost_is_healthy"))
+    ]
+    deferred_development_opportunities = [
+        opportunity
+        for opportunity in development_opportunities
+        if not bool(opportunity.get("cash_after_cost_is_healthy"))
+    ]
     recommended_action_types: list[str] = []
     recommended_before_roll: list[str] = []
     lower_priority_action_types: list[str] = []
@@ -739,7 +749,7 @@ def _action_selection_guidance(
                 "monopoly, railroad, utility, or blocking value."
             )
 
-    if development_opportunities:
+    if recommended_development_opportunities:
         recommended_before_roll.append("BUY_HOUSE")
         if "ROLL_DICE" in legal_action_types:
             lower_priority_action_types.append("ROLL_DICE")
@@ -749,6 +759,14 @@ def _action_selection_guidance(
             "When multiple groups can develop, choose from the highest "
             "development_priority_score group first, then choose the legal property "
             "with the highest marginal_rent_gain."
+        )
+    elif deferred_development_opportunities:
+        if "BUY_HOUSE" not in lower_priority_action_types:
+            lower_priority_action_types.append("BUY_HOUSE")
+        turn_guidance.append(
+            "Wait on BUY_HOUSE even though it is legal because every available build would "
+            "fall below the cash reserve floor; prefer ROLL_DICE unless a concrete rent, "
+            "debt, or bankruptcy-prevention reason justifies the liquidity risk."
         )
 
     if auction_guidance is not None:
@@ -851,6 +869,8 @@ def _action_selection_guidance(
         "lower_priority_action_types": lower_priority_action_types,
         "purchase_guidance": purchase_guidance,
         "development_opportunities": development_opportunities,
+        "recommended_development_opportunities": recommended_development_opportunities,
+        "deferred_development_opportunities": deferred_development_opportunities,
         "auction_guidance": auction_guidance,
         "debt_resolution_guidance": debt_resolution_guidance,
         "mortgage_guidance": mortgage_guidance,
@@ -1293,6 +1313,7 @@ def _development_opportunities(
         )
         current_improvement_level = group_improvement_levels.get(property_id, 0)
         marginal_rent_gain = _marginal_rent_gain(property_data, current_improvement_level)
+        cash_after_cost = player.cash - cost
         opportunities.append(
             {
                 "action_type": "BUY_HOUSE",
@@ -1308,7 +1329,9 @@ def _development_opportunities(
                 "marginal_rent_gain_basis": "rent_after_next_improvement_minus_current_rent",
                 "cost": cost,
                 "cash_before": player.cash,
-                "cash_after_cost": player.cash - cost,
+                "cash_after_cost": cash_after_cost,
+                "cash_reserve_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                "cash_after_cost_is_healthy": cash_after_cost >= PURCHASE_HEALTHY_CASH_FLOOR,
                 "current_improvement_level": current_improvement_level,
                 "group_improvement_levels": group_improvement_levels,
                 "recommendation": (
