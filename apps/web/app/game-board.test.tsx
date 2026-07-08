@@ -328,7 +328,9 @@ describe("ClassicGameBoard", () => {
       "perimeter-price-edge",
     );
     expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-side", "bottom");
+    expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveAttribute("data-marker-board-zone", "perimeter");
     expect(mediterranean?.querySelector("[data-owner-marker]")).toHaveClass("bottom-0");
+    expect(mediterranean?.querySelector("[data-owner-marker]")).not.toHaveClass("top-0");
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
       "aria-label",
       "Development marker: Mediterranean Avenue has 3 houses",
@@ -354,6 +356,10 @@ describe("ClassicGameBoard", () => {
       "interior-development-edge",
     );
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute("data-marker-side", "top");
+    expect(mediterranean?.querySelector("[data-development-marker]")).toHaveAttribute(
+      "data-marker-board-zone",
+      "interior",
+    );
     expect(mediterranean?.querySelector("[data-development-marker]")).toHaveClass("top-0");
     expect(mediterranean?.querySelector("[data-development-marker]")).not.toHaveClass("bottom-0");
     expect(mediterranean?.querySelector("[data-development-marker]")).not.toHaveClass("top-1");
@@ -497,12 +503,13 @@ describe("ClassicGameBoard", () => {
     const movementBanner = screen.getByRole("status", { name: "Board movement" });
     expect(movementBanner).toHaveTextContent("Ada moving to Baltic Avenue");
     expect(movementBanner).toHaveAttribute("data-board-motion-placement", "center-stack");
-    expect(movementBanner).toHaveAttribute("data-board-motion-size", "compact-narrow");
+    expect(movementBanner).toHaveAttribute("data-board-motion-size", "compact-route-chip");
     expect(movementBanner).toHaveAttribute("data-board-motion-layer", "top");
-    expect(movementBanner).toHaveAttribute("data-board-motion-overlap", "separate-from-dice");
-    expect(movementBanner).toHaveClass("max-w-[6rem]");
+    expect(movementBanner).toHaveAttribute("data-board-motion-overlap", "fixed-lane-above-dice");
+    expect(movementBanner).toHaveClass("max-w-[5.25rem]");
     expect(movementBanner).not.toHaveClass("max-w-[4.25rem]");
     expect(movementBanner).not.toHaveClass("max-w-[5.75rem]");
+    expect(movementBanner).not.toHaveClass("max-w-[6rem]");
     expect(movementBanner).not.toHaveClass("max-w-[7rem]");
     expect(movementBanner).not.toHaveClass("max-w-[8.25rem]");
     expect(movementBanner).not.toHaveClass("max-w-[10rem]");
@@ -510,10 +517,16 @@ describe("ClassicGameBoard", () => {
     const centerBoard = screen.getByTestId("center-board-art");
     const motionStack = centerBoard.querySelector("[data-center-motion-stack]");
     expect(motionStack).toBeInTheDocument();
-    expect(motionStack).toHaveAttribute("data-center-motion-layout", "compact-centered-stack");
-    expect(motionStack).toHaveAttribute("data-center-motion-gap", "tight");
-    expect(centerBoard.querySelector("[data-center-motion-lane='movement']")).not.toHaveClass("top-[23%]");
-    expect(centerBoard.querySelector("[data-center-motion-lane='dice']")).not.toHaveClass("top-[82%]");
+    expect(motionStack).toHaveAttribute("data-center-motion-layout", "separated-fixed-lanes");
+    expect(motionStack).toHaveAttribute("data-center-motion-gap", "collision-proof");
+    const movementLane = centerBoard.querySelector("[data-center-motion-lane='movement']");
+    const diceLane = centerBoard.querySelector("[data-center-motion-lane='dice']");
+    expect(movementLane).toHaveAttribute("data-center-motion-lane-position", "above-dice");
+    expect(movementLane).toHaveClass("top-[31%]");
+    expect(movementLane).not.toHaveClass("top-1/2");
+    expect(diceLane).toHaveAttribute("data-center-motion-lane-position", "below-movement");
+    expect(diceLane).toHaveClass("top-[65%]");
+    expect(diceLane).not.toHaveClass("top-1/2");
     const centeredDiceStatus = within(centerBoard).getByRole("status", { name: "Dice roll animation" });
     expect(movementBanner.compareDocumentPosition(centeredDiceStatus) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(centeredDiceStatus).toHaveAttribute(

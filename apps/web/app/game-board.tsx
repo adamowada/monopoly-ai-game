@@ -388,6 +388,17 @@ function oppositeEdge(edge: BoardEdge): BoardEdge {
   }
 }
 
+function propertyMarkerEdgesForPosition(position: number): {
+  developmentEdge: BoardEdge;
+  ownershipEdge: BoardEdge;
+} {
+  const ownershipEdge = perimeterEdgeForPosition(position);
+  return {
+    developmentEdge: oppositeEdge(ownershipEdge),
+    ownershipEdge,
+  };
+}
+
 const ownerMarkerSideClasses: Record<BoardEdge, string> = {
   bottom: "bottom-0 left-1/2 -translate-x-1/2 translate-y-px rounded-b-none",
   left: "left-0 top-1/2 -translate-x-px -translate-y-1/2 rounded-l-none",
@@ -495,15 +506,15 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-[80] mx-auto w-fit max-w-[6rem] rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1.5 py-1 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[80] mx-auto w-fit max-w-[5.25rem] overflow-hidden rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-layer="top"
-      data-board-motion-overlap="separate-from-dice"
+      data-board-motion-overlap="fixed-lane-above-dice"
       data-board-motion-placement="center-stack"
-      data-board-motion-size="compact-narrow"
+      data-board-motion-size="compact-route-chip"
       role="status"
     >
-      <div className="break-words text-[9px] font-black leading-[1.05]">{message}</div>
+      <div className="break-words text-[8px] font-black leading-[1.05]">{message}</div>
     </div>
   );
 }
@@ -522,22 +533,31 @@ function CenterMotionStack({
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-[65] grid place-items-center px-2"
-      data-center-motion-gap="tight"
-      data-center-motion-layout="compact-centered-stack"
+      className="pointer-events-none absolute inset-0 z-[65]"
+      data-center-motion-gap="collision-proof"
+      data-center-motion-layout="separated-fixed-lanes"
       data-center-motion-stack=""
     >
-      <div className="grid w-fit max-w-[7.5rem] justify-items-center gap-1" data-center-motion-stack-inner="">
+      <div className="absolute inset-0" data-center-motion-stack-inner="">
         {showMotionBanner ? (
           <div
-            className="relative z-[80] w-fit max-w-[6rem]"
+            className="absolute left-1/2 top-[31%] z-[80] w-fit max-w-[5.25rem] -translate-x-1/2 -translate-y-1/2"
             data-center-motion-banner-layer=""
             data-center-motion-lane="movement"
+            data-center-motion-lane-position="above-dice"
           >
             <BoardMotionBanner motion={motion} />
           </div>
         ) : null}
-        <div className="relative z-30 w-fit max-w-[7.5rem]" data-center-dice-layer="" data-center-motion-lane="dice">
+        <div
+          className={cn(
+            "absolute left-1/2 z-30 w-fit max-w-[7.25rem] -translate-x-1/2 -translate-y-1/2",
+            showMotionBanner ? "top-[65%]" : "top-1/2",
+          )}
+          data-center-dice-layer=""
+          data-center-motion-lane="dice"
+          data-center-motion-lane-position={showMotionBanner ? "below-movement" : "centered"}
+        >
           <DiceMotionStatus lastRoll={lastRoll} motion={motion} placement="center-board" />
         </div>
       </div>
@@ -850,21 +870,21 @@ function BoardOwnerMarker({
 
   const color = getPlayerColor(game, owner.seat_order);
   const icon = getPlayerIcon(game, owner.seat_order);
-  const perimeterEdge = perimeterEdgeForPosition(position);
+  const { ownershipEdge } = propertyMarkerEdgesForPosition(position);
 
   return (
     <span
       aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
       className={cn(
         "absolute z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm",
-        ownerMarkerSideClasses[perimeterEdge],
+        ownerMarkerSideClasses[ownershipEdge],
       )}
       data-marker-anchor="perimeter-price-edge"
       data-marker-board-zone="perimeter"
       data-marker-edge="perimeter"
       data-marker-placement="owner-perimeter"
       data-marker-role="ownership"
-      data-marker-side={perimeterEdge}
+      data-marker-side={ownershipEdge}
       data-owner-marker=""
       data-token-icon={icon}
       role="img"
@@ -903,15 +923,15 @@ function DevelopmentMarker({
   const label = hasHotel
     ? `Development marker: ${property.name} has a hotel`
     : `Development marker: ${property.name} has ${houses} ${houses === 1 ? "house" : "houses"}`;
-  const interiorEdge = oppositeEdge(perimeterEdgeForPosition(position));
+  const { developmentEdge } = propertyMarkerEdgesForPosition(position);
 
   return (
     <span
       aria-label={label}
       className={cn(
         "absolute z-20 flex items-center justify-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm",
-        developmentMarkerAxisClass(interiorEdge),
-        developmentMarkerSideClasses[interiorEdge],
+        developmentMarkerAxisClass(developmentEdge),
+        developmentMarkerSideClasses[developmentEdge],
       )}
       data-development-marker=""
       data-marker-anchor="interior-development-edge"
@@ -919,7 +939,7 @@ function DevelopmentMarker({
       data-marker-edge="interior"
       data-marker-placement="development-interior"
       data-marker-role="development"
-      data-marker-side={interiorEdge}
+      data-marker-side={developmentEdge}
       role="img"
       title={label.replace("Development marker: ", "")}
     >
