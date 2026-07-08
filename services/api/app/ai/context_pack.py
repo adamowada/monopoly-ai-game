@@ -706,6 +706,7 @@ def _action_selection_guidance(
     turn_guidance: list[str] = []
     purchase_guidance = _purchase_guidance(state, actor_id, legal_actions)
     auction_guidance = _auction_guidance(state, actor_id, legal_actions)
+    debt_resolution_guidance = _debt_resolution_guidance(state, actor_id, legal_actions)
     mortgage_guidance = _mortgage_guidance(state, actor_id, legal_actions)
     unmortgage_guidance = _unmortgage_guidance(state, actor_id, legal_actions)
     jail_guidance = _jail_guidance(state, actor_id, legal_actions)
@@ -751,6 +752,36 @@ def _action_selection_guidance(
                 "Choose PASS_AUCTION when the minimum BID_AUCTION amount is "
                 "above the valuation ceiling unless a concrete monopoly-completion "
                 "reason justifies the overpay."
+            )
+
+    if debt_resolution_guidance is not None:
+        recommendation = _string_or_none(debt_resolution_guidance.get("recommendation"))
+        if recommendation == "settle_cash_debt":
+            recommended_action_types.append("SETTLE_DEBT")
+            for action_type in ("SELL_HOUSE", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"):
+                if action_type in legal_action_types and action_type not in lower_priority_action_types:
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "SETTLE_DEBT is legal and cash covers the active debt; choose it before "
+                "liquidation actions or DECLARE_BANKRUPTCY."
+            )
+        elif recommendation == "sell_improvements_before_mortgage":
+            recommended_action_types.append("SELL_HOUSE")
+            for action_type in ("MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"):
+                if action_type in legal_action_types and action_type not in lower_priority_action_types:
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "SELL_HOUSE can cover the active debt from improvements; choose a legal "
+                "SELL_HOUSE before MORTGAGE_PROPERTY so rent-producing property is not "
+                "disabled unnecessarily."
+            )
+        elif recommendation == "mortgage_only_enough_for_debt":
+            for action_type in ("DECLARE_BANKRUPTCY",):
+                if action_type in legal_action_types and action_type not in lower_priority_action_types:
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "MORTGAGE_PROPERTY may be necessary for the active debt; mortgage only "
+                "enough to cover the remaining amount and avoid DECLARE_BANKRUPTCY."
             )
 
     if mortgage_guidance is not None:
@@ -800,6 +831,7 @@ def _action_selection_guidance(
         "purchase_guidance": purchase_guidance,
         "development_opportunities": development_opportunities,
         "auction_guidance": auction_guidance,
+        "debt_resolution_guidance": debt_resolution_guidance,
         "mortgage_guidance": mortgage_guidance,
         "unmortgage_guidance": unmortgage_guidance,
         "jail_guidance": jail_guidance,
@@ -934,6 +966,85 @@ def _mortgage_guidance(
         "mortgageable_property_count": len(mortgage_actions),
         "mortgageable_property_ids": mortgageable_property_ids,
         "total_available_proceeds": total_available_proceeds,
+    }
+
+
+def _debt_resolution_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    active_payment = state.active_payment
+    if active_payment is None or active_payment.debtor_id != actor_id:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    outstanding_debt = max(active_payment.amount_owed - active_payment.amount_paid, 0)
+    if outstanding_debt <= 0:
+        return None
+
+    settle_actions = [
+        action for action in legal_actions if action.get("type") == "SETTLE_DEBT"
+    ]
+    sell_house_actions = [
+        action for action in legal_actions if action.get("type") == "SELL_HOUSE"
+    ]
+    mortgage_actions = [
+        action for action in legal_actions if action.get("type") == "MORTGAGE_PROPERTY"
+    ]
+    bankruptcy_available = any(action.get("type") == "DECLARE_BANKRUPTCY" for action in legal_actions)
+
+    settle_amount = 0
+    for action in settle_actions:
+        settle_amount = max(settle_amount, _int_or_zero(_mapping(action.get("payload")).get("amount")))
+
+    sell_house_property_ids: list[str] = []
+    sell_house_total_proceeds = 0
+    for action in sell_house_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is not None:
+            sell_house_property_ids.append(property_id)
+        sell_house_total_proceeds += _int_or_zero(payload.get("proceeds"))
+
+    mortgageable_property_ids: list[str] = []
+    mortgage_total_proceeds = 0
+    for action in mortgage_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is not None:
+            mortgageable_property_ids.append(property_id)
+        mortgage_total_proceeds += _int_or_zero(payload.get("proceeds"))
+
+    remaining_after_cash = max(outstanding_debt - player.cash, 0)
+    recommendation = "avoid_bankruptcy_if_any_liquidation_available"
+    if settle_amount >= outstanding_debt:
+        recommendation = "settle_cash_debt"
+    elif sell_house_total_proceeds >= remaining_after_cash and sell_house_actions:
+        recommendation = "sell_improvements_before_mortgage"
+    elif mortgage_actions:
+        recommendation = "mortgage_only_enough_for_debt"
+
+    return {
+        "action_available": bool(
+            settle_actions or sell_house_actions or mortgage_actions or bankruptcy_available
+        ),
+        "recommendation": recommendation,
+        "outstanding_debt": outstanding_debt,
+        "cash_available": player.cash,
+        "remaining_after_cash": remaining_after_cash,
+        "settle_amount": settle_amount,
+        "settlement_available": bool(settle_actions),
+        "sell_house_available": bool(sell_house_actions),
+        "sell_house_property_ids": sell_house_property_ids,
+        "sell_house_total_proceeds": sell_house_total_proceeds,
+        "mortgage_available": bool(mortgage_actions),
+        "mortgageable_property_ids": mortgageable_property_ids,
+        "mortgage_total_proceeds": mortgage_total_proceeds,
+        "bankruptcy_available": bankruptcy_available,
     }
 
 
@@ -1523,6 +1634,7 @@ def _instruction_contract() -> dict[str, Any]:
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
             "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
             "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
+            "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
             "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a street group or blocking an opponent's street group.",
             "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",

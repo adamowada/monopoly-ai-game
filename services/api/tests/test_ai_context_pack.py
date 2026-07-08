@@ -366,6 +366,59 @@ def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> 
     assert "only enough" in guidance_text
 
 
+def test_context_pack_prioritizes_cash_settlement_for_active_debt() -> None:
+    state = _state_with_active_debt_and_owned_railroad(cash=75, amount_owed=75)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    legal_action_types = {action["type"] for action in pack["legal_actions"]}
+    assert {"SETTLE_DEBT", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"}.issubset(legal_action_types)
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["SETTLE_DEBT"]
+    assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
+    assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
+    assert guidance["debt_resolution_guidance"]["recommendation"] == "settle_cash_debt"
+    assert guidance["debt_resolution_guidance"]["settle_amount"] == 75
+    assert guidance["debt_resolution_guidance"]["outstanding_debt"] == 75
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "SETTLE_DEBT" in guidance_text
+    assert "before liquidation" in guidance_text
+
+
+def test_context_pack_prioritizes_selling_improvements_before_mortgage_for_debt() -> None:
+    state = _state_with_active_debt_sellable_house_and_railroad(cash=0, amount_owed=25)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    sell_house_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "SELL_HOUSE"
+    ]
+    mortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert len(sell_house_actions) == 1
+    assert sell_house_actions[0]["payload"] == {
+        "property_id": "property_oriental_avenue",
+        "proceeds": 25,
+    }
+    assert any(
+        action["payload"]["property_id"] == "property_b_and_o_railroad"
+        for action in mortgage_actions
+    )
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["SELL_HOUSE"]
+    assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
+    assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
+    assert guidance["debt_resolution_guidance"]["recommendation"] == "sell_improvements_before_mortgage"
+    assert guidance["debt_resolution_guidance"]["sell_house_property_ids"] == [
+        "property_oriental_avenue"
+    ]
+    assert guidance["debt_resolution_guidance"]["sell_house_total_proceeds"] == 25
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "SELL_HOUSE" in guidance_text
+    assert "before MORTGAGE_PROPERTY" in guidance_text
+
+
 def test_context_pack_prioritizes_unmortgaging_rent_property_when_cash_stays_healthy() -> None:
     state = _state_with_mortgaged_railroad(cash=900)
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
@@ -1013,7 +1066,7 @@ def _state_with_owned_railroad(*, cash: int) -> GameState:
     )
 
 
-def _state_with_active_debt_and_owned_railroad(*, cash: int) -> GameState:
+def _state_with_active_debt_and_owned_railroad(*, cash: int, amount_owed: int = 350) -> GameState:
     state = _state_with_owned_railroad(cash=cash)
     return GameState.model_validate(
         {
@@ -1025,7 +1078,56 @@ def _state_with_active_debt_and_owned_railroad(*, cash: int) -> GameState:
             "active_payment": {
                 "debtor_id": str(AI_PLAYER_ID),
                 "creditor_id": str(OTHER_PLAYER_ID),
-                "amount_owed": 350,
+                "amount_owed": amount_owed,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _state_with_active_debt_sellable_house_and_railroad(
+    *,
+    cash: int,
+    amount_owed: int,
+) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    owned_property_ids = {
+        "property_oriental_avenue",
+        "property_vermont_avenue",
+        "property_connecticut_avenue",
+        "property_b_and_o_railroad",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (ai_player.model_dump(mode="python"), *[
+                player.model_dump(mode="python") for player in state.players[1:]
+            ]),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                    "houses": 1 if ownership.property_id == "property_oriental_avenue" else 0,
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "bank_inventory": {
+                **state.bank_inventory.model_dump(mode="python"),
+                "houses": 31,
+            },
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": amount_owed,
                 "amount_paid": 0,
                 "reason": "rent",
                 "negotiation_allowed": False,
