@@ -710,6 +710,8 @@ def _draw_apply_and_resolve_card(
         dice_total=dice_total,
         apply_card_rent=False,
     )
+    if state.active_payment is not None:
+        return _enter_payment_resolution(state, event_id_prefix)
 
     if effect_type == "go_to_jail":
         return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
@@ -734,6 +736,14 @@ def _draw_apply_and_resolve_card(
         )
 
     return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+
+def _enter_payment_resolution(state: GameState, event_id_prefix: str) -> GameState:
+    active_payment = state.active_payment
+    if active_payment is None:
+        return state
+    state = _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+    return _complete_forced_debt_bankruptcy(state, active_payment.debtor_id, event_id_prefix)
 
 
 def _resolve_nearest_card_landing(

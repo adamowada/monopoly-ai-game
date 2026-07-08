@@ -17,6 +17,9 @@ from app.rules.actions import (
 from app.rules.events import (
     ActiveAuctionSetPayload,
     BankInventorySetPayload,
+    DeckEventName,
+    DeckStateSetPayload,
+    DiceRolledPayload,
     GameEvent,
     PlayerBankruptcySetPayload,
     PlayerCashDeltaPayload,
@@ -152,6 +155,16 @@ def _set_bankrupt(state: GameState, player_id: str) -> GameState:
         state,
         "PLAYER_BANKRUPTCY_SET",
         PlayerBankruptcySetPayload(player_id=player_id, is_bankrupt=True),
+    )
+
+
+def _put_deck_card_on_top(state: GameState, deck: DeckEventName, card_id: str) -> GameState:
+    deck_state = getattr(state.decks, deck)
+    draw_pile = (card_id, *(candidate for candidate in deck_state.draw_pile if candidate != card_id))
+    return _apply_setup_event(
+        state,
+        "DECK_STATE_SET",
+        DeckStateSetPayload(deck=deck, draw_pile=draw_pile, discard_pile=deck_state.discard_pile),
     )
 
 
@@ -612,3 +625,42 @@ def test_roll_dice_action_uses_deterministic_rng_and_records_dice_event() -> Non
     assert next_state_a.turn.phase == "PURCHASE_OR_AUCTION"
     assert {"BUY_PROPERTY", "START_AUCTION"}.issubset(_types(list_legal_actions(next_state_a, "player-1")))
     assert next_state_a.applied_event_ids[0] == "roll-1"
+
+
+def test_roll_drawn_bank_fee_card_enters_payment_resolution_when_cash_is_short(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def rigged_dice_roll(state: GameState, event_id: str, player_id: str) -> GameEvent:
+        return GameEvent(
+            event_id=event_id,
+            sequence=state.event_sequence + 1,
+            type="DICE_ROLLED",
+            payload=DiceRolledPayload(
+                player_id=player_id,
+                die_1=1,
+                die_2=1,
+                total=2,
+                is_doubles=True,
+                roll_counter=state.rng.dice_roll_count + 1,
+            ),
+        )
+
+    monkeypatch.setattr("app.rules.actions.generate_dice_roll_event", rigged_dice_roll)
+    state = _put_deck_card_on_top(
+        _set_cash(_initial_state(), "player-1", 25),
+        "community_chest",
+        "card_community_hospital_fee",
+    )
+
+    next_state = apply_action(state, _action(state, "player-1", "ROLL_DICE"), "short-card-roll")
+
+    assert _player(next_state, "player-1").position == 2
+    assert _player(next_state, "player-1").cash == 25
+    assert next_state.active_payment is not None
+    assert next_state.active_payment.debtor_id == "player-1"
+    assert next_state.active_payment.creditor_id is None
+    assert next_state.active_payment.amount_owed == 100
+    assert next_state.active_payment.reason == "card_bank:card_community_hospital_fee"
+    assert next_state.turn.phase == TurnPhase.PAYMENT_RESOLUTION
+    assert "DECLARE_BANKRUPTCY" in _types(list_legal_actions(next_state, "player-1"))
+    assert all(player.cash >= 0 for player in next_state.players)
