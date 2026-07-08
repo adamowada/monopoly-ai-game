@@ -91,6 +91,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_railroad_purchase_with_healthy_cash,
         ),
         StrategySmokeCase(
+            name="healthy_cash_avoids_mortgage",
+            game_id=UUID("00000000-0000-0000-0000-00000000b208"),
+            decision_type="action_decision",
+            state_factory=_healthy_cash_mortgage_state,
+            verifier=_verify_healthy_cash_avoids_mortgage,
+        ),
+        StrategySmokeCase(
             name="auction_bid_within_valuation",
             game_id=UUID("00000000-0000-0000-0000-00000000b206"),
             decision_type="action_decision",
@@ -198,6 +205,13 @@ def _verify_railroad_purchase_with_healthy_cash(parsed: dict[str, Any]) -> None:
     assert payload.get("property_id") == "property_reading_railroad"
     if "price" in payload:
         assert payload.get("price") == 200
+
+
+def _verify_healthy_cash_avoids_mortgage(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "ROLL_DICE", f"expected ROLL_DICE, got {action.get('type')}"
 
 
 def _verify_auction_bid_within_valuation(parsed: dict[str, Any]) -> None:
@@ -424,6 +438,18 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
 
 
 def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ...]:
+    if case.name == "healthy_cash_avoids_mortgage":
+        return (
+            {
+                "id": "live-strategy-avoid-unnecessary-mortgage",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace has $900 cash, no active debt, and owns "
+                    "property_b_and_o_railroad. MORTGAGE_PROPERTY is available but should be "
+                    "avoided unless debt or urgent liquidity pressure exists. Choose ROLL_DICE."
+                ),
+            },
+        )
     if case.name == "auction_pass_above_valuation":
         return (
             {
@@ -557,6 +583,22 @@ def _railroad_purchase_state(game_id: UUID) -> GameState:
             },
         }
     )
+
+
+def _healthy_cash_mortgage_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-avoid-mortgage")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 900
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id == "property_b_and_o_railroad"
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
 
 
 def _auction_bid_state(game_id: UUID) -> GameState:
