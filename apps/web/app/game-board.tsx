@@ -399,23 +399,8 @@ function propertyMarkerEdgesForPosition(position: number): {
   };
 }
 
-const ownerMarkerSideClasses: Record<BoardEdge, string> = {
-  bottom: "bottom-0 left-1/2 -translate-x-1/2 translate-y-px rounded-b-none",
-  left: "left-0 top-1/2 -translate-x-px -translate-y-1/2 rounded-l-none",
-  right: "right-0 top-1/2 translate-x-px -translate-y-1/2 rounded-r-none",
-  top: "left-1/2 top-0 -translate-x-1/2 -translate-y-px rounded-t-none",
-};
-
-const developmentMarkerSideClasses: Record<BoardEdge, string> = {
-  bottom: "bottom-0 left-1/2 -translate-x-1/2 rounded-b-none",
-  left: "left-0 top-1/2 -translate-x-px -translate-y-1/2 rounded-l-none",
-  right: "right-0 top-1/2 translate-x-px -translate-y-1/2 rounded-r-none",
-  top: "left-1/2 top-0 -translate-x-1/2 -translate-y-px rounded-t-none",
-};
-
-function developmentMarkerAxisClass(edge: BoardEdge): string {
-  return edge === "left" || edge === "right" ? "flex-col" : "flex-row";
-}
+const ownerMarkerCardSlotClass = "bottom-0 left-1/2 -translate-x-1/2 translate-y-px rounded-b-none";
+const developmentMarkerCardSlotClass = "left-1/2 top-0 -translate-x-1/2 -translate-y-px rounded-t-none";
 
 function orientedContentStyle(rotation: number): CSSProperties {
   const sideways = Math.abs(rotation) === 90;
@@ -506,12 +491,12 @@ function BoardMotionBanner({ motion }: Readonly<{ motion?: BoardMotion }>) {
     <div
       aria-label={isLanding ? "Board landing" : "Board movement"}
       aria-live="polite"
-      className="relative z-[80] mx-auto w-fit max-w-[5.25rem] overflow-hidden rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
+      className="relative z-[80] mx-auto w-fit max-w-[4.5rem] overflow-hidden rounded-sm border-2 border-[#2f2418] bg-[#fffbea] px-1 py-0.5 text-center text-[#1f2a1f] shadow-[0_5px_0_rgba(47,36,24,0.16)]"
       data-board-motion-banner={motion.status}
       data-board-motion-layer="top"
-      data-board-motion-overlap="fixed-lane-above-dice"
+      data-board-motion-overlap="separate-fixed-lanes"
       data-board-motion-placement="center-stack"
-      data-board-motion-size="compact-route-chip"
+      data-board-motion-size="micro-route-chip"
       role="status"
     >
       <div className="break-words text-[8px] font-black leading-[1.05]">{message}</div>
@@ -541,7 +526,7 @@ function CenterMotionStack({
       <div className="absolute inset-0" data-center-motion-stack-inner="">
         {showMotionBanner ? (
           <div
-            className="absolute left-1/2 top-[31%] z-[80] w-fit max-w-[5.25rem] -translate-x-1/2 -translate-y-1/2"
+            className="absolute left-1/2 top-[24%] z-[80] w-fit max-w-[4.5rem] -translate-x-1/2 -translate-y-1/2"
             data-center-motion-banner-layer=""
             data-center-motion-lane="movement"
             data-center-motion-lane-position="above-dice"
@@ -552,7 +537,7 @@ function CenterMotionStack({
         <div
           className={cn(
             "absolute left-1/2 z-30 w-fit max-w-[7.25rem] -translate-x-1/2 -translate-y-1/2",
-            showMotionBanner ? "top-[65%]" : "top-1/2",
+            showMotionBanner ? "top-[76%]" : "top-1/2",
           )}
           data-center-dice-layer=""
           data-center-motion-lane="dice"
@@ -877,10 +862,11 @@ function BoardOwnerMarker({
       aria-label={`Owner marker: ${owner.name} owns ${property.name}`}
       className={cn(
         "absolute z-20 grid size-4 place-items-center rounded-sm border border-[#2f2418]/70 text-[9px] font-black shadow-sm",
-        ownerMarkerSideClasses[ownershipEdge],
+        ownerMarkerCardSlotClass,
       )}
       data-marker-anchor="perimeter-price-edge"
       data-marker-board-zone="perimeter"
+      data-marker-card-slot="bottom"
       data-marker-edge="perimeter"
       data-marker-placement="owner-perimeter"
       data-marker-role="ownership"
@@ -929,13 +915,13 @@ function DevelopmentMarker({
     <span
       aria-label={label}
       className={cn(
-        "absolute z-20 flex items-center justify-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm",
-        developmentMarkerAxisClass(developmentEdge),
-        developmentMarkerSideClasses[developmentEdge],
+        "absolute z-20 flex flex-row items-center justify-center gap-0.5 rounded-sm border border-[#2f2418]/50 bg-[#fffbea]/95 px-1 py-0.5 shadow-sm",
+        developmentMarkerCardSlotClass,
       )}
       data-development-marker=""
       data-marker-anchor="interior-development-edge"
       data-marker-board-zone="interior"
+      data-marker-card-slot="top"
       data-marker-edge="interior"
       data-marker-placement="development-interior"
       data-marker-role="development"
@@ -1359,18 +1345,18 @@ export function ClassicGameBoard({ drawnCard, game, lastRoll, motion, onDismissD
                   gridRow: `${coordinates.row} / span ${coordinates.rowSpan}`,
                 }}
               >
-                {property && ownership ? (
-                  <BoardOwnerMarker
-                    game={game}
-                    ownership={ownership}
-                    position={space.position}
-                    property={property}
-                  />
-                ) : null}
-                {property?.kind === "street" && ownership ? (
-                  <DevelopmentMarker ownership={ownership} position={space.position} property={property} />
-                ) : null}
                 <OrientedSpaceContent rotation={contentRotation}>
+                  {property && ownership ? (
+                    <BoardOwnerMarker
+                      game={game}
+                      ownership={ownership}
+                      position={space.position}
+                      property={property}
+                    />
+                  ) : null}
+                  {property?.kind === "street" && ownership ? (
+                    <DevelopmentMarker ownership={ownership} position={space.position} property={property} />
+                  ) : null}
                   {space.id === "space_jail" ? (
                     <JailSpaceCell
                       game={game}
