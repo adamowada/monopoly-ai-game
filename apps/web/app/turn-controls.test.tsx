@@ -1309,7 +1309,7 @@ describe("GamePlaySurface turn controls", () => {
     expect(within(eventHistory).getByText(/PLAYER_POSITION_SET/)).toBeInTheDocument();
   }, 18_000);
 
-  it("pins the game log to the latest entry like a chat room", async () => {
+  it("pins the game log to the latest entry without scrolling the whole page", async () => {
     originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
     originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
     originalScrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
@@ -1351,8 +1351,8 @@ describe("GamePlaySurface turn controls", () => {
     expect(log.querySelector("[data-game-log-scroll-region]")).toBeInTheDocument();
     expect(await within(log).findByText(/rolled 3 \+ 4 = 7/)).toBeInTheDocument();
     expect(await within(log).findByText(/moved to Chance/)).toBeInTheDocument();
-    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "end" }));
     await waitFor(() => expect(scrollTopWrites).toContain(800));
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("renders backend die_1 and die_2 dice payloads as pips and total instead of placeholders", async () => {

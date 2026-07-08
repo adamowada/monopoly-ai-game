@@ -1098,7 +1098,6 @@ function GameLogChatPanel({
 }>) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const logRegionRef = useRef<HTMLOListElement | null>(null);
-  const logEndRef = useRef<HTMLLIElement | null>(null);
   const [enabledCategories, setEnabledCategories] = useState<ReadonlySet<GameLogCategory>>(
     () => new Set(gameLogCategories.map((category) => category.id)),
   );
@@ -1118,7 +1117,6 @@ function GameLogChatPanel({
       if (logRegionRef.current) {
         logRegionRef.current.scrollTop = logRegionRef.current.scrollHeight;
       }
-      logEndRef.current?.scrollIntoView?.({ block: "end" });
     };
     scrollToLatestEntry();
     if (typeof window.requestAnimationFrame !== "function") {
@@ -1214,7 +1212,6 @@ function GameLogChatPanel({
           })
         )
           : null}
-        <li ref={logEndRef} aria-hidden="true" className="h-px shrink-0" role="presentation" />
       </ol>
     </section>
   );
