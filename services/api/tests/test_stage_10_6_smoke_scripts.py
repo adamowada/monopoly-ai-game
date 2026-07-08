@@ -91,6 +91,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "auction_pass_above_valuation" in source
     assert "auction_pass_to_preserve_cash_reserve" in source
     assert "auction_bid_to_complete_color_group" in source
+    assert "auction_bid_to_block_opponent_color_group" in source
     assert "orange_monopoly_development" in source
     assert "multiple_monopolies_prioritizes_orange_development" in source
     assert "low_cash_defers_monopoly_development" in source
@@ -126,6 +127,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "cash reserve floor" in source
     assert "buy_property_to_complete_group" in source
     assert "property_group_completion_premium" in source
+    assert "block_opponent_group_completion_premium" in source
     assert "development_priority_score" in source
     assert "marginal_rent_gain" in source
     assert "cash reserve floor" in source
@@ -251,6 +253,34 @@ def test_live_codex_strategy_smoke_defers_low_cash_development() -> None:
     assert len(guidance["deferred_development_opportunities"]) == 3
     assert guidance["deferred_development_opportunities"][0]["cash_after_cost"] == 250
     assert "cash reserve floor" in " ".join(guidance["turn_guidance"])
+
+
+def test_live_codex_strategy_smoke_auction_blocks_opponent_group_completion() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["auction_bid_to_block_opponent_color_group"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["action_selection_guidance"]["auction_guidance"]
+    assert guidance["property_id"] == "property_virginia_avenue"
+    assert guidance["valuation_basis"] == "block_opponent_group_completion_premium"
+    assert guidance["strategic_valuation_ceiling"] == 240
+    assert guidance["opponent_group_completion_threats"] == [
+        {
+            "opponent_player_id": str(module.OTHER_PLAYER_ID),
+            "opponent_owned_property_ids": [
+                "property_st_charles_place",
+                "property_states_avenue",
+            ],
+        }
+    ]
 
 
 def test_live_codex_strategy_smoke_blocks_opponent_near_monopoly() -> None:

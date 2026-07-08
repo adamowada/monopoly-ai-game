@@ -793,6 +793,12 @@ def _action_selection_guidance(
                     "above the valuation ceiling unless a concrete monopoly-completion "
                     "reason justifies the overpay."
                 )
+        if auction_guidance.get("opponent_group_completion_threats"):
+            turn_guidance.append(
+                "For BID_AUCTION, a block_opponent_group_completion_premium valuation can justify "
+                "bidding above list price when blocking an opponent from completing a color group, "
+                "while still staying at or below the valuation ceiling."
+            )
 
     if debt_resolution_guidance is not None:
         recommendation = _string_or_none(debt_resolution_guidance.get("recommendation"))
@@ -1216,10 +1222,38 @@ def _auction_guidance(
         and auction.property_id not in same_group_owned_property_ids
         and len(same_group_owned_property_ids) == property_group_size - 1
     )
+    opponent_group_completion_threats: list[dict[str, Any]] = []
+    if group is not None and auction.property_id in group.property_ids:
+        owner_ids = {
+            ownership_by_property_id[property_id].owner_id
+            for property_id in group.property_ids
+            if property_id != auction.property_id
+            and ownership_by_property_id.get(property_id) is not None
+            and ownership_by_property_id[property_id].owner_id not in {None, actor_id}
+        }
+        for owner_id in sorted(str(owner_id) for owner_id in owner_ids if owner_id is not None):
+            owned_property_ids = [
+                property_id
+                for property_id in group.property_ids
+                if property_id != auction.property_id
+                and ownership_by_property_id.get(property_id) is not None
+                and ownership_by_property_id[property_id].owner_id == owner_id
+            ]
+            if len(owned_property_ids) == property_group_size - 1:
+                opponent_group_completion_threats.append(
+                    {
+                        "opponent_player_id": owner_id,
+                        "opponent_owned_property_ids": owned_property_ids,
+                    }
+                )
     if completes_property_group:
         strategic_valuation_ceiling = property_data.price * 3 // 2
         valuation_basis = "property_group_completion_premium"
         cash_reserve_floor = GROUP_COMPLETION_PURCHASE_CASH_FLOOR
+    elif opponent_group_completion_threats:
+        strategic_valuation_ceiling = property_data.price * 3 // 2
+        valuation_basis = "block_opponent_group_completion_premium"
+        cash_reserve_floor = PURCHASE_HEALTHY_CASH_FLOOR
     elif same_group_owned_property_ids:
         strategic_valuation_ceiling = property_data.price * 5 // 4
         valuation_basis = "same_group_position_premium"
@@ -1246,6 +1280,7 @@ def _auction_guidance(
         "same_group_owned_property_ids": same_group_owned_property_ids,
         "property_group_size": property_group_size,
         "completes_property_group": completes_property_group,
+        "opponent_group_completion_threats": opponent_group_completion_threats,
         "strategic_valuation_ceiling": strategic_valuation_ceiling,
         "valuation_ceiling": valuation_ceiling,
         "valuation_basis": valuation_basis,

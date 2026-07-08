@@ -884,6 +884,7 @@ def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops
         "same_group_owned_property_ids": [],
         "property_group_size": 3,
         "completes_property_group": False,
+        "opponent_group_completion_threats": [],
         "strategic_valuation_ceiling": 160,
         "valuation_ceiling": 160,
         "valuation_basis": "listed_price",
@@ -922,6 +923,30 @@ def test_context_pack_guides_auction_pass_when_cash_reserve_would_be_breached() 
     guidance_text = " ".join(guidance["turn_guidance"])
     assert "PASS_AUCTION" in guidance_text
     assert "cash reserve" in guidance_text
+
+
+def test_context_pack_guides_auction_premium_to_block_opponent_group_completion() -> None:
+    state = _state_with_active_auction_to_block_opponent_group_completion()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["auction_guidance"]["property_id"] == "property_virginia_avenue"
+    assert guidance["auction_guidance"]["valuation_basis"] == "block_opponent_group_completion_premium"
+    assert guidance["auction_guidance"]["strategic_valuation_ceiling"] == 240
+    assert guidance["auction_guidance"]["valuation_ceiling"] == 240
+    assert guidance["auction_guidance"]["opponent_group_completion_threats"] == [
+        {
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_owned_property_ids": [
+                "property_st_charles_place",
+                "property_states_avenue",
+            ],
+        }
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "blocking" in guidance_text
+    assert "valuation ceiling" in guidance_text
 
 
 def test_context_pack_redacts_profile_seed_source_from_prompt() -> None:
@@ -1780,6 +1805,28 @@ def _state_with_active_auction(*, cash: int = 1500, high_bid_amount: int = 50) -
                 "high_bid_amount": high_bid_amount,
                 "passed_player_ids": [],
             },
+        }
+    )
+
+
+def _state_with_active_auction_to_block_opponent_group_completion() -> GameState:
+    state = _state_with_active_auction()
+    opponent_owned_property_ids = {
+        "property_st_charles_place",
+        "property_states_avenue",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(OTHER_PLAYER_ID),
+                }
+                if ownership.property_id in opponent_owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
         }
     )
 
