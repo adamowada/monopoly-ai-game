@@ -236,7 +236,7 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
 
     guidance = pack["action_selection_guidance"]
     assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
-    assert guidance["lower_priority_action_types"] == ["ROLL_DICE"]
+    assert guidance["lower_priority_action_types"] == ["ROLL_DICE", "MORTGAGE_PROPERTY"]
     assert [opportunity["property_id"] for opportunity in guidance["development_opportunities"]] == [
         "property_st_james_place",
         "property_tennessee_avenue",
@@ -245,6 +245,46 @@ def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> No
     assert all(opportunity["cash_after_cost"] == 2900 for opportunity in guidance["development_opportunities"])
     assert "complete color group" in guidance["turn_guidance"][0]
     assert any("BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
+def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt() -> None:
+    state = _state_with_owned_railroad(cash=900)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    mortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert len(mortgage_actions) == 1
+    assert mortgage_actions[0]["payload"]["property_id"] == "property_b_and_o_railroad"
+
+    guidance = pack["action_selection_guidance"]
+    assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
+    assert guidance["mortgage_guidance"]["recommendation"] == "avoid_unless_debt_or_liquidity_pressure"
+    assert guidance["mortgage_guidance"]["has_active_debt"] is False
+    assert guidance["mortgage_guidance"]["cash_available"] == 900
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "Avoid MORTGAGE_PROPERTY" in guidance_text
+    assert "active debt" in guidance_text
+    assert any("MORTGAGE_PROPERTY" in instruction for instruction in pack["instruction_contract"]["instructions"])
+
+
+def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> None:
+    state = _state_with_active_debt_and_owned_railroad(cash=0)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    mortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert len(mortgage_actions) == 1
+
+    guidance = pack["action_selection_guidance"]
+    assert "MORTGAGE_PROPERTY" not in guidance["lower_priority_action_types"]
+    assert guidance["mortgage_guidance"]["recommendation"] == "liquidate_only_enough_for_active_debt"
+    assert guidance["mortgage_guidance"]["has_active_debt"] is True
+    assert guidance["mortgage_guidance"]["cash_available"] == 0
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "active debt" in guidance_text
+    assert "only enough" in guidance_text
 
 
 def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops() -> None:
@@ -763,6 +803,43 @@ def _state_with_orange_monopoly() -> GameState:
                 else ownership
                 for ownership in state.property_ownership
             ),
+        }
+    )
+
+
+def _state_with_owned_railroad(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id == "property_b_and_o_railroad"
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_active_debt_and_owned_railroad(*, cash: int) -> GameState:
+    state = _state_with_owned_railroad(cash=cash)
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": 350,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
         }
     )
 

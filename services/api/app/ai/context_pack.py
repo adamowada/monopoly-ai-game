@@ -46,6 +46,7 @@ VISIBLE_MEMORY_SCOPES = frozenset({"public", "table", "audit"})
 ACTIVE_NEGOTIATION_STATUSES = ("opened", "active", "countered", "accepted")
 _FIELD_JOINER = "".join
 AIContextPack: TypeAlias = dict[str, Any]
+MORTGAGE_HEALTHY_CASH_FLOOR = 200
 
 
 def build_ai_context_pack(
@@ -696,6 +697,7 @@ def _action_selection_guidance(
     lower_priority_action_types: list[str] = []
     turn_guidance: list[str] = []
     auction_guidance = _auction_guidance(state, actor_id, legal_actions)
+    mortgage_guidance = _mortgage_guidance(state, actor_id, legal_actions)
 
     if development_opportunities:
         recommended_before_roll.append("BUY_HOUSE")
@@ -722,12 +724,83 @@ def _action_selection_guidance(
                 "reason justifies the overpay."
             )
 
+    if mortgage_guidance is not None:
+        recommendation = _string_or_none(mortgage_guidance.get("recommendation"))
+        if recommendation == "avoid_unless_debt_or_liquidity_pressure":
+            if "MORTGAGE_PROPERTY" not in lower_priority_action_types:
+                lower_priority_action_types.append("MORTGAGE_PROPERTY")
+            turn_guidance.append(
+                "Avoid MORTGAGE_PROPERTY while cash is healthy and no active debt exists; "
+                "mortgaging disables rent and creates future unmortgage interest. Use it "
+                "only for active debt, bankruptcy prevention, or urgent liquidity."
+            )
+        elif recommendation == "liquidate_only_enough_for_active_debt":
+            turn_guidance.append(
+                "For MORTGAGE_PROPERTY during active debt, mortgage only enough property "
+                "to cover the outstanding amount after using available cash and cheaper "
+                "liquidation actions."
+            )
+
     return {
         "recommended_action_types_before_roll": recommended_before_roll,
         "lower_priority_action_types": lower_priority_action_types,
         "development_opportunities": development_opportunities,
         "auction_guidance": auction_guidance,
+        "mortgage_guidance": mortgage_guidance,
         "turn_guidance": turn_guidance,
+    }
+
+
+def _mortgage_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    mortgage_actions = [
+        action for action in legal_actions if action.get("type") == "MORTGAGE_PROPERTY"
+    ]
+    if not mortgage_actions:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    has_active_debt = (
+        state.active_payment is not None and state.active_payment.debtor_id == actor_id
+    )
+    outstanding_debt = 0
+    if has_active_debt and state.active_payment is not None:
+        outstanding_debt = max(
+            state.active_payment.amount_owed - state.active_payment.amount_paid,
+            0,
+        )
+
+    mortgageable_property_ids: list[str] = []
+    total_available_proceeds = 0
+    for action in mortgage_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is not None:
+            mortgageable_property_ids.append(property_id)
+        total_available_proceeds += _int_or_zero(payload.get("proceeds"))
+
+    recommendation = "reserve_for_specific_liquidity_need"
+    if has_active_debt:
+        recommendation = "liquidate_only_enough_for_active_debt"
+    elif player.cash >= MORTGAGE_HEALTHY_CASH_FLOOR:
+        recommendation = "avoid_unless_debt_or_liquidity_pressure"
+
+    return {
+        "action_available": True,
+        "recommendation": recommendation,
+        "has_active_debt": has_active_debt,
+        "outstanding_debt": outstanding_debt,
+        "cash_available": player.cash,
+        "healthy_cash_floor": MORTGAGE_HEALTHY_CASH_FLOOR,
+        "mortgageable_property_count": len(mortgage_actions),
+        "mortgageable_property_ids": mortgageable_property_ids,
+        "total_available_proceeds": total_available_proceeds,
     }
 
 
@@ -1068,6 +1141,7 @@ def _instruction_contract() -> dict[str, Any]:
             "Choose action_decision.action only from legal_actions when making a game action.",
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
             "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
+            "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",

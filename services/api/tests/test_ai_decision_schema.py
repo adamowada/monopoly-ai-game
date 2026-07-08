@@ -8,6 +8,7 @@ import pytest
 from app.ai.decision_schema import (
     AI_OUTPUT_SCHEMA,
     AI_MEMORY_CATEGORIES,
+    ActionDecisionOutput,
     AIDecisionValidationError,
     DECISION_TYPES,
     MALFORMED_AI_OUTPUT_REASON_CODE,
@@ -195,6 +196,7 @@ def test_jail_fine_payload_string_normalizes_to_empty_object() -> None:
 
     parsed = validate_ai_decision_output(raw_output)
 
+    assert isinstance(parsed.root, ActionDecisionOutput)
     assert parsed.root.action.payload == {}
 
 
