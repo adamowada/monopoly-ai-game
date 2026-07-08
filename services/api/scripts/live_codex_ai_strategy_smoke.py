@@ -221,6 +221,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_bad_deal_rejection,
             actor_player_id=OTHER_PLAYER_ID,
         ),
+        StrategySmokeCase(
+            name="orange_good_deal_acceptance",
+            game_id=UUID("00000000-0000-0000-0000-00000000b220"),
+            decision_type="accept_reject",
+            state_factory=_orange_near_monopoly_state,
+            verifier=_verify_orange_good_deal_acceptance,
+        ),
     )
 
 
@@ -451,6 +458,15 @@ def _verify_orange_bad_deal_rejection(parsed: dict[str, Any]) -> None:
     assert accept_reject.get("decision") == "reject", f"expected reject, got {accept_reject.get('decision')}"
 
 
+def _verify_orange_good_deal_acceptance(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(GOOD_DEAL_ID)
+    assert accept_reject.get("decision") == "accept", f"expected accept, got {accept_reject.get('decision')}"
+
+
 def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, Any]:
     if case.decision_type == "action_decision":
         action = _dict(parsed.get("action"))
@@ -520,6 +536,11 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
 def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
     if case.decision_type not in {"deal_proposal", "accept_reject"}:
         return ()
+    current_deal_id = None
+    if case.name == "orange_bad_deal_rejection":
+        current_deal_id = str(BAD_DEAL_ID)
+    elif case.name == "orange_good_deal_acceptance":
+        current_deal_id = str(GOOD_DEAL_ID)
     return (
         {
             "id": str(NEGOTIATION_ID),
@@ -529,7 +550,7 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
             "round_number": 1,
             "context": {
                 "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
-                "current_deal_id": str(BAD_DEAL_ID) if case.decision_type == "accept_reject" else None,
+                "current_deal_id": current_deal_id,
                 "context": {
                     "topic": "Trade for Tennessee Avenue to complete Orange",
                     "target_property_id": "property_tennessee_avenue",
@@ -548,7 +569,7 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
 
 
 def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
-    if case.decision_type == "accept_reject":
+    if case.name == "orange_bad_deal_rejection":
         return (
             {
                 "id": "live-strategy-lowball-message-1",
@@ -557,6 +578,19 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "recipient_player_id": str(OTHER_PLAYER_ID),
                 "message_type": "freeform_message",
                 "body": "I will pay $1 for Tennessee Avenue so I can complete Orange.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
+    if case.name == "orange_good_deal_acceptance":
+        return (
+            {
+                "id": "live-strategy-fair-offer-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "recipient_player_id": str(AI_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I can sell Tennessee Avenue for $220 so you complete Orange.",
                 "payload": {"message_type": "freeform_message"},
                 "created_at": "2026-07-08T00:00:02Z",
             },
@@ -580,15 +614,18 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
 def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
     if case.decision_type != "accept_reject":
         return ()
+    deal_id = GOOD_DEAL_ID if case.name == "orange_good_deal_acceptance" else BAD_DEAL_ID
+    terms = _good_deal_terms() if case.name == "orange_good_deal_acceptance" else _bad_deal_terms()
+    proposer_id = OTHER_PLAYER_ID if case.name == "orange_good_deal_acceptance" else AI_PLAYER_ID
     return (
         {
-            "id": str(BAD_DEAL_ID),
+            "id": str(deal_id),
             "negotiation_id": str(NEGOTIATION_ID),
-            "proposed_by_player_id": str(AI_PLAYER_ID),
+            "proposed_by_player_id": str(proposer_id),
             "parent_deal_id": None,
             "status": "proposed",
             "version": 1,
-            "terms": _bad_deal_terms(),
+            "terms": terms,
             "validation_errors": [],
             "created_at": "2026-07-08T00:00:03Z",
             "updated_at": "2026-07-08T00:00:03Z",
@@ -794,6 +831,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
             },
         )
     if case.decision_type == "accept_reject":
+        if case.name == "orange_good_deal_acceptance":
+            return (
+                {
+                    "id": "live-strategy-accept-fair-monopoly-completer",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Grace can receive property_tennessee_avenue "
+                        "from Ada for $220. Tennessee Avenue completes Grace's Orange monopoly, the "
+                        "cash price is below the $270 strategic ceiling, and cash_after_payment remains "
+                        "$1280. Accept the deal."
+                    ),
+                },
+            )
         return (
             {
                 "id": "live-strategy-reject-lowball-monopoly-enabler",
@@ -847,6 +897,7 @@ def _deal_terms_template() -> dict[str, Any]:
 
 
 BAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b302")
+GOOD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b303")
 
 
 def _bad_deal_terms() -> dict[str, Any]:
@@ -866,6 +917,31 @@ def _bad_deal_terms() -> dict[str, Any]:
             {
                 "kind": "immediate_property_transfer",
                 "instrument_id": "live-strategy-lowball-tennessee-transfer",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_tennessee_avenue",
+            },
+        ],
+    }
+
+
+def _good_deal_terms() -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-fair-tennessee",
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-fair-cash",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "amount": 220,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-fair-tennessee-transfer",
                 "from_player_id": str(OTHER_PLAYER_ID),
                 "to_player_id": str(AI_PLAYER_ID),
                 "property_id": "property_tennessee_avenue",

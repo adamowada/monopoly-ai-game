@@ -462,6 +462,49 @@ def test_context_pack_recommends_rejecting_lowball_deal_that_completes_opponent_
     )
 
 
+def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopoly() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=500)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_fair_tennessee_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    assert guidance["deal_evaluations"] == [
+        {
+            "deal_id": str(DEAL_ID),
+            "recommendation": "accept",
+            "reason_code": "receives_property_that_completes_actor_street_group_with_affordable_cash",
+            "actor_id": str(AI_PLAYER_ID),
+            "actor_receives_cash_total": 0,
+            "actor_pays_cash_total": 220,
+            "actor_transfers_property_ids": [],
+            "actor_receives_property_ids": ["property_tennessee_avenue"],
+            "opportunity": {
+                "kind": "actor_street_group_completion",
+                "property_id": "property_tennessee_avenue",
+                "property_name": "Tennessee Avenue",
+                "property_price": 180,
+                "group": "orange",
+                "group_name": "Orange",
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "actor_already_owned_property_ids": [
+                    "property_st_james_place",
+                    "property_new_york_avenue",
+                ],
+                "maximum_cash_value_ceiling": 270,
+                "cash_after_payment": 280,
+                "group_completion_cash_floor": 100,
+            },
+        }
+    ]
+    assert "Accept proposed deals" in guidance["guidance"][0]
+
+
 def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="deal_proposal")
@@ -1215,6 +1258,43 @@ def _lowball_tennessee_deal() -> dict[str, Any]:
                     "from_player_id": str(AI_PLAYER_ID),
                     "to_player_id": str(OTHER_PLAYER_ID),
                     "amount": 1,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _fair_tennessee_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "fair-tennessee-to-grace",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "fair-cash",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 220,
                 },
                 {
                     "kind": "immediate_property_transfer",

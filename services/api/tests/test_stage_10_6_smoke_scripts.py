@@ -98,6 +98,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "multiple_near_monopolies_prioritizes_orange_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
     assert "orange_bad_deal_rejection" in source
+    assert "orange_good_deal_acceptance" in source
     assert "FOURTH_PLAYER_ID" in source
     assert 'PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai")' in source
     assert "BUY_HOUSE" in source
@@ -134,6 +135,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "participant_player_ids" in source
     assert "accept_reject" in source
     assert "expected reject" in source
+    assert "expected accept" in source
     assert "treating as pass" not in source
 
 
@@ -266,6 +268,33 @@ def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance(
     assert guidance["deal_evaluations"][0]["risk"]["property_id"] == "property_tennessee_avenue"
     assert guidance["deal_evaluations"][0]["risk"]["minimum_cash_value_floor"] == 270
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 269
+
+
+def test_live_codex_strategy_smoke_good_deal_has_context_pack_acceptance_guidance() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_good_deal_acceptance"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        negotiation_messages=module._negotiation_messages(case),
+        deals=module._deals(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+    assert guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.GOOD_DEAL_ID): "accept"
+    }
+    assert guidance["deal_evaluations"][0]["opportunity"]["property_id"] == (
+        "property_tennessee_avenue"
+    )
+    assert guidance["deal_evaluations"][0]["opportunity"]["maximum_cash_value_ceiling"] == 270
+    assert guidance["deal_evaluations"][0]["opportunity"]["cash_after_payment"] == 1280
 
 
 def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(monkeypatch: pytest.MonkeyPatch) -> None:

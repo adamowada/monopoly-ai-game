@@ -1430,7 +1430,7 @@ def _deal_evaluation_guidance(
         evaluation
         for deal in _sorted_rows(deals)
         if _string_or_none(deal.get("status")) == "proposed"
-        if (evaluation := _deal_completion_risk_evaluation(state, actor_id, deal)) is not None
+        if (evaluation := _deal_completion_evaluation(state, actor_id, deal)) is not None
     ]
     recommended_accept_reject_by_deal_id = {
         str(evaluation["deal_id"]): str(evaluation["recommendation"])
@@ -1443,6 +1443,11 @@ def _deal_evaluation_guidance(
             "Reject proposed deals that transfer away a property completing an opponent's street group "
             "when the visible compensation is below the strategic cash value floor."
         )
+    if any(evaluation.get("recommendation") == "accept" for evaluation in evaluations):
+        guidance_messages.append(
+            "Accept proposed deals that complete this player's street group when the cash payment "
+            "is within the strategic value ceiling and leaves enough liquidity."
+        )
 
     return {
         "recommended_accept_reject_by_deal_id": recommended_accept_reject_by_deal_id,
@@ -1451,7 +1456,7 @@ def _deal_evaluation_guidance(
     }
 
 
-def _deal_completion_risk_evaluation(
+def _deal_completion_evaluation(
     state: GameState,
     actor_id: str,
     deal: Mapping[str, Any],
@@ -1489,14 +1494,22 @@ def _deal_completion_risk_evaluation(
         for transfer in actor_transfers
         if transfer.get("property_id") is not None
     ]
-    actor_receives_property_ids = [
-        str(term.get("property_id"))
+    actor_receives = [
+        {
+            "property_id": _string_or_none(term.get("property_id")),
+            "sender_player_id": _string_or_none(term.get("from_player_id")),
+        }
         for term in instruments
         if term.get("kind") == "immediate_property_transfer"
         and _string_or_none(term.get("to_player_id")) == actor_id
-        and _string_or_none(term.get("property_id")) is not None
+        and _string_or_none(term.get("from_player_id")) not in {None, actor_id}
     ]
-    if not actor_transfers:
+    actor_receives_property_ids = [
+        str(receipt["property_id"])
+        for receipt in actor_receives
+        if receipt.get("property_id") is not None
+    ]
+    if not actor_transfers and not actor_receives:
         return None
 
     data = load_classic_monopoly_data()
@@ -1505,6 +1518,7 @@ def _deal_completion_risk_evaluation(
     ownership_by_property_id = {
         ownership.property_id: ownership for ownership in state.property_ownership
     }
+    player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
 
     for transfer in actor_transfers:
         property_id = _string_or_none(transfer.get("property_id"))
@@ -1557,6 +1571,65 @@ def _deal_completion_risk_evaluation(
                 "recipient_already_owned_property_ids": recipient_already_owned_property_ids,
                 "minimum_cash_value_floor": minimum_cash_value_floor,
                 "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+            },
+        }
+
+    for receipt in actor_receives:
+        property_id = _string_or_none(receipt.get("property_id"))
+        sender_player_id = _string_or_none(receipt.get("sender_player_id"))
+        if property_id is None or sender_player_id is None:
+            continue
+        ownership = ownership_by_property_id.get(property_id)
+        property_data = properties_by_id.get(property_id)
+        if (
+            ownership is None
+            or ownership.owner_id != sender_player_id
+            or property_data is None
+            or property_data.kind != "street"
+        ):
+            continue
+        group = groups_by_id.get(property_data.group)
+        if group is None:
+            continue
+        actor_already_owned_property_ids = [
+            group_property_id
+            for group_property_id in group.property_ids
+            if group_property_id != property_id
+            and (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+            and group_ownership.owner_id == actor_id
+        ]
+        if len(actor_already_owned_property_ids) != len(group.property_ids) - 1:
+            continue
+
+        maximum_cash_value_ceiling = property_data.price * 3 // 2
+        cash_after_payment = player_cash - actor_pays_cash_total
+        if (
+            actor_pays_cash_total > maximum_cash_value_ceiling
+            or cash_after_payment < GROUP_COMPLETION_PURCHASE_CASH_FLOOR
+        ):
+            continue
+
+        return {
+            "deal_id": _string_or_none(deal.get("id")),
+            "recommendation": "accept",
+            "reason_code": "receives_property_that_completes_actor_street_group_with_affordable_cash",
+            "actor_id": actor_id,
+            "actor_receives_cash_total": actor_receives_cash_total,
+            "actor_pays_cash_total": actor_pays_cash_total,
+            "actor_transfers_property_ids": actor_transfers_property_ids,
+            "actor_receives_property_ids": actor_receives_property_ids,
+            "opportunity": {
+                "kind": "actor_street_group_completion",
+                "property_id": property_id,
+                "property_name": property_data.name,
+                "property_price": property_data.price,
+                "group": group.id,
+                "group_name": group.name,
+                "sender_player_id": sender_player_id,
+                "actor_already_owned_property_ids": actor_already_owned_property_ids,
+                "maximum_cash_value_ceiling": maximum_cash_value_ceiling,
+                "cash_after_payment": cash_after_payment,
+                "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
             },
         }
     return None
