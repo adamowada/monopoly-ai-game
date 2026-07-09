@@ -362,6 +362,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_utility_near_set_deal_proposal,
         ),
         StrategySmokeCase(
+            name="railroad_good_deal_acceptance",
+            game_id=UUID("00000000-0000-0000-0000-00000000b23a"),
+            decision_type="accept_reject",
+            state_factory=_railroad_near_set_state,
+            verifier=_verify_railroad_good_deal_acceptance,
+        ),
+        StrategySmokeCase(
             name="orange_bad_deal_rejection",
             game_id=UUID("00000000-0000-0000-0000-00000000b204"),
             decision_type="accept_reject",
@@ -959,6 +966,17 @@ def _verify_orange_good_deal_acceptance(parsed: dict[str, Any]) -> None:
     )
 
 
+def _verify_railroad_good_deal_acceptance(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(FAIR_RAILROAD_DEAL_ID)
+    assert accept_reject.get("decision") == "accept", (
+        f"expected accept, got {accept_reject.get('decision')}"
+    )
+
+
 def _verify_orange_overpriced_deal_rejection(parsed: dict[str, Any]) -> None:
     accept_reject = _dict(parsed.get("accept_reject"))
 
@@ -1103,6 +1121,20 @@ def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, 
 
 def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
     if case.decision_type == "accept_reject":
+        if case.name == "railroad_good_deal_acceptance":
+            return {
+                "mode": "live_strategy_smoke",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "deal_id": str(FAIR_RAILROAD_DEAL_ID),
+                "requested_decision": (
+                    "Respond to the current offer. Ada offers Short Line Railroad "
+                    "for $250, which completes Grace's railroad set."
+                ),
+                "strategic_position": (
+                    "Grace owns the other three railroads and can afford this fair "
+                    "completion price while preserving liquidity."
+                ),
+            }
         return {
             "mode": "live_strategy_smoke",
             "negotiation_id": str(NEGOTIATION_ID),
@@ -1167,6 +1199,8 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         current_deal_id = str(BAD_DEAL_ID)
     elif case.name == "orange_good_deal_acceptance":
         current_deal_id = str(GOOD_DEAL_ID)
+    elif case.name == "railroad_good_deal_acceptance":
+        current_deal_id = str(FAIR_RAILROAD_DEAL_ID)
     elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         current_deal_id = str(OVERPRICED_DEAL_ID)
     elif case.name in {"orange_cash_draining_deal_rejection", "orange_cash_draining_deal_counteroffer"}:
@@ -1231,7 +1265,7 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
                 "created_at": "2026-07-08T00:00:00Z",
             },
         )
-    if case.name == "railroad_near_set_deal_proposal":
+    if case.name in {"railroad_near_set_deal_proposal", "railroad_good_deal_acceptance"}:
         return (
             {
                 "id": str(NEGOTIATION_ID),
@@ -1312,6 +1346,19 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "recipient_player_id": str(AI_PLAYER_ID),
                 "message_type": "freeform_message",
                 "body": "I can sell Tennessee Avenue for $220 so you complete Orange.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
+    if case.name == "railroad_good_deal_acceptance":
+        return (
+            {
+                "id": "live-strategy-fair-railroad-offer-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "recipient_player_id": str(AI_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I can sell Short Line Railroad for $250 so you complete Railroads.",
                 "payload": {"message_type": "freeform_message"},
                 "created_at": "2026-07-08T00:00:02Z",
             },
@@ -1421,6 +1468,10 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
     if case.name == "orange_good_deal_acceptance":
         deal_id = GOOD_DEAL_ID
         terms = _good_deal_terms()
+        proposer_id = OTHER_PLAYER_ID
+    elif case.name == "railroad_good_deal_acceptance":
+        deal_id = FAIR_RAILROAD_DEAL_ID
+        terms = _fair_railroad_deal_terms()
         proposer_id = OTHER_PLAYER_ID
     elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         deal_id = OVERPRICED_DEAL_ID
@@ -1904,6 +1955,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     ),
                 },
             )
+        if case.name == "railroad_good_deal_acceptance":
+            return (
+                {
+                    "id": "live-strategy-accept-fair-railroad-completer",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Ada offers Short Line Railroad "
+                        "to Grace for $250. Grace owns the other three railroads, so this "
+                        "deal completes Grace's railroad set within the $300 strategic "
+                        "value ceiling and preserves liquidity. Accept the deal."
+                    ),
+                },
+            )
         if case.name == "orange_overpriced_deal_rejection":
             return (
                 {
@@ -2019,6 +2083,7 @@ GOOD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b303")
 OVERPRICED_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b304")
 CASH_DRAINING_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b305")
 BREAKUP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b306")
+FAIR_RAILROAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b307")
 
 
 def _bad_deal_terms() -> dict[str, Any]:
@@ -2066,6 +2131,31 @@ def _good_deal_terms(*, amount: int = 220) -> dict[str, Any]:
                 "from_player_id": str(OTHER_PLAYER_ID),
                 "to_player_id": str(AI_PLAYER_ID),
                 "property_id": "property_tennessee_avenue",
+            },
+        ],
+    }
+
+
+def _fair_railroad_deal_terms(*, amount: int = 250) -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-fair-railroad-completer",
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-fair-railroad-cash",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "amount": amount,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-fair-short-line-transfer",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_short_line_railroad",
             },
         ],
     }
