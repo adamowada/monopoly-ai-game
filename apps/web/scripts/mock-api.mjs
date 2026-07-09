@@ -1785,6 +1785,68 @@ function genericMortgageLegalActionsFor(game, actor, existingMortgagePropertyIds
     .map((candidate) => candidate.action);
 }
 
+function developmentLevel(ownership) {
+  if (!ownership) {
+    return 0;
+  }
+  return ownership.hotel || ownership.hotels > 0 ? 5 : Math.max(0, ownership.houses ?? 0);
+}
+
+function sellImprovementRentLoss(property, level) {
+  if (property?.kind !== "street" || !Array.isArray(property.rents) || level <= 0) {
+    return 0;
+  }
+  if (level >= 5) {
+    return (property.rents[5] ?? property.rents.at(-1) ?? 0) - (property.rents[4] ?? 0);
+  }
+  return (property.rents[level] ?? 0) - (property.rents[level - 1] ?? 0);
+}
+
+function genericSellHouseLegalActionsFor(game, actor, existingSellPropertyIds = new Set()) {
+  if (!actor) {
+    return [];
+  }
+  const candidates = [];
+  for (const group of propertyGroupData) {
+    if (group.kind !== "street" || !Array.isArray(group.property_ids) || group.property_ids.length === 0) {
+      continue;
+    }
+    const improved = group.property_ids
+      .map((propertyId) => {
+        const property = propertyById(propertyId);
+        const ownership = propertyOwnership(game, propertyId);
+        const level = developmentLevel(ownership);
+        return { level, ownership, property };
+      })
+      .filter(
+        ({ level, ownership, property }) =>
+          property &&
+          ownership?.owner_id === actor.id &&
+          !ownership.mortgaged &&
+          level > 0 &&
+          !existingSellPropertyIds.has(property.id),
+      );
+    if (improved.length === 0) {
+      continue;
+    }
+    const maxLevel = Math.max(...improved.map(({ level }) => level));
+    for (const candidate of improved.filter(({ level }) => level === maxLevel)) {
+      const proceeds = Math.floor((candidate.property.house_cost ?? group.house_cost ?? 0) / 2);
+      if (proceeds <= 0) {
+        continue;
+      }
+      candidates.push({
+        action: legalAction(game, "SELL_HOUSE", { property_id: candidate.property.id, proceeds }),
+        proceeds,
+        rentLoss: sellImprovementRentLoss(candidate.property, candidate.level),
+      });
+    }
+  }
+  return candidates
+    .sort((left, right) => left.rentLoss - right.rentLoss || right.proceeds - left.proceeds)
+    .map((candidate) => candidate.action);
+}
+
 function propertyManagementLegalActionsFor(game) {
   if (game.seed.startsWith("stage-5-property-management-reject")) {
     return [legalAction(game, "BUY_HOUSE", { property_id: "property_baltic_avenue", cost: 50 })];
@@ -1794,7 +1856,6 @@ function propertyManagementLegalActionsFor(game) {
   const mediterranean = propertyOwnership(game, "property_mediterranean_avenue");
   const baltic = propertyOwnership(game, "property_baltic_avenue");
   const parkPlace = propertyOwnership(game, "property_park_place");
-  const boardwalk = propertyOwnership(game, "property_boardwalk");
   const readingRailroad = propertyOwnership(game, "property_reading_railroad");
   const actorCash = actor?.state.cash ?? 0;
   const actions = [];
@@ -1819,9 +1880,12 @@ function propertyManagementLegalActionsFor(game) {
   if (parkPlace?.owner_id === actor?.id && parkPlace.mortgaged && actorCash >= 220) {
     actions.push(legalAction(game, "UNMORTGAGE_PROPERTY", { property_id: "property_park_place", cost: 220 }));
   }
-  if (boardwalk?.owner_id === actor?.id && !boardwalk.mortgaged && (boardwalk.hotel || boardwalk.houses > 0)) {
-    actions.push(legalAction(game, "SELL_HOUSE", { property_id: "property_boardwalk", proceeds: 100 }));
-  }
+  const existingSellPropertyIds = new Set(
+    actions
+      .filter((action) => action.type === "SELL_HOUSE" && typeof action.payload?.property_id === "string")
+      .map((action) => action.payload.property_id),
+  );
+  actions.push(...genericSellHouseLegalActionsFor(game, actor, existingSellPropertyIds));
   if (isStage105Seed(game.seed) && readingRailroad?.owner_id === actor?.id && !readingRailroad.mortgaged) {
     actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_reading_railroad", proceeds: 100 }));
   }

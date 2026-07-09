@@ -466,6 +466,94 @@ describe("mock API AI strategy", () => {
     );
   });
 
+  it("sells developed property improvements to settle debt before forced bankruptcy", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-two-human-full-round-debug-sell-before-bankruptcy",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          player_cash: [
+            { seat_order: 0, cash: 40 },
+            { seat_order: 1, cash: 1 },
+          ],
+          property_owners: [
+            { property_id: "property_mediterranean_avenue", seat_order: 0 },
+            { property_id: "property_oriental_avenue", seat_order: 1 },
+            { property_id: "property_vermont_avenue", seat_order: 1 },
+            { property_id: "property_connecticut_avenue", seat_order: 1 },
+          ],
+          property_improvements: [{ property_id: "property_connecticut_avenue", houses: 2, hotel: false }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const grace = game.players[1];
+
+    await stepAi(baseUrl, game.id, ada.id);
+    await stepAi(baseUrl, game.id, ada.id);
+    const graceRoll = await stepAi(baseUrl, game.id, grace.id);
+    expect(graceRoll.accepted_events.map((event) => event.event_type)).toContain("ACTIVE_PAYMENT_SET");
+
+    const liquidationStep = await stepAi(baseUrl, game.id, grace.id);
+
+    expect(liquidationStep.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "PLAYER_CASH_DELTA",
+          payload: expect.objectContaining({ amount: 25, player_id: grace.id }),
+        }),
+        expect.objectContaining({
+          event_type: "PROPERTY_IMPROVEMENTS_SET",
+          payload: expect.objectContaining({
+            hotel: false,
+            houses: 1,
+            property_id: "property_connecticut_avenue",
+          }),
+        }),
+      ]),
+    );
+    expect(liquidationStep.accepted_events.map((event) => event.event_type)).not.toContain("BANKRUPTCY_DECLARED");
+
+    const settlementStep = await stepAi(baseUrl, game.id, grace.id);
+    expect(settlementStep.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "RENT_PAID",
+          payload: expect.objectContaining({
+            amount: 2,
+            creditor_player_id: ada.id,
+            debtor_player_id: grace.id,
+          }),
+        }),
+      ]),
+    );
+
+    const stateAfterSettlement = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ houses?: number; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterSettlement.state.players.find((player) => player.id === grace.id)?.cash).toBe(24);
+    expect(
+      stateAfterSettlement.state.property_ownership.find(
+        (ownership) => ownership.property_id === "property_connecticut_avenue",
+      ),
+    ).toEqual(expect.objectContaining({ houses: 1 }));
+  });
+
   it("develops a complete color group before rolling a later AI turn and pays for the build", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl);
