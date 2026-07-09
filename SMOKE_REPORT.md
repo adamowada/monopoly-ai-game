@@ -2,19 +2,23 @@ Status: pass
 
 ## Lineage Gate
 
-- Selected Design Lineage: `application-dashboard`.
-- Primary user task: monitor current local game/research stack state, compare tier records, navigate future operational details, and adjust setup filters/settings later.
-- Selected Page: `Dashboard Page`.
-- Selected Layout: `Sidebar App Shell`; mobile uses the same navigation as a top summary/navigation list with no hamburger control.
-- Selected Component families: `tables`, `badges`, `forms`, `grid-layout`, `icon-systems`, `responsive-behavior`, `accessibility-patterns`, `tailwind-theme-patterns`.
-- Rejected lineage: `application-coordination`, because Stage 1.4 monitors broad stack state rather than choosing and acting on one record.
-- Rejected lineage: `saas-marketing`, because marketing density, hero rhythm, and CTA hierarchy conflict with an operational local game console.
-- Color Palette roles: neutral off-white page background, white surface, tinted neutral elevated surface, near-black primary text, cool neutral secondary/muted text, low-contrast neutral border, teal primary accent/focus, green secondary/success, amber warning, rose danger, neutral disabled.
-- Density: medium-to-high operational density with compact repeated records.
-- Visual Hierarchy: app title and backend stack status first, tier health records second, future workspace regions third.
-- Affordance and Hover State: navigation anchors target page sections, refresh button refetches health, disabled future setup controls are visibly disabled, passive workspace cards do not carry interactive affordance.
-- Responsive behavior: desktop sidebar becomes a top summary/navigation list on narrow screens; essential health and navigation remain visible.
-- Accessibility basics: landmarks, semantic headings, table headers, form labels, named refresh control, visible focus, and text status labels in addition to color.
+- Selected Design Lineage: `application-coordination`.
+- Primary user task: play a local Monopoly-style board game from the board surface, identify the current player, understand cash, ownership, development, token locations, blockers, and legal next actions at a glance, then open secondary research or audit views only when needed.
+- Selected Page: `Dashboard Page` only as a route-level application page; the product-specific presentation is a custom game-table page where the board is the dominant object.
+- Selected Layout: board-first game-surface layout with the board as the largest region, current-turn command area adjacent to the board, player trays around or near the board, and secondary views in a hamburger drawer plus compact tabs/disclosures.
+- Selected Component families: `dashboard-page`, `stacked-lists`, `forms`, `badges`, `grid-layout`, `interaction-patterns`, `responsive-behavior`, `accessibility-patterns`, `icon-systems`, and `tailwind-theme-patterns`.
+- Custom tabletop override: replace generic dashboard panels with board-game trays, command panels, deed/card surfaces, token pieces, owner markers, development markers, and a real game drawer.
+- Rejected lineage: `application-dashboard`, because it overweights equal panels, summaries, and admin-style monitoring. The target is acting on the current game state from the board, not monitoring a broad dashboard.
+- Rejected lineage: `saas-marketing`, because the page is not a persuasive landing page and must not use hero-section rhythm or conversion-page hierarchy.
+- Rejected lineage: `ecommerce-product-evaluation`, because property/deed inspection can borrow product-card clarity, but the primary task is not browsing variants, purchasing, or cart flow.
+- Rejected lineage: `documentation`, because rules and AI audit views may be dense secondary content, but the normal play page must not read like documentation or logs.
+- Color Palette roles: page background is a muted game mat; board surface is warm board paper; board ink is dark green-brown; player colors are reserved for tokens, trays, and owner markers; surface is muted paper/card; elevated surface is warmer deed/card paper; primary text is dark ink; secondary text is muted ink; border is dark board ink for board and softer paper-border for trays; primary accent is current-player color or table accent; secondary accent is deck/card accent; focus is high-contrast teal; success, warning, and danger are semantic only; disabled is visibly muted with useful explanation.
+- Density: board has medium game density and highest visual priority; player trays are compact and game-like; current legal actions stay close to the board; supporting records use higher density only after opening drawers, tabs, or disclosures.
+- Visual Hierarchy: board first; current player and turn second; legal action command area third; urgent blocker or active payment/debt fourth; player cash, token location, ownership, and development fifth; latest meaningful event sixth; negotiations/contracts/property-management shortcuts seventh; logs, AI audit, raw IDs, and research detail last.
+- Affordance rules: inspectable board spaces must be keyboard accessible; legal actions must expose meaningful state-derived descriptions; owner and development markers are visible without hover; hamburger opens and closes a real drawer; primary turn actions remain outside the drawer.
+- Hover State rules: hover/focus confirms inspectable spaces, tabs, drawer items, and explicit actions; passive trays and records do not use decorative interactive affordance; disabled actions remain visibly disabled and explain why when it matters.
+- Responsive behavior: desktop keeps board, current player, cash, and primary action in the first viewport; tablet keeps board first and command area adjacent or immediately below; mobile keeps board first, command area immediately after, and player trays compressed without hiding primary actions behind the hamburger.
+- Accessibility basics: semantic headings and regions, accessible names for board spaces/tokens/decks/actions, visible focus, keyboard drawer/tabs/space inspection, no status by color alone, and reduced-motion-safe dice, token, card, and highlight animations.
 
 ## Actual Index Files Read
 
@@ -26,26 +30,72 @@ Status: pass
 
 ## Source Inspection Boundary
 
-- `application_blocks/react/page-examples/home-screens/02-stacked.jsx`
-- `application_blocks/react/application-shells/multi-column/06-full-width-with-narrow-sidebar-and-header.jsx`
-- `application_blocks/react/lists/tables/18-with-hidden-headings.jsx`
-- `application_blocks/react/elements/badges/18-small-flat-pill-with-dot.jsx`
-- `insights/application_blocks/react/page-examples/home-screens/02-stacked.jsx.md`
-- `insights/application_blocks/react/application-shells/multi-column/06-full-width-with-narrow-sidebar-and-header.jsx.md`
-- `insights/application_blocks/react/lists/tables/18-with-hidden-headings.jsx.md`
-- `insights/application_blocks/react/elements/badges/18-small-flat-pill-with-dot.jsx.md`
+- Web Design Templates guidance inspected:
+  - `GLOSSARY.md`
+  - `insights/guides/START_HERE.md`
+  - `insights/guides/VALIDATION.md`
+  - `insights/guides/redesigning-a-website.md`
+  - `insights/guides/building-an-admin-app.md`
+  - `insights/guides/choosing-a-design-lineage.md`
+  - `insights/recipes/admin-dashboard.md`
+  - `insights/library/pages/dashboard-page.md`
+  - `insights/library/components/stacked-lists.md`
+  - `insights/library/components/forms.md`
+  - `insights/library/components/badges.md`
+  - `insights/library/layouts/grid-layout.md`
+  - `insights/library/interactions/interaction-patterns.md`
+  - `insights/library/responsive/responsive-behavior.md`
+  - `insights/library/accessibility/accessibility-patterns.md`
+  - `insights/library/icons/icon-systems.md`
+  - `insights/library/styles/tailwind-theme-patterns.md`
+  - `skills/web-design-templates/references/smoke-tests.md`
+- Selected exemplar records, not raw source templates:
+  - `application_blocks/react/page-examples/home-screens/02-stacked.jsx`
+  - `application_blocks/react/data-display/description-lists/06-narrow-with-hidden-labels.jsx`
+  - `application_blocks/react/elements/badges/18-small-flat-pill-with-dot.jsx`
+  - `application_blocks/react/application-shells/multi-column/06-full-width-with-narrow-sidebar-and-header.jsx`
+  - `ecommerce_blocks/react/page-examples/product-pages/05-with-tabs-and-related-products.jsx`
+  - `marketing/src/components/icons/user-circle-icon.tsx`
+  - `online_course/src/app/globals.css`
+- Raw Web Design Templates source files were not inspected or copied.
+- Current repository source inspection will be recorded during implementation.
 
 ## Runtime Verification
 
-- Build command: `pnpm --filter @monopoly-ai-game/web run build`.
-- Start command: `pnpm --filter @monopoly-ai-game/web run start`.
-- API verification port: `18002`.
-- Web verification port: `13002`.
-- Production server PID during verification: `19156`.
-- Verification routes: `/` and `/api/backend-health`.
-- Runtime evidence: production HTML contained `Local Game Research Console`, `api`, and `ok`; Playwright verified the browser-visible backend health status, backend stage, and environment text against the production server.
-- Cleanup result: API and web process trees were stopped and ports `18002` and `13002` were confirmed closed.
+- Current status: pass. The ART_PLAN implementation has completed local verification against the board-first game-table direction, including full unit coverage, full local Chrome E2E coverage, production build, production screenshot sanity, and cleanup of temporary verification servers.
+- Passing targeted component checks:
+  - `pnpm --filter @monopoly-ai-game/web exec vitest run app/game-board.test.tsx app/turn-controls.test.tsx`
+  - `pnpm --filter @monopoly-ai-game/web exec vitest run app/dashboard-shell.test.tsx app/game-setup.test.tsx app/turn-controls.test.tsx app/game-board.test.tsx app/game-page.test.tsx`
+  - `pnpm --filter @monopoly-ai-game/web exec vitest run app/property-management.test.tsx app/contracts-panel.test.tsx app/ai-audit-panel.test.tsx app/negotiation-panel.test.tsx app/turn-controls.test.tsx app/stage-10-4-component-coverage.test.tsx`
+- Passing full unit suite:
+  - `pnpm --filter @monopoly-ai-game/web run test:unit`
+  - Result: 19 files, 92 tests passed.
+- Passing targeted E2E checks:
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/app-shell.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-setup.spec.ts e2e/game-table-layout.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts e2e/game-table-layout.spec.ts e2e/ai-audit.spec.ts e2e/contracts-log.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/stage-11-3-playability-review.spec.ts e2e/stage-11-4-render-reliability.spec.ts --project=chrome`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/game-board.spec.ts e2e/game-table-layout.spec.ts e2e/ai-audit.spec.ts e2e/contracts-log.spec.ts e2e/negotiation.spec.ts e2e/property-management.spec.ts e2e/stage-11-3-playability-review.spec.ts e2e/stage-11-4-render-reliability.spec.ts e2e/art-screenshot-sanity.spec.ts --project=chrome`
+- Passing full local E2E suite:
+  - `pnpm --filter @monopoly-ai-game/web run test:e2e`
+  - Result: 33 passed, 1 skipped. The skipped spec is `final-local-acceptance`, intentionally gated for docker compose by `PLAYWRIGHT_FINAL_LOCAL_ACCEPTANCE=1`.
+- Passing screenshot sanity check:
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/art-screenshot-sanity.spec.ts --project=chrome`
+  - This writes non-full-page desktop, tablet, mobile, five-player stacked-token, contract-heavy, AI-thinking, AI-blocked/rejected, and game-over viewport screenshots to the Playwright per-test output directory and decodes their PNG data to verify expected dimensions and nonblank color variation.
+- Passing typecheck:
+  - `pnpm --filter @monopoly-ai-game/web run typecheck`
+- Passing production build:
+  - `pnpm --filter @monopoly-ai-game/web run build`
+  - Also rerun with `INTERNAL_API_BASE_URL=http://127.0.0.1:18102` and `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:18102` for production screenshot verification.
+- Passing production screenshot sanity:
+  - With `next start` on `127.0.0.1:13102` and mock API on `127.0.0.1:18102`: `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13102 MOCK_API_PORT=18102 pnpm --filter @monopoly-ai-game/web exec playwright test e2e/art-screenshot-sanity.spec.ts --project=chrome`
+  - Result: 5 passed.
+- Cleanup completed:
+  - Temporary production verification listeners on ports `13102` and `18102` were stopped and confirmed no longer listening.
 
 ## Residual Risks
 
-- No known residual risk for Stage 1.4 scope.
+- No known local ART_PLAN acceptance blockers remain after full local verification.
+- `final-local-acceptance` remains skipped in the standard local E2E run by design because it targets docker compose and requires `PLAYWRIGHT_FINAL_LOCAL_ACCEPTANCE=1`.
+- Future subjective polish can still improve illustration richness, but the verified implementation now meets the local board-first game-table direction.

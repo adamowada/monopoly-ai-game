@@ -22,10 +22,12 @@ test("user can inspect AI audit records for profiles, decisions, memory, retriev
   page,
 }) => {
   await createAiAuditGame(page);
+  await page.getByRole("tab", { name: "AI notebook" }).click();
 
   const panel = page.getByRole("region", { name: "AI audit" });
   await expect(panel).toBeVisible();
-  await expect(panel).toContainText("Private local research view");
+  await expect(panel).toContainText("AI notebook");
+  await expect(panel).not.toContainText("Private local AI notebook");
 
   await expect(panel).toContainText("AI profile");
   await expect(panel).toContainText("Grace audit profile");
@@ -35,23 +37,27 @@ test("user can inspect AI audit records for profiles, decisions, memory, retriev
   await expect(panel).toContainText("Play style");
 
   await expect(panel).toContainText("Decision history");
-  await expect(panel).toContainText("ai_decision_id");
-  await expect(panel).toContainText("ai_profile_id");
-  await expect(panel).toContainText("state_hash");
+  await expect(panel).toContainText("Grace action decision");
+  await expect(panel).not.toContainText("ai_decision_id");
+  await expect(panel).not.toContainText("ai_profile_id");
+  await expect(panel).not.toContainText("state_hash");
   await expect(panel).toContainText("Legal actions snapshot");
   await expect(panel).toContainText("ROLL_DICE");
-  await expect(panel).toContainText("Prompt context");
-  await expect(panel).toContainText("Parsed output");
 
   await expect(panel).toContainText("Self-dialogue timeline");
-  await expect(panel).toContainText("Linked decision");
   await expect(panel).toContainText("Memory entries");
-  await expect(panel).toContainText("Used by decision");
-  await expect(panel).toContainText("superseded_by_memory_id");
+  await expect(panel).not.toContainText("superseded_by_memory_id");
   await expect(panel).toContainText("Retrieved context records");
-  await expect(panel).toContainText("retrieval_record_id");
+  await expect(panel).not.toContainText("retrieval_record_id");
 
   await expect(panel).toContainText("Rejected AI outputs");
   await expect(panel).toContainText("Validation errors");
   await expect(panel).toContainText("BUY_PROPERTY is not in the Legal actions snapshot.");
+
+  await panel.getByRole("button", { name: "Show AI technical trace" }).first().click();
+  await expect(panel).toContainText("ai_decision_id");
+  await expect(panel).toContainText("ai_profile_id");
+  await expect(panel).toContainText("state_hash");
+  await expect(panel).toContainText("Prompt context");
+  await expect(panel).toContainText("Parsed output");
 });

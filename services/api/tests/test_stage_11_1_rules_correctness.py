@@ -241,7 +241,8 @@ def test_stage_11_1_regression_card_draw_applies_effect_and_preserves_jail_card_
 
     assert not _player(used, "player-1").in_jail
     assert _player(used, "player-1").get_out_of_jail_card_ids == ()
-    assert "card_chance_get_out_of_jail" in used.decks.chance.discard_pile
+    assert used.decks.chance.draw_pile[-1] == "card_chance_get_out_of_jail"
+    assert "card_chance_get_out_of_jail" not in used.decks.chance.discard_pile
 
 
 def test_stage_11_1_regression_chance_nearest_utility_uses_fresh_roll_and_active_debt() -> None:

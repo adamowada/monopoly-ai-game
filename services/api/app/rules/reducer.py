@@ -255,9 +255,15 @@ def _updates_for_event(state: GameState, event: GameEvent) -> dict[str, Any]:
         payload = _expect_payload(event, CardDrawnPayload)
         deck_state = _validate_card_drawn_payload(state, payload)
         deck_updates = state.decks.model_dump(mode="python")
+        remaining_draw_pile = deck_state.draw_pile[1:]
+        next_draw_pile = (
+            remaining_draw_pile
+            if _card_is_get_out_of_jail(payload.card_id)
+            else (*remaining_draw_pile, payload.card_id)
+        )
         deck_updates[payload.deck] = DeckState(
-            draw_pile=deck_state.draw_pile[1:],
-            discard_pile=(*deck_state.discard_pile, payload.card_id),
+            draw_pile=next_draw_pile,
+            discard_pile=deck_state.discard_pile,
         )
         return {
             "decks": DeckCollectionState.model_validate(deck_updates),
@@ -449,7 +455,7 @@ def _validate_deck_shuffled_payload(state: GameState, payload: DeckShuffledPaylo
             f"{payload.deck} shuffle counter {payload.shuffle_counter} does not match expected "
             f"shuffle counter {expected_counter}"
         )
-    _validate_full_deck_membership(payload.deck, payload.draw_pile)
+    _validate_deck_membership_allowing_held_cards(state, payload.deck, payload.draw_pile)
 
 
 def _validate_card_drawn_payload(state: GameState, payload: CardDrawnPayload) -> DeckState:
@@ -559,6 +565,14 @@ def _card_ids_for_deck(deck_name: str) -> set[str]:
 def _all_card_ids() -> set[str]:
     data = load_classic_monopoly_data()
     return {card.id for card in (*data.decks.chance, *data.decks.community_chest)}
+
+
+def _card_is_get_out_of_jail(card_id: str) -> bool:
+    data = load_classic_monopoly_data()
+    for card in (*data.decks.chance, *data.decks.community_chest):
+        if card.id == card_id:
+            return card.effect.get("type") == "get_out_of_jail"
+    raise InvalidEventError(f"unknown card {card_id}")
 
 
 def _deck_state_for_name(state: GameState, deck_name: str) -> DeckState:

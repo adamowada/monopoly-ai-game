@@ -4139,6 +4139,49 @@
         ]
       }
     },
+    "/games/{game_id}/end": {
+      "post": {
+        "operationId": "end_game_games__game_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "game_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Game Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameMetadataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "End Game",
+        "tags": [
+          "games"
+        ]
+      }
+    },
     "/games/{game_id}/events": {
       "get": {
         "operationId": "list_events_games__game_id__events_get",

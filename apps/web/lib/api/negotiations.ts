@@ -491,3 +491,18 @@ export async function expireNegotiation({
   const payload = await readJson(response, "Expire negotiation", true);
   return parseNegotiationMutation(payload);
 }
+
+export async function executeNegotiation({
+  gameId,
+  negotiationId,
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: NegotiationScopedOptions): Promise<NegotiationMutationResponse> {
+  const response = await fetcher(gameUrl(baseUrl, gameId, `/negotiations/${encodeURIComponent(negotiationId)}/execute`), {
+    method: "POST",
+    cache: "no-store",
+    headers: { accept: "application/json" },
+  });
+  const payload = await readJson(response, "Execute negotiation", true);
+  return parseNegotiationMutation(payload);
+}

@@ -15,7 +15,7 @@ import {
   Split,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
 import { submitAiStep, type AiDecisionType, type AiStepResponse } from "../lib/api/gameplay";
@@ -39,6 +39,7 @@ import {
 } from "../lib/api/negotiations";
 import type { GameMetadata } from "../lib/api/games";
 import { cn } from "../lib/ui";
+import { PropertyReference } from "./property-deed-card";
 
 type NegotiationPanelProps = {
   gameId: string;
@@ -96,6 +97,42 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function labelFromSnake(value: string): string {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function termKindLabel(kind: DealTermKind): string {
+  return labelFromSnake(kind);
+}
+
+function TechnicalRecord({
+  buttonLabel,
+  children,
+}: Readonly<{
+  buttonLabel: string;
+  children: ReactNode;
+}>) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="mt-3">
+      <button
+        aria-expanded={isOpen}
+        className="rounded-md border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+      >
+        {isOpen ? "Hide technical record" : buttonLabel}
+      </button>
+      {isOpen ? (
+        <div className="mt-2 grid gap-1 rounded border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-700">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function isActiveNegotiationWindow(status: Negotiation["status"] | null | undefined): boolean {
   return status === "opened" || status === "active" || status === "countered";
 }
@@ -145,6 +182,48 @@ function termSummary(game: GameMetadata, term: DealTerm): string {
     return `${to} receives risk coverage from ${from}`;
   }
   return `${from} owes ${to} a conditional payment`;
+}
+
+function propertyIdsFromTerm(term: DealTerm): string[] {
+  const ids = new Set<string>();
+  const propertyId = readString(term.property_id);
+  if (propertyId) {
+    ids.add(propertyId);
+  }
+  const collateralPropertyIds = term.collateral_property_ids;
+  if (Array.isArray(collateralPropertyIds)) {
+    for (const item of collateralPropertyIds) {
+      const id = readString(item);
+      if (id) {
+        ids.add(id);
+      }
+    }
+  }
+  const trigger = term.trigger;
+  if (trigger && typeof trigger === "object" && !Array.isArray(trigger)) {
+    const triggerPropertyId = readString((trigger as Record<string, unknown>).property_id);
+    if (triggerPropertyId) {
+      ids.add(triggerPropertyId);
+    }
+  }
+  return [...ids];
+}
+
+function TermSummaryLine({ game, term }: Readonly<{ game: GameMetadata; term: DealTerm }>) {
+  const propertyIds = propertyIdsFromTerm(term);
+  const ownerId = readString(term.from_player_id) ?? readString(term.lender_player_id) ?? null;
+  return (
+    <>
+      <span className="font-semibold text-neutral-950">{termKindLabel(term.kind)}</span> - {termSummary(game, term)}
+      {propertyIds.length > 0 ? (
+        <span className="mt-1 flex flex-wrap gap-1.5">
+          {propertyIds.map((propertyId) => (
+            <PropertyReference key={propertyId} game={game} ownerId={ownerId} propertyId={propertyId} />
+          ))}
+        </span>
+      ) : null}
+    </>
+  );
 }
 
 function defaultTermDraft(game: GameMetadata, participants: string[]): TermDraft {
@@ -327,7 +406,7 @@ function ValidationAlert({ errors }: Readonly<{ errors: ValidationError[] }>) {
       <div className="flex gap-2">
         <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-rose-700" />
         <div>
-          <p className="font-semibold text-rose-950">Validation errors</p>
+          <div className="font-semibold text-rose-950">Validation errors</div>
           <ul className="mt-1 list-disc space-y-1 pl-4">
             {errors.map((error) => (
               <li key={`${error.code}-${error.field ?? "field"}-${error.message}`}>
@@ -730,7 +809,6 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Negotiation inbox</h2>
-          <p className="mt-1 text-xs text-neutral-600">Deals, messages, and accept/reject outcomes are loaded from the API.</p>
         </div>
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
           <MessageSquareText aria-hidden="true" className="size-3" />
@@ -828,7 +906,8 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               <Button
                 onClick={requestOpenAiNegotiationStep}
                 disabled={busy || !canAskAiOpenNegotiation}
-                className="w-fit bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                className="w-fit"
+                variant="secondary"
               >
                 {requestAiNegotiationStep.isPending ? (
                   <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -839,9 +918,9 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               </Button>
             </div>
             {aiNegotiationResult?.decision_type === "open_negotiation" ? (
-              <p className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
+              <div className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
                 AI response {aiNegotiationResult.status}
-              </p>
+              </div>
             ) : null}
           </section>
         ) : null}
@@ -849,11 +928,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
         <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
           <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <h3 className="text-sm font-semibold text-neutral-950">Threads</h3>
-            {negotiationsQuery.isLoading ? (
-              <p className="mt-2 text-sm text-neutral-600">Loading negotiations.</p>
-            ) : negotiations.length === 0 ? (
-              <p className="mt-2 text-sm text-neutral-600">No negotiations yet.</p>
-            ) : (
+            {negotiations.length > 0 ? (
               <div className="mt-3 grid gap-2">
                 {negotiations.map((negotiation) => (
                   <button
@@ -874,12 +949,12 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                   >
                     <span className="block font-semibold">{negotiation.topic}</span>
                     <span className="mt-1 block text-xs">
-                      {statusLabel(negotiation.status)} · round_number {negotiation.round_number}
+                      {statusLabel(negotiation.status)} - Round {negotiation.round_number}
                     </span>
                   </button>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
 
           <section aria-label="Negotiation thread" className="rounded-md border border-neutral-200 bg-white p-3">
@@ -887,13 +962,11 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               <div>
                 <h3 className="text-sm font-semibold text-neutral-950">Negotiation thread</h3>
                 {selectedNegotiation ? (
-                  <p className="mt-1 text-xs text-neutral-600">
-                    {selectedNegotiation.topic} · {statusLabel(selectedNegotiation.status)} · round_number{" "}
+                  <div className="mt-1 text-xs text-neutral-600">
+                    {selectedNegotiation.topic} - {statusLabel(selectedNegotiation.status)} - Round{" "}
                     {selectedNegotiation.round_number}
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-neutral-600">No negotiation selected.</p>
-                )}
+                  </div>
+                ) : null}
               </div>
               {selectedNegotiation ? (
                 <span
@@ -927,21 +1000,13 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                       Participants {playerNames(game, selectedNegotiation.participant_player_ids)}
                     </dd>
                   </div>
-                  <div>
-                    <dt className="text-xs font-medium uppercase text-neutral-500">status</dt>
-                    <dd className="mt-1 text-neutral-950">{selectedNegotiation.status}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-medium uppercase text-neutral-500">participant_player_ids</dt>
-                    <dd className="mt-1 break-all text-neutral-950">{selectedNegotiation.participant_player_ids.join(", ")}</dd>
-                  </div>
                 </dl>
-                {selectedNegotiation.status === "expired" ? (
-                  <p className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm font-medium text-neutral-700">
-                    Expired negotiation is visibly closed and cannot execute accept controls.
-                  </p>
-                ) : null}
-
+                <TechnicalRecord buttonLabel="Show negotiation technical record">
+                  <div>negotiation_id {selectedNegotiation.id}</div>
+                  <div>status {selectedNegotiation.status}</div>
+                  <div>round_number {selectedNegotiation.round_number}</div>
+                  <div>participant_player_ids {selectedNegotiation.participant_player_ids.join(", ")}</div>
+                </TechnicalRecord>
                 {aiParticipants.length > 0 ? (
                   <section aria-label="AI negotiation controls" className="rounded-md border border-purple-200 bg-purple-50 p-3">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -978,7 +1043,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                             }
                           }}
                           disabled={busy || !canAskAiOffer}
-                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                          variant="secondary"
                         >
                           <BadgeDollarSign aria-hidden="true" className="size-4" />
                           Ask AI offer
@@ -986,7 +1051,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         <Button
                           onClick={() => requestThreadAiNegotiationStep("counteroffer")}
                           disabled={busy || !canAskAiDealResponse}
-                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                          variant="secondary"
                         >
                           <RefreshCw aria-hidden="true" className="size-4" />
                           Ask AI counteroffer
@@ -994,7 +1059,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         <Button
                           onClick={() => requestThreadAiNegotiationStep("accept_reject")}
                           disabled={busy || !canAskAiDealResponse}
-                          className="bg-white text-purple-900 ring-1 ring-inset ring-purple-200 hover:bg-purple-100"
+                          variant="secondary"
                         >
                           <CheckCircle2 aria-hidden="true" className="size-4" />
                           Ask AI accept/reject
@@ -1002,29 +1067,25 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                       </div>
                     </div>
                     {aiNegotiationResult ? (
-                      <p className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
+                      <div className="mt-3 rounded-md border border-purple-200 bg-white px-3 py-2 text-sm font-medium text-purple-950">
                         AI response {aiNegotiationResult.status}
-                      </p>
+                      </div>
                     ) : null}
                   </section>
                 ) : null}
 
                 <div className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
                   <h4 className="text-sm font-semibold text-neutral-950">Messages</h4>
-                  {messagesQuery.isLoading ? (
-                    <p className="mt-2 text-sm text-neutral-600">Loading messages.</p>
-                  ) : (messagesQuery.data ?? []).length === 0 ? (
-                    <p className="mt-2 text-sm text-neutral-600">No messages yet.</p>
-                  ) : (
+                  {(messagesQuery.data ?? []).length > 0 ? (
                     <ol className="mt-2 divide-y divide-neutral-200 text-sm">
                       {(messagesQuery.data ?? []).map((message) => (
                         <li key={message.id} className="py-2">
-                          <p className="font-medium text-neutral-950">{playerName(game, message.author_player_id)}</p>
-                          <p className="mt-1 text-neutral-700">{message.body}</p>
+                          <div className="font-medium text-neutral-950">{playerName(game, message.author_player_id)}</div>
+                          <div className="mt-1 text-neutral-700">{message.body}</div>
                         </li>
                       ))}
                     </ol>
-                  )}
+                  ) : null}
                 </div>
 
                 <form
@@ -1066,11 +1127,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
 
                 <section aria-label="Selected deal versions" className="grid gap-2">
                   <h4 className="text-sm font-semibold text-neutral-950">Selected deal versions</h4>
-                  {selectedDeals.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-neutral-200 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
-                      No deal versions proposed.
-                    </p>
-                  ) : (
+                  {selectedDeals.length > 0 ? (
                     selectedDeals.map((deal) => {
                       const canExecute = deal.status === "proposed" && isNegotiationOpen;
                       return (
@@ -1083,9 +1140,9 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div>
                               <h5 className="text-sm font-semibold text-neutral-950">Deal v{deal.version}</h5>
-                              <p className="mt-1 text-xs text-neutral-600">
-                                {deal.parent_deal_id ? `Counteroffer · Parent deal ${deal.parent_deal_id}` : "Original proposal"}
-                              </p>
+                              <div className="mt-1 text-xs text-neutral-600">
+                                {deal.parent_deal_id ? "Counteroffer" : "Original proposal"}
+                              </div>
                             </div>
                             <span
                               className={cn(
@@ -1108,44 +1165,32 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                               <dd className="mt-1 text-neutral-950">{playerName(game, deal.proposer_player_id)}</dd>
                             </div>
                             <div>
-                              <dt className="font-medium uppercase text-neutral-500">accepted_at</dt>
-                              <dd className="mt-1 text-neutral-950">{deal.accepted_at ?? "not accepted"}</dd>
-                            </div>
-                            <div>
-                              <dt className="font-medium uppercase text-neutral-500">validation_errors</dt>
-                              <dd className="mt-1 text-neutral-950">{deal.validation_errors.length}</dd>
-                            </div>
-                            <div>
-                              <dt className="font-medium uppercase text-neutral-500">parent_deal_id</dt>
-                              <dd className="mt-1 text-neutral-950">{deal.parent_deal_id ?? "none"}</dd>
+                              <dt className="font-medium uppercase text-neutral-500">Participants</dt>
+                              <dd className="mt-1 text-neutral-950">{playerNames(game, deal.participant_player_ids)}</dd>
                             </div>
                           </dl>
 
                           <ul className="mt-3 grid gap-1.5 text-sm text-neutral-700">
                             {deal.terms.map((term, index) => (
                               <li key={`${deal.id}-${term.kind}-${index}`} className="rounded border border-neutral-200 bg-white px-2 py-1.5">
-                                <span className="font-semibold text-neutral-950">{term.kind}</span> · {termSummary(game, term)}
+                                <TermSummaryLine game={game} term={term} />
                               </li>
                             ))}
                           </ul>
 
-                          {deal.status === "rejected" ? (
-                            <p className="mt-3 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-700">
-                              Rejected deal is visibly closed and cannot execute accept controls.
-                            </p>
-                          ) : null}
-                          {deal.status === "expired" ? (
-                            <p className="mt-3 rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-700">
-                              Expired deal is visibly closed and cannot execute accept controls.
-                            </p>
-                          ) : null}
+                          <TechnicalRecord buttonLabel="Show deal technical record">
+                            <div>deal_id {deal.id}</div>
+                            <div>parent_deal_id {deal.parent_deal_id ?? "none"}</div>
+                            <div>accepted_at {deal.accepted_at ?? "not accepted"}</div>
+                            <div>validation_errors {deal.validation_errors.length}</div>
+                          </TechnicalRecord>
 
                           {canExecute ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Button
                                 onClick={() => startCounteroffer(deal)}
                                 disabled={busy}
-                                className="bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100"
+                                variant="secondary"
                               >
                                 <RefreshCw aria-hidden="true" className="size-4" />
                                 Counteroffer
@@ -1169,7 +1214,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                               <Button
                                 onClick={() => rejectDealMutation.mutate(deal.id)}
                                 disabled={busy}
-                                className="bg-rose-700 hover:bg-rose-800 focus-visible:outline-rose-700"
+                                variant="danger"
                               >
                                 {rejectDealMutation.isPending ? (
                                   <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -1183,14 +1228,15 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
                         </article>
                       );
                     })
-                  )}
+                  ) : null}
                 </section>
 
                 {isNegotiationOpen ? (
                   <Button
                     onClick={() => expireNegotiationMutation.mutate(selectedNegotiation.id)}
                     disabled={busy}
-                    className="w-fit bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100"
+                    className="w-fit"
+                    variant="secondary"
                   >
                     {expireNegotiationMutation.isPending ? (
                       <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -1209,9 +1255,6 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="text-sm font-semibold text-neutral-950">Structured deal builder</h3>
-              <p className="mt-1 text-xs text-neutral-600">
-                Add executable terms as a draft, then submit them to the API for a proposed deal version.
-              </p>
             </div>
             <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-white px-2 py-1 text-xs font-medium text-neutral-600 ring-1 ring-inset ring-neutral-200">
               <BadgeDollarSign aria-hidden="true" className="size-3" />
@@ -1243,7 +1286,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               >
                 {termKinds.map((kind) => (
                   <option key={kind} value={kind}>
-                    {kind}
+                    {termKindLabel(kind)}
                   </option>
                 ))}
               </select>
@@ -1333,7 +1376,7 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
             <Button
               onClick={addSampleTerms}
               disabled={!selectedNegotiation || !isNegotiationOpen}
-              className="bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100"
+              variant="secondary"
             >
               <FileText aria-hidden="true" className="size-4" />
               Add sample complex instruments
@@ -1344,10 +1387,12 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
             </Button>
           </div>
 
-          <div className="mt-3 rounded-md border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
-            <p className="font-semibold text-neutral-950">Counteroffer</p>
-            <p className="mt-1">Parent deal {parentDealId ?? "none"}</p>
-          </div>
+          {parentDealId ? (
+            <div className="mt-3 rounded-md border border-neutral-200 bg-white p-3 text-sm text-neutral-700">
+              <span className="block font-semibold text-neutral-950">Counteroffer</span>
+              <span className="mt-1 block">Parent deal {parentDealId}</span>
+            </div>
+          ) : null}
         </section>
 
         <section aria-label="Contract preview" className="rounded-md border border-neutral-200 bg-white p-3">
@@ -1368,24 +1413,16 @@ export function NegotiationPanel({ gameId, game, apiBaseUrl }: NegotiationPanelP
               <dt className="text-xs font-medium uppercase text-neutral-500">Complex instruments</dt>
               <dd className="mt-1 text-neutral-950">{previewTerms.length} terms</dd>
             </div>
-            <div>
-              <dt className="text-xs font-medium uppercase text-neutral-500">Obligations</dt>
-              <dd className="mt-1 text-neutral-950">Phase 6 would create obligations from accepted structured terms.</dd>
-            </div>
           </dl>
-          {previewTerms.length === 0 ? (
-            <p className="mt-3 rounded-md border border-dashed border-neutral-200 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
-              No terms selected for preview.
-            </p>
-          ) : (
+          {previewTerms.length > 0 ? (
             <ul className="mt-3 grid gap-2 text-sm text-neutral-700">
               {previewTerms.map((term, index) => (
                 <li key={`${term.kind}-${index}`} className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-                  <span className="font-semibold text-neutral-950">{term.kind}</span> · {termSummary(game, term)}
+                  <TermSummaryLine game={game} term={term} />
                 </li>
               ))}
             </ul>
-          )}
+          ) : null}
         </section>
       </div>
     </section>

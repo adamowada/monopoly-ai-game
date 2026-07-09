@@ -31,10 +31,13 @@ from pydantic import (
 
 MALFORMED_AI_OUTPUT_REASON_CODE = "malformed_ai_output"
 _FIELD_JOINER = "".join
+_EMPTY_ACTION_PAYLOAD_TYPES = frozenset({"ROLL_DICE", "END_TURN", "PAY_JAIL_FINE"})
 
 
 def _normalize_codex_json_object(value: Any) -> Any:
     if isinstance(value, str):
+        if value.strip() == "":
+            return {}
         try:
             decoded = json.loads(value)
         except json.JSONDecodeError as exc:
@@ -47,9 +50,31 @@ def _normalize_codex_json_object(value: Any) -> Any:
     return value
 
 
+def _normalize_optional_codex_json_object(value: Any) -> Any:
+    if isinstance(value, str):
+        if value.strip() == "":
+            return {}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(decoded, Mapping):
+            return dict(decoded)
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
 CodexJsonObject = Annotated[
     dict[str, Any],
     BeforeValidator(_normalize_codex_json_object),
+    WithJsonSchema({"type": "string"}),
+]
+
+OptionalCodexJsonObject = Annotated[
+    dict[str, Any],
+    BeforeValidator(_normalize_optional_codex_json_object),
     WithJsonSchema({"type": "string"}),
 ]
 
@@ -99,6 +124,17 @@ class AIActionPayload(_SchemaModel):
         description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_empty_action_payload_placeholders(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        action_type = value.get("type")
+        payload = value.get("payload")
+        if action_type in _EMPTY_ACTION_PAYLOAD_TYPES and isinstance(payload, str):
+            return {**value, "payload": {}}
+        return value
+
 
 class NegotiationMessagePayload(_SchemaModel):
     recipient_player_id: UUID | None = Field(
@@ -106,7 +142,7 @@ class NegotiationMessagePayload(_SchemaModel):
         description="Optional specific recipient for a negotiation message.",
     )
     body: str = Field(min_length=1, max_length=4000, description="Negotiation text to send.")
-    metadata: CodexJsonObject = Field(
+    metadata: OptionalCodexJsonObject = Field(
         default_factory=dict,
         description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
     )
@@ -160,6 +196,29 @@ class SelfDialoguePayload(_SchemaModel):
     text: str | None = Field(default=None, min_length=1)
     reason: str | None = Field(default=None, min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_missing_provided_text(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+
+        if value.get("status") != "provided":
+            return value
+
+        text = value.get("text")
+        if isinstance(text, str) and text.strip():
+            return value
+        if text is not None and not isinstance(text, str):
+            return value
+
+        reason = value.get("reason")
+        normalized = dict(value)
+        normalized["status"] = "empty"
+        normalized.pop("text", None)
+        if not isinstance(reason, str) or not reason.strip():
+            normalized["reason"] = "No self-dialogue text provided."
+        return normalized
+
     @model_validator(mode="after")
     def validate_payload_shape(self) -> SelfDialoguePayload:
         if self.status == "provided":
@@ -179,7 +238,7 @@ class MemoryUpdatePayload(_SchemaModel):
     category: MemoryCategory
     importance: int = Field(ge=0, le=10)
     content: str = Field(min_length=1)
-    metadata: CodexJsonObject = Field(
+    metadata: OptionalCodexJsonObject = Field(
         default_factory=dict,
         description="JSON object encoded as a string by Codex; validation normalizes it to a dictionary.",
     )

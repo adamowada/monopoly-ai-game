@@ -299,10 +299,18 @@ class EventPersistence:
         return EventAppendManyResult(events=tuple(records), state=current_state)
 
     async def list_accepted_events(self, game_id: UUID | str) -> list[AcceptedEventRecord]:
+        return await self.list_accepted_events_after(game_id, sequence=0)
+
+    async def list_accepted_events_after(
+        self,
+        game_id: UUID | str,
+        *,
+        sequence: int,
+    ) -> list[AcceptedEventRecord]:
         normalized_game_id = _coerce_uuid(game_id)
         async with self._session_factory() as session:
             await _load_initial_state(session, normalized_game_id)
-            rows = await _load_event_rows_after(session, normalized_game_id, sequence=0)
+            rows = await _load_event_rows_after(session, normalized_game_id, sequence=sequence)
             return [_accepted_event_record_from_row(row) for row in rows]
 
     async def replay_from_event_zero(self, game_id: UUID | str) -> GameState:
@@ -533,7 +541,7 @@ def _build_game_event(
 
 
 def _payload_for_storage(payload: EventModel) -> dict[str, Any]:
-    return payload.model_dump(mode="json")
+    return payload.model_dump(mode="json", exclude_unset=True)
 
 
 async def _update_game_current_state(
@@ -541,10 +549,17 @@ async def _update_game_current_state(
     game_id: UUID,
     state: GameState,
 ) -> None:
+    game_values: dict[str, Any] = {
+        "current_phase": state.turn.phase.value,
+        "updated_at": sa.func.now(),
+    }
+    if state.turn.phase.value == "GAME_OVER":
+        game_values["status"] = "ended"
+
     await session.execute(
         games.update()
         .where(games.c.id == game_id)
-        .values(current_phase=state.turn.phase.value, updated_at=sa.func.now())
+        .values(**game_values)
     )
     for player_state in state.players:
         await session.execute(

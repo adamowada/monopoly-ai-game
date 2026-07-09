@@ -14,7 +14,7 @@ async function createGame(page: import("@playwright/test").Page, seed: string) {
   await expect(page.getByRole("region", { name: "Classic Monopoly-style board" })).toBeVisible();
 }
 
-test("shows legal turn controls, rolls from the returned action, logs accepted events, and refetches after SSE", async ({ page }) => {
+test("shows legal turn controls, rolls from the returned action, logs accepted moves, and refreshes on accepted events", async ({ page }) => {
   const legalActionsResponses: string[] = [];
   page.on("response", (response) => {
     if (response.url().includes("/legal-actions")) {
@@ -30,10 +30,9 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   await expect(controls.getByRole("button", { name: "Roll dice" })).toBeEnabled();
   await expect(controls.getByRole("button", { name: "End turn" })).toBeDisabled();
   await expect(controls.getByRole("button", { name: "Buy property" })).toHaveCount(0);
+  await expect(controls.getByText("Loading moves")).toHaveCount(0);
 
-  await expect
-    .poll(() => legalActionsResponses.length, { message: "SSE invalidation should refetch legal actions" })
-    .toBeGreaterThanOrEqual(2);
+  const legalActionFetchesBeforeAction = legalActionsResponses.length;
 
   const actionRequest = page.waitForRequest((request) => request.url().includes("/actions") && request.method() === "POST");
   await controls.getByRole("button", { name: "Roll dice" }).click();
@@ -41,11 +40,35 @@ test("shows legal turn controls, rolls from the returned action, logs accepted e
   expect(submitted.headers()["idempotency-key"]).toBeTruthy();
   expect(submitted.postDataJSON()).toMatchObject({ type: "ROLL_DICE" });
 
+  const slidingToken = page.locator("[data-token-slide='true']").first();
+  await expect(slidingToken).toBeVisible();
+  await expect(slidingToken).toHaveClass(/board-token-motion-overlay/);
+  await expect(page.getByRole("status", { name: "Board movement" })).toBeVisible();
+  await expect
+    .poll(() => slidingToken.evaluate((element) => window.getComputedStyle(element).transitionDuration))
+    .toContain("0.38s");
+  const firstSlidingBox = await slidingToken.boundingBox();
+  expect(firstSlidingBox).toBeTruthy();
+  await expect
+    .poll(async () => {
+      const nextBox = await slidingToken.boundingBox();
+      if (!firstSlidingBox || !nextBox) {
+        return 0;
+      }
+      return Math.abs(nextBox.x - firstSlidingBox.x) + Math.abs(nextBox.y - firstSlidingBox.y);
+    })
+    .toBeGreaterThan(8);
+
   await expect(page.getByLabel("Ada token at Chance, position 7")).toBeVisible();
+  await expect(page.getByRole("status", { name: "Board landing" })).toContainText("Ada landed on Chance");
   await expect(page.getByLabel("Ada token at GO, position 0")).toHaveCount(0);
+  await page.getByRole("tab", { name: "Contracts" }).click();
   const log = page.getByRole("region", { name: "Game log" });
-  await expect(log).toContainText("DICE_ROLLED");
-  await expect(log).toContainText("TOKEN_MOVED");
+  await expect(log).toContainText("Ada rolled 3 + 4 = 7");
+  await expect(log).toContainText("Ada moved to Chance");
+  await expect
+    .poll(() => legalActionsResponses.length, { message: "accepted event should refresh legal actions" })
+    .toBeGreaterThan(legalActionFetchesBeforeAction);
 });
 
 test("shows Rejected action for a mock stale action without moving the active token", async ({ page }) => {

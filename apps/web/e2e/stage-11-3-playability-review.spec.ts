@@ -54,6 +54,30 @@ async function clickTurnControl(page: Page, name: string) {
   await button.click();
 }
 
+async function openTableView(page: Page, name: "Properties" | "Deals" | "Contracts" | "AI notebook") {
+  await page.getByRole("tab", { name }).click();
+}
+
+function legalDeed(page: Page, name: string) {
+  return page
+    .getByRole("region", { name: "Legal deed actions" })
+    .getByRole("region", { name: `Property detail: ${name}` });
+}
+
+async function openDeedCatalog(page: Page) {
+  const catalog = page.getByRole("region", { name: "Deed catalog" });
+  if ((await catalog.count()) === 0) {
+    await page.getByRole("region", { name: "Property management" }).getByRole("button", { name: "Open deed catalog" }).click();
+  }
+  await expect(catalog).toBeVisible();
+  return catalog;
+}
+
+async function catalogDeed(page: Page, name: string) {
+  const catalog = await openDeedCatalog(page);
+  return catalog.getByRole("region", { name: `Property detail: ${name}` });
+}
+
 test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Roll dice Buy property Settle debt Build house Mortgage Start negotiation Propose deal Accept Enforce obligation", async ({
   page,
 }) => {
@@ -70,13 +94,11 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
 
   await expect(board).toBeVisible();
   await expect(propertyManagement).toBeVisible();
-  await expect(contracts).toBeVisible();
-  await expect(negotiation).toBeVisible();
-  await expect(aiAudit).toBeVisible();
-  await expect(log).toBeVisible();
+  await expect(contracts).toBeHidden();
+  await expect(negotiation).toBeHidden();
+  await expect(aiAudit).toBeHidden();
+  await expect(log).toBeHidden();
 
-  const mediterranean = page.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
-  const reading = page.getByRole("region", { name: "Property detail: Reading Railroad" });
   const bankInventory = page.getByRole("region", { name: "Bank inventory" });
 
   await expectActivePlayer(page, "Ada");
@@ -84,7 +106,7 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
   await expect(controls.getByRole("button", { name: "Buy property" })).toBeEnabled();
 
   await clickTurnControl(page, "Buy property");
-  await expect(mediterranean).toContainText("Owner Ada");
+  await expect(await catalogDeed(page, "Mediterranean Avenue")).toContainText("Owner Ada");
 
   await clickTurnControl(page, "End turn");
   await expectActivePlayer(page, "Grace");
@@ -93,24 +115,29 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
   await expect(controls.getByRole("button", { name: "Settle debt" })).toBeEnabled();
 
   await clickTurnControl(page, "Settle debt");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("RENT_PAID");
 
   await clickTurnControl(page, "End turn");
   await expectActivePlayer(page, "Ada");
 
-  await expect(mediterranean.getByRole("button", { name: "Build house" })).toBeEnabled();
-  await mediterranean.getByRole("button", { name: "Build house" }).click();
-  await expect(mediterranean).toContainText("Houses: 1");
+  await openTableView(page, "Properties");
+  await expect(legalDeed(page, "Mediterranean Avenue").getByRole("button", { name: "Build house" })).toBeEnabled();
+  await legalDeed(page, "Mediterranean Avenue").getByRole("button", { name: "Build house" }).click();
+  await expect(await catalogDeed(page, "Mediterranean Avenue")).toContainText("Houses: 1");
   await expect(bankInventory).toContainText("Houses remaining");
 
-  await expect(reading.getByRole("button", { name: "Mortgage" })).toBeEnabled();
-  await reading.getByRole("button", { name: "Mortgage" }).click();
-  await expect(reading).toContainText("Mortgaged");
+  await expect(legalDeed(page, "Reading Railroad").getByRole("button", { name: "Mortgage" })).toBeEnabled();
+  await legalDeed(page, "Reading Railroad").getByRole("button", { name: "Mortgage" }).click();
+  await expect(await catalogDeed(page, "Reading Railroad")).toContainText("Mortgaged");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 
   await createGame(page, "stage-10-5-contract-enforcement", twoHumanPlayers);
   await expect(board).toBeVisible();
+  await openTableView(page, "Contracts");
   await expect(contracts).toBeVisible();
+  await openTableView(page, "Deals");
   await expect(negotiation).toBeVisible();
 
   await negotiation.getByLabel("Negotiation topic").fill("Stage 11.3 UI usability pass");
@@ -126,6 +153,7 @@ test("stage-11-3-two-human-playthrough: readable 2 human players loop reaches Ro
   await deal.getByRole("button", { name: "Accept" }).click();
   await expect(deal).toContainText("Accepted");
 
+  await openTableView(page, "Contracts");
   await expect(contracts).toContainText("Active contracts");
   await expect(contracts).toContainText("pending");
   await contracts.getByRole("button", { name: "Enforce obligation" }).click();
@@ -168,42 +196,43 @@ test("stage-11-3-property-management-playthrough: browser reaches Build house Se
   const log = page.getByRole("region", { name: "Game log" });
   const propertyManagement = page.getByRole("region", { name: "Property management" });
   const bankInventory = page.getByRole("region", { name: "Bank inventory" });
-  const mediterranean = page.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
-  const baltic = page.getByRole("region", { name: "Property detail: Baltic Avenue" });
-  const parkPlace = page.getByRole("region", { name: "Property detail: Park Place" });
-  const boardwalk = page.getByRole("region", { name: "Property detail: Boardwalk" });
 
   await expect(propertyManagement).toBeVisible();
   await expect(bankInventory).toBeVisible();
   await expectActivePlayer(page, "Ada");
-  await expect(mediterranean).toContainText("Owner Ada");
-  await expect(baltic).toContainText("Owner Ada");
-  await expect(parkPlace).toContainText("Owner Ada");
-  await expect(parkPlace).toContainText("Mortgaged");
-  await expect(boardwalk).toContainText("Owner Ada");
-  await expect(boardwalk).toContainText("Hotels: 1");
+  await expect(legalDeed(page, "Mediterranean Avenue")).toContainText("Owner Ada");
+  await expect(legalDeed(page, "Baltic Avenue")).toContainText("Owner Ada");
+  await expect(legalDeed(page, "Park Place")).toContainText("Owner Ada");
+  await expect(legalDeed(page, "Park Place")).toContainText("Mortgaged");
+  await expect(legalDeed(page, "Boardwalk")).toContainText("Owner Ada");
+  await expect(legalDeed(page, "Boardwalk")).toContainText("Hotels: 1");
 
-  await expect(baltic.getByRole("button", { name: "Mortgage" })).toBeEnabled();
-  await baltic.getByRole("button", { name: "Mortgage" }).click();
-  await expect(baltic).toContainText("Mortgaged");
+  await expect(legalDeed(page, "Baltic Avenue").getByRole("button", { name: "Mortgage" })).toBeEnabled();
+  await legalDeed(page, "Baltic Avenue").getByRole("button", { name: "Mortgage" }).click();
+  await expect(await catalogDeed(page, "Baltic Avenue")).toContainText("Mortgaged");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 
-  await expect(parkPlace.getByRole("button", { name: "Unmortgage" })).toBeEnabled();
-  await parkPlace.getByRole("button", { name: "Unmortgage" }).click();
-  await expect(parkPlace).toContainText("Unmortgaged");
+  await openTableView(page, "Properties");
+  await expect(legalDeed(page, "Park Place").getByRole("button", { name: "Unmortgage" })).toBeEnabled();
+  await legalDeed(page, "Park Place").getByRole("button", { name: "Unmortgage" }).click();
+  await expect(await catalogDeed(page, "Park Place")).toContainText("Unmortgaged");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_MORTGAGE_SET");
 
-  await expect(mediterranean.getByRole("button", { name: "Build house" })).toBeEnabled();
-  await mediterranean.getByRole("button", { name: "Build house" }).click();
-  await expect(mediterranean).toContainText("Houses: 1");
+  await openTableView(page, "Properties");
+  await expect(legalDeed(page, "Mediterranean Avenue").getByRole("button", { name: "Build house" })).toBeEnabled();
+  await legalDeed(page, "Mediterranean Avenue").getByRole("button", { name: "Build house" }).click();
+  await expect(await catalogDeed(page, "Mediterranean Avenue")).toContainText("Houses: 1");
   await expect(bankInventory).toContainText("Houses remaining 31");
 
-  await expect(boardwalk.getByRole("button", { name: "Sell house" })).toBeEnabled();
-  await boardwalk.getByRole("button", { name: "Sell house" }).click();
-  await expect(boardwalk).toContainText("Houses: 4");
-  await expect(boardwalk).toContainText("Hotels: 0");
+  await expect(legalDeed(page, "Boardwalk").getByRole("button", { name: "Sell house" })).toBeEnabled();
+  await legalDeed(page, "Boardwalk").getByRole("button", { name: "Sell house" }).click();
+  await expect(await catalogDeed(page, "Boardwalk")).toContainText("Houses: 4");
+  await expect(await catalogDeed(page, "Boardwalk")).toContainText("Hotels: 0");
   await expect(bankInventory).toContainText("Houses remaining 27");
   await expect(bankInventory).toContainText("Hotels remaining 13");
+  await openTableView(page, "Contracts");
   await expect(log).toContainText("PROPERTY_IMPROVEMENTS_SET");
 });
 
@@ -256,6 +285,7 @@ test("stage-11-3-mixed-ai-playthrough: mixed human/AI players, Start auction Bid
   await expect(stepAiButton).toBeEnabled();
   await stepAiButton.click();
   await expect(auction).toContainText(/Current high bidder/);
-  await expect(aiAudit).toContainText("AI audit");
+  await openTableView(page, "AI notebook");
+  await expect(aiAudit).toContainText("AI notebook");
   await expect(aiAudit).toContainText("Decision history");
 });

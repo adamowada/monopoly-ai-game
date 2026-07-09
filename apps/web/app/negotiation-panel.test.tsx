@@ -340,9 +340,10 @@ describe("NegotiationPanel", () => {
 
     const inbox = await screen.findByRole("region", { name: "Negotiation inbox" });
     expect(inbox).toHaveTextContent("Negotiation inbox");
-    expect(screen.getByRole("region", { name: "Negotiation thread" })).toHaveTextContent("No negotiation selected");
+    expect(screen.getByRole("region", { name: "Negotiation thread" })).not.toHaveTextContent("No negotiation selected");
     expect(screen.getByRole("region", { name: "Structured deal builder" })).toHaveTextContent("Structured deal builder");
     expect(screen.getByRole("region", { name: "Contract preview" })).toHaveTextContent("Complex instruments");
+    expect(screen.getByRole("region", { name: "Contract preview" })).not.toHaveTextContent("No terms selected for preview.");
 
     fireEvent.change(screen.getByLabelText("Negotiation topic"), { target: { value: "Opening trade" } });
     fireEvent.change(screen.getByLabelText("Negotiation context"), { target: { value: "Ada wants a railroad swap." } });
@@ -350,7 +351,7 @@ describe("NegotiationPanel", () => {
 
     const thread = await screen.findByRole("region", { name: "Negotiation thread" });
     await waitFor(() => expect(thread).toHaveTextContent("Opening trade"));
-    expect(thread).toHaveTextContent("round_number 1");
+    expect(thread).toHaveTextContent("Round 1");
     expect(thread).toHaveTextContent("Participants Ada, Grace");
 
     fireEvent.change(screen.getByLabelText("Freeform message"), {
@@ -363,13 +364,15 @@ describe("NegotiationPanel", () => {
     const preview = screen.getByRole("region", { name: "Contract preview" });
     expect(preview).toHaveTextContent("Contract preview");
     expect(preview).toHaveTextContent("Complex instruments");
+    expect(within(preview).getByRole("button", { name: "Show property card for Oriental Avenue" })).toBeInTheDocument();
+    expect(within(preview).getAllByRole("button", { name: "Show property card for Reading Railroad" }).length).toBeGreaterThan(0);
     for (const termKind of [
-      "immediate_cash_transfer",
-      "deferred_cash_payment",
-      "interest_bearing_debt",
-      "property_purchase_option",
-      "rent_share",
-      "insurance_payout",
+      "Immediate Cash Transfer",
+      "Deferred Cash Payment",
+      "Interest Bearing Debt",
+      "Property Purchase Option",
+      "Rent Share",
+      "Insurance Payout",
     ]) {
       expect(preview).toHaveTextContent(termKind);
     }
@@ -379,7 +382,8 @@ describe("NegotiationPanel", () => {
     const deal = await screen.findByRole("region", { name: "Deal v1" });
     expect(deal).toHaveTextContent("Deal v1");
     expect(deal).toHaveTextContent("Proposed");
-    expect(deal).toHaveTextContent("immediate_cash_transfer");
+    expect(deal).toHaveTextContent("Immediate Cash Transfer");
+    expect(within(deal).getByRole("button", { name: "Show property card for Oriental Avenue" })).toBeInTheDocument();
 
     const dealSubmission = fetchMock.mock.calls.find(
       ([url, init]) => String(url) === `${apiBaseUrl}/games/${gameId}/deals` && init?.method === "POST",
@@ -417,8 +421,9 @@ describe("NegotiationPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Propose deal" }));
 
     const counterDeal = await screen.findByRole("region", { name: "Deal v2" });
-    expect(counterDeal).toHaveTextContent("Parent deal deal-1");
     expect(counterDeal).toHaveTextContent("Counteroffer");
+    expect(screen.getByRole("region", { name: "Selected deal versions" })).not.toHaveTextContent("No deal versions proposed.");
+    expect(counterDeal).not.toHaveTextContent("parent_deal_id");
     const counterSubmission = fetchMock.mock.calls.find(
       ([url, init]) =>
         String(url) === `${apiBaseUrl}/games/${gameId}/deals` &&
@@ -430,7 +435,9 @@ describe("NegotiationPanel", () => {
     fireEvent.click(within(counterDeal).getByRole("button", { name: "Accept" }));
 
     await waitFor(() => expect(counterDeal).toHaveTextContent("Accepted"));
+    fireEvent.click(within(counterDeal).getByRole("button", { name: "Show deal technical record" }));
     expect(counterDeal).toHaveTextContent("accepted_at");
+    expect(counterDeal).toHaveTextContent("parent_deal_id deal-1");
     expect(within(counterDeal).queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
   });
 
@@ -438,7 +445,7 @@ describe("NegotiationPanel", () => {
     const { fetchMock, state } = createNegotiationFetchMock();
     renderPanel(fetchMock);
 
-    expect(await screen.findByRole("region", { name: "Negotiation thread" })).toHaveTextContent(
+    expect(await screen.findByRole("region", { name: "Negotiation thread" })).not.toHaveTextContent(
       "No negotiation selected",
     );
 

@@ -46,7 +46,7 @@ async function createAuctionGameWithAiBidder(page: Page) {
     accepted_events?: Array<{ event_type: string }>;
   };
   expect(rollBody.status).toBe("accepted");
-  expect(rollBody.accepted_events?.map((event) => event.event_type)).toEqual(["DICE_ROLLED", "TOKEN_MOVED"]);
+  expect(rollBody.accepted_events?.map((event) => event.event_type)).toEqual(["DICE_ROLLED", "PLAYER_POSITION_SET"]);
 
   const state = await readMockJson<{
     state: { turn: { phase: string }; players: Array<{ id: string; position: number }> };
@@ -87,6 +87,7 @@ test("mixed human/AI game progresses through the AI step path and stalls remain 
   });
 
   await expect(page.getByRole("status", { name: "AI step status" })).toContainText("AI done");
+  await page.getByRole("tab", { name: "Contracts" }).click();
   await expect(page.getByRole("region", { name: "Game log" })).toContainText("DICE_ROLLED");
 
   await createAiFirstGame(page, "stage-7-6-ai-blocked");
@@ -109,9 +110,11 @@ test("Mock AI step decisions satisfy AI audit schema", async ({ page }) => {
   await expect(page.getByRole("status", { name: "AI step status" })).toContainText("AI done");
 
   await page.reload();
+  await page.getByRole("tab", { name: "AI notebook" }).click();
 
   const panel = page.getByRole("region", { name: "AI audit" });
   await expect(panel).toContainText("Decision history");
+  await panel.getByRole("button", { name: "Show AI technical trace" }).first().click();
   await expect(panel).toContainText(`ai_decision_id ${aiStepBody.ai_decision_id}`);
 });
 
@@ -142,6 +145,7 @@ test("Mock AI auction steps choose auction actions", async ({ page }) => {
   expect(aiStepBody.accepted_events.some((event) => event.actor_player_id === graceId)).toBe(true);
 
   await expect(auction).toContainText(/Current high bidder\s*Grace/);
+  await page.getByRole("tab", { name: "Contracts" }).click();
   await expect(page.getByRole("region", { name: "Game log" })).toContainText("ACTIVE_AUCTION_SET");
 
   const state = await readMockJson<{
@@ -174,6 +178,7 @@ test("AIs initiate and respond to negotiations through AI controls", async ({ pa
   await page.getByRole("button", { name: "Create game" }).click();
 
   await expect(page).toHaveURL(/\/games\/mock-game-\d+$/);
+  await page.getByRole("tab", { name: "Deals" }).click();
   const panel = page.getByRole("region", { name: "Negotiation inbox" });
   await panel.getByLabel("Negotiation topic").fill("AI structured package");
   await panel.getByLabel("Negotiation context").fill("Ask Linus for a complex offer.");
@@ -189,7 +194,7 @@ test("AIs initiate and respond to negotiations through AI controls", async ({ pa
 
   await aiControls.getByRole("button", { name: "Ask AI offer" }).click();
   const firstDeal = page.getByRole("region", { name: "Deal v1" });
-  await expect(firstDeal).toContainText("rent_share");
+  await expect(firstDeal).toContainText("Rent Share");
 
   await aiControls.getByRole("button", { name: "Ask AI counteroffer" }).click();
   await expect(page.getByRole("region", { name: "Deal v2" })).toContainText("Counteroffer");

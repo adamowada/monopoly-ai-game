@@ -61,6 +61,8 @@ type ReadGameOptions = {
   fetcher?: GameFetcher;
 };
 
+type EndGameOptions = ReadGameOptions;
+
 function getDefaultBackendBaseUrl(): string {
   return (
     process.env.INTERNAL_API_BASE_URL ??
@@ -75,6 +77,10 @@ function gamesUrl(baseUrl: string): string {
 
 function gameUrl(baseUrl: string, gameId: string): string {
   return `${gamesUrl(baseUrl)}/${encodeURIComponent(gameId)}`;
+}
+
+function endGameUrl(baseUrl: string, gameId: string): string {
+  return `${gameUrl(baseUrl, gameId)}/end`;
 }
 
 function errorMessage(error: unknown): string {
@@ -173,6 +179,29 @@ export async function readGame({
 
     if (!response.ok) {
       throw new Error(await responseErrorMessage(response, "Load game"));
+    }
+
+    const payload: unknown = await response.json();
+    return { state: "loaded", game: GameMetadataSchema.parse(payload) };
+  } catch (error) {
+    return { state: "error", error: errorMessage(error) };
+  }
+}
+
+export async function endGame({
+  gameId,
+  baseUrl = getDefaultBackendBaseUrl(),
+  fetcher = fetch,
+}: EndGameOptions): Promise<GameSnapshot> {
+  try {
+    const response = await fetcher(endGameUrl(baseUrl, gameId), {
+      method: "POST",
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response, "End game"));
     }
 
     const payload: unknown = await response.json();

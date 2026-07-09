@@ -30,7 +30,12 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.ai.context_pack import build_ai_context_pack, build_ai_context_pack_from_db
 from app.ai.orchestrator import (
@@ -54,6 +59,7 @@ from app.db.metadata import (
     players,
 )
 from app.rules.actions import list_legal_actions
+from app.rules.phases import TurnPhase
 from app.rules.state import GameState, PlayerSetup, create_initial_game_state
 
 
@@ -156,6 +162,19 @@ def _state() -> GameState:
     )
 
 
+def _state_in_phase(phase: TurnPhase) -> GameState:
+    state = _state()
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": phase,
+            },
+        }
+    )
+
+
 def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> None:
     state = _state()
     pack = build_ai_context_pack(
@@ -209,7 +228,7 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
     assert pack["legal_actions"] == [
         action.model_dump(mode="json") for action in list_legal_actions(state, str(AI_PLAYER_ID))
     ]
-    assert pack["required_output_schema"]["title"] == "AIDecisionOutput"
+    assert "required_output_schema" not in pack
     assert pack["instruction_contract"]["backend_is_rules_authority"] is True
     assert pack["instruction_contract"]["no_emergency_action_path"] is True
 
@@ -224,6 +243,1899 @@ def test_context_pack_uses_legal_actions_and_hides_private_engine_state() -> Non
     assert "Keep cash available for early auctions." in memory_text
     assert "Ada publicly rejected a railroad package." in memory_text
     assert "Ada secretly wants the orange group." not in memory_text
+
+
+def test_context_pack_recommends_roll_when_no_management_action_is_better() -> None:
+    state = _state()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["ROLL_DICE"]
+    assert guidance["recommended_turn_flow_action"] == {
+        "type": "ROLL_DICE",
+        "payload": {},
+        "reason_code": "roll_when_no_higher_priority_action",
+    }
+    assert "ROLL_DICE advances the turn" in " ".join(guidance["turn_guidance"])
+
+
+def test_context_pack_recommends_end_turn_when_post_roll_management_is_done() -> None:
+    state = _state_in_phase(TurnPhase.POST_ROLL_MANAGEMENT)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["END_TURN"]
+    assert guidance["recommended_turn_flow_action"] == {
+        "type": "END_TURN",
+        "payload": {},
+        "reason_code": "end_turn_when_no_higher_priority_action",
+    }
+    assert "END_TURN advances play" in " ".join(guidance["turn_guidance"])
+
+
+def test_context_pack_prioritizes_legal_monopoly_development_before_roll() -> None:
+    state = _state_with_orange_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    build_actions = [action for action in pack["legal_actions"] if action["type"] == "BUY_HOUSE"]
+    assert len(build_actions) == 3
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
+    assert guidance["lower_priority_action_types"] == ["ROLL_DICE", "MORTGAGE_PROPERTY"]
+    assert guidance["recommended_development_action"] == {
+        "type": "BUY_HOUSE",
+        "payload": {
+            "property_id": "property_new_york_avenue",
+            "cost": 100,
+        },
+        "reason_code": "highest_priority_even_monopoly_development",
+        "property_id": "property_new_york_avenue",
+        "property_name": "New York Avenue",
+        "group": "orange",
+        "group_name": "Orange",
+        "development_priority_score": 1400,
+        "marginal_rent_gain": 64,
+    }
+    assert [
+        opportunity["property_id"] for opportunity in guidance["development_opportunities"]
+    ] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+    ]
+    assert [
+        opportunity["marginal_rent_gain"] for opportunity in guidance["development_opportunities"]
+    ] == [64, 56, 56]
+    assert all(
+        opportunity["cash_after_cost"] == 2900
+        for opportunity in guidance["development_opportunities"]
+    )
+    assert all(
+        opportunity["development_priority_score"] > 0
+        for opportunity in guidance["development_opportunities"]
+    )
+    assert "highest marginal_rent_gain" in guidance["turn_guidance"][0]
+    assert "complete color group" in guidance["turn_guidance"][0]
+    assert any(
+        "BUY_HOUSE" in instruction for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_development_action" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_explains_even_building_priority_for_uneven_monopoly() -> None:
+    state = _state_with_uneven_orange_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    opportunities = guidance["development_opportunities"]
+
+    assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
+    assert [opportunity["property_id"] for opportunity in opportunities] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+    ]
+    assert all(opportunity["current_improvement_level"] == 1 for opportunity in opportunities)
+    assert all(
+        opportunity["minimum_group_improvement_level"] == 1 for opportunity in opportunities
+    )
+    assert all(
+        opportunity["maximum_group_improvement_level"] == 2 for opportunity in opportunities
+    )
+    assert all(opportunity["even_building_priority"] == 1 for opportunity in opportunities)
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "least-developed property" in guidance_text
+    assert "even-building rule" in guidance_text
+
+
+def test_context_pack_defers_monopoly_development_when_cash_after_cost_breaches_reserve() -> None:
+    state = _state_with_orange_monopoly(cash=350)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    build_actions = [action for action in pack["legal_actions"] if action["type"] == "BUY_HOUSE"]
+    assert len(build_actions) == 3
+
+    guidance = pack["action_selection_guidance"]
+    assert "BUY_HOUSE" not in guidance["recommended_action_types_before_roll"]
+    assert guidance["recommended_development_action"] is None
+    assert "ROLL_DICE" not in guidance["lower_priority_action_types"]
+    assert "BUY_HOUSE" in guidance["lower_priority_action_types"]
+    assert [
+        opportunity["property_id"] for opportunity in guidance["development_opportunities"]
+    ] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+    ]
+    assert guidance["recommended_development_opportunities"] == []
+    assert [
+        opportunity["cash_after_cost"]
+        for opportunity in guidance["deferred_development_opportunities"]
+    ] == [
+        250,
+        250,
+        250,
+    ]
+    assert all(
+        opportunity["cash_reserve_floor"] == 300
+        for opportunity in guidance["deferred_development_opportunities"]
+    )
+    assert all(
+        opportunity["cash_after_cost_is_healthy"] is False
+        for opportunity in guidance["deferred_development_opportunities"]
+    )
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "Wait on BUY_HOUSE" in guidance_text
+    assert "cash reserve floor" in guidance_text
+
+
+def test_context_pack_prioritizes_stronger_monopoly_development_group_before_roll() -> None:
+    state = _state_with_brown_and_orange_monopolies()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    opportunities = guidance["development_opportunities"]
+
+    assert guidance["recommended_action_types_before_roll"] == ["BUY_HOUSE"]
+    assert [opportunity["group"] for opportunity in opportunities[:3]] == [
+        "orange",
+        "orange",
+        "orange",
+    ]
+    assert [opportunity["property_id"] for opportunity in opportunities[:3]] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+    ]
+    assert {opportunity["group"] for opportunity in opportunities[3:]} == {"brown"}
+    assert (
+        opportunities[0]["development_priority_score"]
+        > opportunities[-1]["development_priority_score"]
+    )
+    assert opportunities[0]["marginal_rent_gain"] == 64
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "highest development_priority_score" in guidance_text
+
+
+def test_context_pack_surfaces_near_monopoly_trade_opportunities() -> None:
+    state = _state_with_orange_near_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"] == {
+        "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "context": {
+            "topic": "Trade for Tennessee Avenue to complete Orange",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "strategic_reason": (
+                "Completing Orange unlocks BUY_HOUSE development and materially raises rent pressure."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "avoid_trading_away_group_property_ids": [
+                    "property_st_james_place",
+                    "property_new_york_avenue",
+                ],
+            },
+        },
+    }
+    assert guidance["trade_opportunities"] == [
+        {
+            "kind": "complete_street_group",
+            "priority": "high",
+            "group": "orange",
+            "group_name": "Orange",
+            "actor_owned_property_ids": [
+                "property_st_james_place",
+                "property_new_york_avenue",
+            ],
+            "actor_owned_property_names": [
+                "St. James Place",
+                "New York Avenue",
+            ],
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "strategic_reason": (
+                "Completing Orange unlocks BUY_HOUSE development and materially raises rent pressure."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "avoid_trading_away_group_property_ids": [
+                    "property_st_james_place",
+                    "property_new_york_avenue",
+                ],
+            },
+        }
+    ]
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "open_negotiation" in instruction_text
+    assert (
+        "participant_player_ids must include both this AI player and the target owner"
+        in instruction_text
+    )
+    assert "open_negotiation.negotiation.context must be a JSON object" in instruction_text
+
+
+def test_context_pack_surfaces_near_railroad_set_trade_opportunities() -> None:
+    state = _state_with_railroad_near_set()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"] == {
+        "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "context": {
+            "topic": "Trade for Short Line Railroad to complete Railroads",
+            "target_property_id": "property_short_line_railroad",
+            "target_property_name": "Short Line Railroad",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "strategic_reason": (
+                "Completing Railroads raises railroad rent tiers and strengthens set leverage."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 200,
+                "cash_budget_ceiling": 300,
+                "avoid_trading_away_group_property_ids": [
+                    "property_reading_railroad",
+                    "property_pennsylvania_railroad",
+                    "property_b_and_o_railroad",
+                ],
+            },
+        },
+    }
+    assert guidance["trade_opportunities"] == [
+        {
+            "kind": "complete_railroad_group",
+            "priority": "high",
+            "group": "railroad",
+            "group_name": "Railroads",
+            "property_group_kind": "railroad",
+            "actor_owned_property_ids": [
+                "property_reading_railroad",
+                "property_pennsylvania_railroad",
+                "property_b_and_o_railroad",
+            ],
+            "actor_owned_property_names": [
+                "Reading Railroad",
+                "Pennsylvania Railroad",
+                "B&O Railroad",
+            ],
+            "target_property_id": "property_short_line_railroad",
+            "target_property_name": "Short Line Railroad",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "strategic_reason": (
+                "Completing Railroads raises railroad rent tiers and strengthens set leverage."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 200,
+                "cash_budget_ceiling": 300,
+                "avoid_trading_away_group_property_ids": [
+                    "property_reading_railroad",
+                    "property_pennsylvania_railroad",
+                    "property_b_and_o_railroad",
+                ],
+            },
+        }
+    ]
+
+
+def test_context_pack_defers_near_railroad_set_trade_when_cash_cannot_support_offer() -> None:
+    state = _state_with_railroad_near_set(ai_cash=450)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "complete_railroad_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "railroad",
+            "group_name": "Railroads",
+            "property_group_kind": "railroad",
+            "target_property_id": "property_short_line_railroad",
+            "target_property_name": "Short Line Railroad",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "cash_budget_floor": 200,
+            "cash_budget_ceiling": 150,
+            "healthy_cash_floor": 300,
+            "reason": "Available cash above the healthy reserve cannot cover the target property list price.",
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
+def test_context_pack_surfaces_near_utility_set_trade_opportunities() -> None:
+    state = _state_with_utility_near_set()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"]["context"] == {
+        "topic": "Trade for Water Works to complete Utilities",
+        "target_property_id": "property_water_works",
+        "target_property_name": "Water Works",
+        "target_owner_id": str(OTHER_PLAYER_ID),
+        "target_owner_name": "Ada",
+        "strategic_reason": (
+            "Completing Utilities doubles utility rent multipliers and strengthens set leverage."
+        ),
+        "suggested_offer": {
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 225,
+            "avoid_trading_away_group_property_ids": ["property_electric_company"],
+        },
+    }
+    assert guidance["trade_opportunities"][0]["kind"] == "complete_utility_group"
+    assert guidance["trade_opportunities"][0]["property_group_kind"] == "utility"
+    assert guidance["trade_opportunities"][0]["target_property_id"] == "property_water_works"
+
+
+def test_context_pack_defers_near_utility_set_trade_when_cash_cannot_support_offer() -> None:
+    state = _state_with_utility_near_set(ai_cash=425)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "complete_utility_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "utility",
+            "group_name": "Utilities",
+            "property_group_kind": "utility",
+            "target_property_id": "property_water_works",
+            "target_property_name": "Water Works",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 125,
+            "healthy_cash_floor": 300,
+            "reason": "Available cash above the healthy reserve cannot cover the target property list price.",
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
+def test_context_pack_prioritizes_stronger_near_monopoly_trade_opportunity() -> None:
+    state = _state_with_multiple_near_monopolies()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"]["context"]["target_property_id"] == (
+        "property_tennessee_avenue"
+    )
+    assert [
+        opportunity["target_property_id"] for opportunity in guidance["trade_opportunities"]
+    ] == [
+        "property_tennessee_avenue",
+        "property_connecticut_avenue",
+    ]
+
+
+def test_context_pack_defers_near_monopoly_trade_when_cash_cannot_support_offer() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=350)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "complete_street_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "orange",
+            "group_name": "Orange",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 50,
+            "healthy_cash_floor": 300,
+            "reason": "Available cash above the healthy reserve cannot cover the target property list price.",
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
+def test_context_pack_surfaces_blocking_opponent_near_monopoly_trade_opportunity() -> None:
+    state = _state_with_opponent_orange_near_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"] == {
+        "participant_player_ids": [str(AI_PLAYER_ID), str(THIRD_PLAYER_ID)],
+        "context": {
+            "topic": "Trade for Tennessee Avenue to block Ada's Orange monopoly",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "strategic_reason": (
+                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves set defense."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "do_not_trade_target_to_opponent_player_id": str(OTHER_PLAYER_ID),
+            },
+        },
+    }
+    assert guidance["trade_opportunities"] == [
+        {
+            "kind": "block_opponent_street_group",
+            "priority": "medium",
+            "group": "orange",
+            "group_name": "Orange",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "opponent_owned_property_ids": [
+                "property_st_james_place",
+                "property_new_york_avenue",
+            ],
+            "opponent_owned_property_names": [
+                "St. James Place",
+                "New York Avenue",
+            ],
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "participants": [str(AI_PLAYER_ID), str(THIRD_PLAYER_ID)],
+            "strategic_reason": (
+                "Acquiring Tennessee Avenue blocks Ada from completing Orange and preserves set defense."
+            ),
+            "suggested_offer": {
+                "cash_budget_floor": 180,
+                "cash_budget_ceiling": 270,
+                "do_not_trade_target_to_opponent_player_id": str(OTHER_PLAYER_ID),
+            },
+        }
+    ]
+
+
+def test_context_pack_defers_blocking_opponent_near_monopoly_when_cash_cannot_support_offer() -> None:
+    state = _state_with_opponent_orange_near_monopoly()
+    ai_player = state.players[0].model_copy(update={"cash": 350})
+    state = state.model_copy(update={"players": (ai_player, *state.players[1:])})
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "block_opponent_street_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "orange",
+            "group_name": "Orange",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 50,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
+def test_context_pack_defers_blocking_opponent_railroad_set_when_cash_cannot_support_offer() -> None:
+    state = _state_with_opponent_railroad_near_set(ai_cash=450)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "block_opponent_railroad_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "railroad",
+            "group_name": "Railroads",
+            "property_group_kind": "railroad",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "target_property_id": "property_short_line_railroad",
+            "target_property_name": "Short Line Railroad",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "cash_budget_floor": 200,
+            "cash_budget_ceiling": 150,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
+def test_context_pack_defers_blocking_opponent_utility_set_when_cash_cannot_support_offer() -> None:
+    state = _state_with_opponent_utility_near_set(ai_cash=425)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "block_opponent_utility_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "utility",
+            "group_name": "Utilities",
+            "property_group_kind": "utility",
+            "opponent_player_id": str(THIRD_PLAYER_ID),
+            "opponent_player_name": "Lin",
+            "target_property_id": "property_electric_company",
+            "target_property_name": "Electric Company",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 125,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        },
+        {
+            "kind": "block_opponent_utility_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "utility",
+            "group_name": "Utilities",
+            "property_group_kind": "utility",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "target_property_id": "property_water_works",
+            "target_property_name": "Water Works",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 125,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
+def test_context_pack_recommends_rejecting_lowball_deal_that_completes_opponent_monopoly() -> None:
+    state = _state_with_orange_near_monopoly()
+    pack = build_ai_context_pack(
+        state,
+        player_id=OTHER_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_lowball_tennessee_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    recommended_action = guidance["recommended_accept_reject_actions"][0]
+    assert recommended_action["deal_id"] == str(DEAL_ID)
+    assert recommended_action["decision"] == "reject"
+    assert recommended_action["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_below_floor"
+    )
+    assert recommended_action["accept_reject_payload_template"]["deal_id"] == str(DEAL_ID)
+    assert recommended_action["accept_reject_payload_template"]["decision"] == "reject"
+    assert "undervalues set leverage" in recommended_action["accept_reject_payload_template"]["message"]
+    assert guidance["deal_evaluations"] == [
+        {
+            "deal_id": str(DEAL_ID),
+            "recommendation": "reject",
+            "reason_code": "transfers_property_that_completes_opponent_street_group_below_floor",
+            "actor_id": str(OTHER_PLAYER_ID),
+            "actor_receives_cash_total": 1,
+            "actor_pays_cash_total": 0,
+            "actor_transfers_property_ids": ["property_tennessee_avenue"],
+            "actor_receives_property_ids": [],
+            "risk": {
+                "kind": "opponent_street_group_completion",
+                "property_id": "property_tennessee_avenue",
+                "property_name": "Tennessee Avenue",
+                "property_price": 180,
+                "group": "orange",
+                "group_name": "Orange",
+                "recipient_player_id": str(AI_PLAYER_ID),
+                "recipient_already_owned_property_ids": [
+                    "property_st_james_place",
+                    "property_new_york_avenue",
+                ],
+                "minimum_cash_value_floor": 270,
+                "cash_value_gap": 269,
+            },
+        }
+    ]
+    assert "Reject proposed deals" in guidance["guidance"][0]
+    assert any(
+        "deal_evaluation_guidance recommends reject" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_accept_reject_actions" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_monopoly() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=500)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_fair_tennessee_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    recommended_action = guidance["recommended_accept_reject_actions"][0]
+    assert recommended_action["deal_id"] == str(DEAL_ID)
+    assert recommended_action["decision"] == "accept"
+    assert recommended_action["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_with_affordable_cash"
+    )
+    assert recommended_action["accept_reject_payload_template"]["deal_id"] == str(DEAL_ID)
+    assert recommended_action["accept_reject_payload_template"]["decision"] == "accept"
+    assert "completes my set" in recommended_action["accept_reject_payload_template"]["message"]
+    assert guidance["deal_evaluations"] == [
+        {
+            "deal_id": str(DEAL_ID),
+            "recommendation": "accept",
+            "reason_code": "receives_property_that_completes_actor_street_group_with_affordable_cash",
+            "actor_id": str(AI_PLAYER_ID),
+            "actor_receives_cash_total": 0,
+            "actor_pays_cash_total": 220,
+            "actor_transfers_property_ids": [],
+            "actor_receives_property_ids": ["property_tennessee_avenue"],
+            "opportunity": {
+                "kind": "actor_street_group_completion",
+                "property_id": "property_tennessee_avenue",
+                "property_name": "Tennessee Avenue",
+                "property_price": 180,
+                "group": "orange",
+                "group_name": "Orange",
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "actor_already_owned_property_ids": [
+                    "property_st_james_place",
+                    "property_new_york_avenue",
+                ],
+                "maximum_cash_value_ceiling": 270,
+                "net_cash_payment": 220,
+                "actor_transfers_property_value_total": 0,
+                "total_payment_value": 220,
+                "cash_after_payment": 280,
+                "cash_after_net_payment": 280,
+                "group_completion_cash_floor": 100,
+            },
+        }
+    ]
+    assert "Accept proposed deals" in guidance["guidance"][0]
+
+
+def test_context_pack_accepts_actor_completion_when_cash_return_makes_net_price_fair() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=500)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_cash_return_tennessee_completion_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "accept"
+    assert guidance["deal_evaluations"][0]["recommendation"] == "accept"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_with_affordable_cash"
+    )
+    assert guidance["deal_evaluations"][0]["actor_receives_cash_total"] == 200
+    assert guidance["deal_evaluations"][0]["actor_pays_cash_total"] == 400
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["maximum_cash_value_ceiling"] == 270
+    assert opportunity["net_cash_payment"] == 200
+    assert opportunity["cash_after_net_payment"] == 300
+    assert opportunity["cash_after_payment"] == 100
+
+
+def test_context_pack_rejects_actor_completion_when_property_payment_overpays() -> None:
+    state = _state_with_orange_near_monopoly_and_ai_boardwalk()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_boardwalk_for_tennessee_completion_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "message"
+    ] == "I reject because the payment is above my strategic value ceiling."
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    )
+    assert guidance["deal_evaluations"][0]["actor_transfers_property_ids"] == [
+        "property_boardwalk"
+    ]
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["maximum_cash_value_ceiling"] == 270
+    assert opportunity["net_cash_payment"] == 0
+    assert opportunity["actor_transfers_property_value_total"] == 400
+    assert opportunity["total_payment_value"] == 400
+    assert opportunity["payment_value_over_ceiling"] == 130
+
+
+def test_context_pack_counteroffers_cash_instead_of_overpaying_property_for_completion() -> None:
+    state = _state_with_orange_near_monopoly_and_ai_boardwalk()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="counteroffer",
+        deals=[_boardwalk_for_tennessee_completion_deal()],
+    )
+
+    guidance = pack["counteroffer_guidance"]
+
+    assert guidance["recommended_decision_types"] == ["counteroffer"]
+    template = guidance["counteroffer_templates"][0]
+    payload = template["counteroffer_payload_template"]
+    assert template["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    )
+    assert template["current_payment_value"] == 400
+    assert template["current_cash_amount"] == 0
+    assert template["recommended_cash_amount"] == 270
+    assert payload["message"] == (
+        "I can counter at $270 for Tennessee Avenue to complete Orange without overpaying."
+    )
+    assert payload["terms"]["terms"] == [
+        {
+            "kind": "immediate_cash_transfer",
+            "from_player_id": str(AI_PLAYER_ID),
+            "to_player_id": str(OTHER_PLAYER_ID),
+            "amount": 270,
+        },
+        {
+            "kind": "immediate_property_transfer",
+            "from_player_id": str(OTHER_PLAYER_ID),
+            "to_player_id": str(AI_PLAYER_ID),
+            "property_id": "property_tennessee_avenue",
+        },
+    ]
+    assert "property_boardwalk" not in json.dumps(payload["terms"])
+
+
+def test_context_pack_rejects_mutual_completion_that_gives_opponent_stronger_group() -> None:
+    state = _state_with_light_blue_near_set_and_opponent_orange_near_set()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_mutual_light_blue_for_orange_completion_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "message"
+    ] == "I reject because this trade gives you the stronger completed set."
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_for_weaker_actor_completion"
+    )
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["group"] == "orange"
+    assert risk["actor_completion_group"] == "light_blue"
+    assert risk["opponent_completion_priority_score"] == 1400
+    assert risk["actor_completion_priority_score"] == 690
+    assert risk["completion_priority_gap"] == 710
+    assert risk["total_compensation_value"] == 270
+
+
+def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_railroad_set() -> None:
+    state = _state_with_railroad_near_set(ai_cash=500)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[
+            _cash_for_property_deal(
+                property_id="property_short_line_railroad",
+                cash_from_player_id=str(AI_PLAYER_ID),
+                cash_to_player_id=str(OTHER_PLAYER_ID),
+                property_from_player_id=str(OTHER_PLAYER_ID),
+                property_to_player_id=str(AI_PLAYER_ID),
+                amount=240,
+            )
+        ],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "accept"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_railroad_group_with_affordable_cash"
+    )
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["kind"] == "actor_railroad_group_completion"
+    assert opportunity["property_group_kind"] == "railroad"
+    assert opportunity["property_id"] == "property_short_line_railroad"
+    assert opportunity["maximum_cash_value_ceiling"] == 300
+    assert opportunity["cash_after_payment"] == 260
+
+
+def test_context_pack_rejects_lowball_deal_that_completes_opponent_railroad_set() -> None:
+    state = _state_with_railroad_near_set()
+    pack = build_ai_context_pack(
+        state,
+        player_id=OTHER_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[
+            _cash_for_property_deal(
+                property_id="property_short_line_railroad",
+                cash_from_player_id=str(AI_PLAYER_ID),
+                cash_to_player_id=str(OTHER_PLAYER_ID),
+                property_from_player_id=str(OTHER_PLAYER_ID),
+                property_to_player_id=str(AI_PLAYER_ID),
+                amount=1,
+            )
+        ],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_completes_opponent_railroad_group_below_floor"
+    )
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["kind"] == "opponent_railroad_group_completion"
+    assert risk["property_group_kind"] == "railroad"
+    assert risk["property_id"] == "property_short_line_railroad"
+    assert risk["minimum_cash_value_floor"] == 300
+    assert risk["cash_value_gap"] == 299
+
+
+def test_context_pack_rejects_opponent_completion_when_cash_is_returned_in_same_deal() -> None:
+    state = _state_with_light_blue_near_set_and_opponent_orange_near_set()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_cash_round_trip_tennessee_completion_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_below_floor"
+    )
+    assert guidance["deal_evaluations"][0]["actor_receives_cash_total"] == 320
+    assert guidance["deal_evaluations"][0]["actor_pays_cash_total"] == 200
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["minimum_cash_value_floor"] == 270
+    assert risk["total_compensation_value"] == 320
+    assert risk["net_compensation_value"] == 120
+    assert risk["net_compensation_value_gap"] == 150
+
+
+def test_context_pack_recommends_accepting_fair_deal_that_completes_actor_utility_set() -> None:
+    state = _state_with_utility_near_set(ai_cash=400)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[
+            _cash_for_property_deal(
+                property_id="property_water_works",
+                cash_from_player_id=str(AI_PLAYER_ID),
+                cash_to_player_id=str(OTHER_PLAYER_ID),
+                property_from_player_id=str(OTHER_PLAYER_ID),
+                property_to_player_id=str(AI_PLAYER_ID),
+                amount=180,
+            )
+        ],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "accept"}
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_utility_group_with_affordable_cash"
+    )
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["kind"] == "actor_utility_group_completion"
+    assert opportunity["property_group_kind"] == "utility"
+    assert opportunity["property_id"] == "property_water_works"
+    assert opportunity["maximum_cash_value_ceiling"] == 225
+    assert opportunity["cash_after_payment"] == 220
+
+
+def test_context_pack_recommends_rejecting_overpriced_deal_that_completes_actor_monopoly() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=800)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_fair_tennessee_deal(amount=400)],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    )
+    assert guidance["deal_evaluations"][0]["actor_pays_cash_total"] == 400
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["maximum_cash_value_ceiling"] == 270
+    assert opportunity["cash_over_value_ceiling"] == 130
+    assert opportunity["payment_value_over_ceiling"] == 130
+    assert opportunity["cash_after_payment"] == 400
+
+
+def test_context_pack_builds_counteroffer_template_for_overpriced_monopoly_completion() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=800)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="counteroffer",
+        deals=[_fair_tennessee_deal(amount=400)],
+    )
+
+    guidance = pack["counteroffer_guidance"]
+    assert guidance["recommended_decision_types"] == ["counteroffer"]
+    assert guidance["guidance"] == [
+        "Use the highest-priority counteroffer_payload_template when a proposed deal has strategic upside but breaches value or liquidity limits."
+    ]
+    template = guidance["counteroffer_templates"][0]
+    payload = template["counteroffer_payload_template"]
+    terms = payload["terms"]
+
+    assert template["responds_to_deal_id"] == str(DEAL_ID)
+    assert template["negotiation_id"] == str(NEGOTIATION_ID)
+    assert template["reason_code"] == "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    assert template["recommended_cash_amount"] == 270
+    assert payload == {
+        "responds_to_deal_id": str(DEAL_ID),
+        "message": "I can counter at $270 for Tennessee Avenue to complete Orange without overpaying.",
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 270,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+    }
+    assert json.loads(template["terms_json_string_example"]) == terms
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "counteroffer_guidance" in instruction_text
+    assert "counteroffer_payload_template" in instruction_text
+
+
+def test_context_pack_builds_counteroffer_template_for_cash_draining_monopoly_completion() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=300)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="counteroffer",
+        deals=[_fair_tennessee_deal(amount=220)],
+    )
+
+    guidance = pack["counteroffer_guidance"]
+    assert guidance["recommended_decision_types"] == ["counteroffer"]
+    template = guidance["counteroffer_templates"][0]
+    payload = template["counteroffer_payload_template"]
+
+    assert template["responds_to_deal_id"] == str(DEAL_ID)
+    assert template["negotiation_id"] == str(NEGOTIATION_ID)
+    assert template["reason_code"] == "receives_property_that_completes_actor_street_group_below_cash_floor"
+    assert template["recommended_cash_amount"] == 200
+    assert template["maximum_cash_value_ceiling"] == 270
+    assert template["cash_limited_ceiling"] == 200
+    assert payload["message"] == (
+        "I can counter at $200 for Tennessee Avenue to complete Orange while preserving cash."
+    )
+    assert json.loads(template["terms_json_string_example"]) == payload["terms"]
+
+
+def test_context_pack_recommends_rejecting_monopoly_completion_deal_that_drains_cash() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=300)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_fair_tennessee_deal(amount=220)],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_below_cash_floor"
+    )
+    assert guidance["deal_evaluations"][0]["actor_pays_cash_total"] == 220
+    opportunity = guidance["deal_evaluations"][0]["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["cash_after_payment"] == 80
+    assert opportunity["group_completion_cash_floor"] == 100
+    assert opportunity["cash_floor_gap"] == 20
+
+
+def test_context_pack_recommends_rejecting_deal_that_breaks_actor_monopoly() -> None:
+    state = _state_with_orange_monopoly()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_sell_tennessee_from_monopoly_deal(amount=300)],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["deal_evaluations"][0]["recommendation"] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_breaks_actor_complete_street_group_below_floor"
+    )
+    assert guidance["deal_evaluations"][0]["actor_receives_cash_total"] == 300
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["kind"] == "actor_street_group_breakup"
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["group"] == "orange"
+    assert risk["actor_owned_group_property_ids"] == [
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    ]
+    assert risk["minimum_cash_value_floor"] == 540
+    assert risk["cash_value_gap"] == 240
+
+
+def test_context_pack_rejects_property_swap_that_undervalues_actor_monopoly_breakup() -> None:
+    state = _state_with_orange_monopoly_and_opponent_baltic()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="accept_reject",
+        deals=[_swap_tennessee_for_baltic_from_monopoly_deal()],
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+
+    assert guidance["recommended_accept_reject_by_deal_id"] == {str(DEAL_ID): "reject"}
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"][
+        "decision"
+    ] == "reject"
+    assert guidance["deal_evaluations"][0]["reason_code"] == (
+        "transfers_property_that_breaks_actor_complete_street_group_below_floor"
+    )
+    risk = guidance["deal_evaluations"][0]["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["minimum_cash_value_floor"] == 540
+    assert risk["actor_receives_property_value_total"] == 60
+    assert risk["total_compensation_value"] == 60
+    assert risk["compensation_value_gap"] == 480
+
+
+def test_context_pack_instructs_deal_proposals_as_json_structured_deals() -> None:
+    state = _state_with_orange_near_monopoly()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="deal_proposal")
+
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+
+    assert "deal_proposal.deal.terms" in instruction_text
+    assert "valid JSON object string" in instruction_text
+    assert "Do not prefix" in instruction_text
+    assert "structured_deal" in instruction_text
+    assert "terms array" in instruction_text
+
+
+def test_context_pack_builds_deal_proposal_template_from_targeted_negotiation() -> None:
+    state = _state_with_orange_near_monopoly()
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="deal_proposal",
+        negotiations=[_active_tennessee_negotiation()],
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == ["deal_proposal"]
+    assert guidance["guidance"] == [
+        "Use the highest-priority deal_payload_template for deal_proposal unless visible terms require a safer counter."
+    ]
+    template = guidance["proposal_templates"][0]
+    deal_payload = template["deal_payload_template"]
+    terms = deal_payload["terms"]
+
+    assert template["negotiation_id"] == str(NEGOTIATION_ID)
+    assert template["target_property_id"] == "property_tennessee_avenue"
+    assert template["target_owner_id"] == str(OTHER_PLAYER_ID)
+    assert template["recommended_cash_offer"] == 225
+    assert deal_payload == {
+        "recipient_player_ids": [str(OTHER_PLAYER_ID)],
+        "message": "I can offer $225 for Tennessee Avenue to complete Orange.",
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 225,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+    }
+    assert json.loads(template["terms_json_string_example"]) == terms
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "deal_proposal_guidance" in instruction_text
+    assert "deal_payload_template" in instruction_text
+
+
+def test_context_pack_clamps_deal_proposal_offer_to_current_cash() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=500)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="deal_proposal",
+        negotiations=[_active_tennessee_negotiation()],
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == ["deal_proposal"]
+    template = guidance["proposal_templates"][0]
+    deal_payload = template["deal_payload_template"]
+
+    assert template["cash_available"] == 500
+    assert template["cash_budget_ceiling"] == 270
+    assert template["current_cash_budget_ceiling"] == 200
+    assert template["recommended_cash_offer"] == 190
+    assert deal_payload["message"] == (
+        "I can offer $190 for Tennessee Avenue to complete Orange."
+    )
+    assert deal_payload["terms"]["terms"][0]["amount"] == 190
+
+
+def test_context_pack_skips_deal_proposal_when_current_cash_cannot_support_offer() -> None:
+    state = _state_with_orange_near_monopoly(ai_cash=450)
+    pack = build_ai_context_pack(
+        state,
+        player_id=AI_PLAYER_ID,
+        decision_type="deal_proposal",
+        negotiations=[_active_tennessee_negotiation()],
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["proposal_templates"] == []
+    assert guidance["deferred_proposal_opportunities"] == [
+        {
+            "negotiation_id": str(NEGOTIATION_ID),
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 270,
+            "current_cash_budget_ceiling": 150,
+            "cash_available": 450,
+            "healthy_cash_floor": 300,
+            "reason": "Current cash above reserve cannot support the saved offer floor.",
+        }
+    ]
+    assert "Wait on deal_proposal" in guidance["guidance"][0]
+
+
+def test_context_pack_deprioritizes_mortgage_when_cash_is_healthy_without_debt() -> None:
+    state = _state_with_owned_railroad(cash=900)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    mortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert len(mortgage_actions) == 1
+    assert mortgage_actions[0]["payload"]["property_id"] == "property_b_and_o_railroad"
+
+    guidance = pack["action_selection_guidance"]
+    assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
+    assert (
+        guidance["mortgage_guidance"]["recommendation"] == "avoid_unless_debt_or_liquidity_pressure"
+    )
+    assert guidance["mortgage_guidance"]["has_active_debt"] is False
+    assert guidance["mortgage_guidance"]["cash_available"] == 900
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "Avoid MORTGAGE_PROPERTY" in guidance_text
+    assert "active debt" in guidance_text
+    assert any(
+        "MORTGAGE_PROPERTY" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_keeps_mortgage_available_for_active_debt_liquidation() -> None:
+    state = _state_with_active_debt_and_owned_railroad(cash=0)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    mortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert len(mortgage_actions) == 1
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["MORTGAGE_PROPERTY"]
+    assert "MORTGAGE_PROPERTY" not in guidance["lower_priority_action_types"]
+    assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
+    assert (
+        guidance["mortgage_guidance"]["recommendation"] == "liquidate_only_enough_for_active_debt"
+    )
+    assert guidance["debt_resolution_guidance"]["recommendation"] == "mortgage_only_enough_for_debt"
+    assert guidance["debt_resolution_guidance"]["recommended_debt_action"] == {
+        "type": "MORTGAGE_PROPERTY",
+        "payload": {
+            "property_id": "property_b_and_o_railroad",
+            "proceeds": 100,
+        },
+        "reason_code": "mortgage_only_enough_for_active_debt",
+    }
+    assert guidance["mortgage_guidance"]["has_active_debt"] is True
+    assert guidance["mortgage_guidance"]["cash_available"] == 0
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "active debt" in guidance_text
+    assert "only enough" in guidance_text
+
+
+def test_context_pack_prefers_mortgaging_non_monopoly_property_for_debt() -> None:
+    state = _state_with_active_debt_orange_monopoly_and_railroad(cash=0, amount_owed=100)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    mortgage_property_ids = [
+        action["payload"]["property_id"]
+        for action in pack["legal_actions"]
+        if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert {
+        "property_b_and_o_railroad",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }.issubset(set(mortgage_property_ids))
+
+    guidance = pack["action_selection_guidance"]
+    mortgage_guidance = guidance["mortgage_guidance"]
+    assert guidance["recommended_action_types"] == ["MORTGAGE_PROPERTY"]
+    assert mortgage_guidance["recommended_mortgage_property_ids"] == [
+        "property_b_and_o_railroad"
+    ]
+    assert guidance["debt_resolution_guidance"]["recommended_debt_action"] == {
+        "type": "MORTGAGE_PROPERTY",
+        "payload": {
+            "property_id": "property_b_and_o_railroad",
+            "proceeds": 100,
+        },
+        "reason_code": "mortgage_only_enough_for_active_debt",
+    }
+    assert mortgage_guidance["ranked_mortgage_options"][0] == {
+        "property_id": "property_b_and_o_railroad",
+        "property_name": "B&O Railroad",
+        "property_kind": "railroad",
+        "group": "railroad",
+        "proceeds": 100,
+        "covers_remaining_debt": True,
+        "liquidation_gap": 0,
+        "breaks_complete_street_group": False,
+        "priority_reason": "covers_debt_without_breaking_complete_street_group",
+    }
+    orange_options = [
+        option
+        for option in mortgage_guidance["ranked_mortgage_options"]
+        if option["group"] == "orange"
+    ]
+    assert orange_options
+    assert all(option["breaks_complete_street_group"] is True for option in orange_options)
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "property_b_and_o_railroad" in guidance_text
+    assert "preserving stronger set leverage" in guidance_text
+
+
+def test_context_pack_prioritizes_cash_settlement_for_active_debt() -> None:
+    state = _state_with_active_debt_and_owned_railroad(cash=75, amount_owed=75)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    legal_action_types = {action["type"] for action in pack["legal_actions"]}
+    assert {"SETTLE_DEBT", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"}.issubset(legal_action_types)
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["SETTLE_DEBT"]
+    assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
+    assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
+    assert guidance["debt_resolution_guidance"]["recommendation"] == "settle_cash_debt"
+    recommended_debt_action = guidance["debt_resolution_guidance"]["recommended_debt_action"]
+    assert recommended_debt_action["type"] == "SETTLE_DEBT"
+    assert recommended_debt_action["payload"]["amount"] == 75
+    assert recommended_debt_action["payload"]["creditor_player_id"] == str(OTHER_PLAYER_ID)
+    assert recommended_debt_action["payload"]["debt_id"].startswith(
+        f"active-debt:{GAME_ID}:"
+    )
+    assert recommended_debt_action["reason_code"] == "settle_cash_debt"
+    assert guidance["debt_resolution_guidance"]["settle_amount"] == 75
+    assert guidance["debt_resolution_guidance"]["outstanding_debt"] == 75
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "SETTLE_DEBT" in guidance_text
+    assert "before liquidation" in guidance_text
+    instruction_text = " ".join(pack["instruction_contract"]["instructions"])
+    assert "recommended_debt_action" in instruction_text
+
+
+def test_context_pack_prioritizes_selling_improvements_before_mortgage_for_debt() -> None:
+    state = _state_with_active_debt_sellable_house_and_railroad(cash=0, amount_owed=25)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    sell_house_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "SELL_HOUSE"
+    ]
+    mortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "MORTGAGE_PROPERTY"
+    ]
+    assert len(sell_house_actions) == 1
+    assert sell_house_actions[0]["payload"] == {
+        "property_id": "property_oriental_avenue",
+        "proceeds": 25,
+    }
+    assert any(
+        action["payload"]["property_id"] == "property_b_and_o_railroad"
+        for action in mortgage_actions
+    )
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["SELL_HOUSE"]
+    assert "MORTGAGE_PROPERTY" in guidance["lower_priority_action_types"]
+    assert "DECLARE_BANKRUPTCY" in guidance["lower_priority_action_types"]
+    assert (
+        guidance["debt_resolution_guidance"]["recommendation"]
+        == "sell_improvements_before_mortgage"
+    )
+    assert guidance["debt_resolution_guidance"]["recommended_debt_action"] == {
+        "type": "SELL_HOUSE",
+        "payload": {
+            "property_id": "property_oriental_avenue",
+            "proceeds": 25,
+        },
+        "reason_code": "sell_improvements_before_mortgage",
+    }
+    assert guidance["debt_resolution_guidance"]["sell_house_property_ids"] == [
+        "property_oriental_avenue"
+    ]
+    assert guidance["debt_resolution_guidance"]["sell_house_total_proceeds"] == 25
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "SELL_HOUSE" in guidance_text
+    assert "before MORTGAGE_PROPERTY" in guidance_text
+
+
+def test_context_pack_prioritizes_unmortgaging_rent_property_when_cash_stays_healthy() -> None:
+    state = _state_with_mortgaged_railroad(cash=900)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    unmortgage_actions = [
+        action for action in pack["legal_actions"] if action["type"] == "UNMORTGAGE_PROPERTY"
+    ]
+    assert len(unmortgage_actions) == 1
+    assert unmortgage_actions[0]["payload"]["property_id"] == "property_b_and_o_railroad"
+    assert unmortgage_actions[0]["payload"]["cost"] == 110
+
+    guidance = pack["action_selection_guidance"]
+    assert "UNMORTGAGE_PROPERTY" in guidance["recommended_action_types_before_roll"]
+    assert "ROLL_DICE" in guidance["lower_priority_action_types"]
+    assert guidance["unmortgage_guidance"]["recommendation"] == "restore_rent_when_cash_healthy"
+    assert guidance["unmortgage_guidance"]["recommended_unmortgage_action"] == {
+        "type": "UNMORTGAGE_PROPERTY",
+        "payload": {
+            "property_id": "property_b_and_o_railroad",
+            "cost": 110,
+        },
+        "reason_code": "restore_rent_when_cash_healthy",
+    }
+    assert guidance["unmortgage_guidance"]["cash_after_cheapest_unmortgage"] == 790
+    assert guidance["unmortgage_guidance"]["unmortgageable_property_ids"] == [
+        "property_b_and_o_railroad"
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "UNMORTGAGE_PROPERTY" in guidance_text
+    assert "restore rent" in guidance_text
+    assert any(
+        "UNMORTGAGE_PROPERTY" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_unmortgage_action" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_prioritizes_jail_card_over_fine_and_jail_roll() -> None:
+    state = _state_with_jail_card(cash=900)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    legal_action_types = {action["type"] for action in pack["legal_actions"]}
+    assert {"ROLL_DICE", "PAY_JAIL_FINE", "USE_GET_OUT_OF_JAIL_CARD"}.issubset(legal_action_types)
+    card_action = next(
+        action for action in pack["legal_actions"] if action["type"] == "USE_GET_OUT_OF_JAIL_CARD"
+    )
+    assert card_action["payload"]["card_id"] == "card_community_get_out_of_jail"
+
+    guidance = pack["action_selection_guidance"]
+    assert "USE_GET_OUT_OF_JAIL_CARD" in guidance["recommended_action_types_before_roll"]
+    assert "PAY_JAIL_FINE" in guidance["lower_priority_action_types"]
+    assert "ROLL_DICE" in guidance["lower_priority_action_types"]
+    assert guidance["jail_guidance"] == {
+        "action_available": True,
+        "recommendation": "use_card_before_paying_or_rolling",
+        "recommended_jail_action": {
+            "type": "USE_GET_OUT_OF_JAIL_CARD",
+            "payload": {"card_id": "card_community_get_out_of_jail"},
+            "reason_code": "use_card_before_paying_or_rolling",
+        },
+        "cash_available": 900,
+        "jail_turns": 1,
+        "jail_card_ids": ["card_community_get_out_of_jail"],
+        "pay_fine_available": True,
+        "roll_dice_available": True,
+    }
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "USE_GET_OUT_OF_JAIL_CARD" in guidance_text
+    assert "PAY_JAIL_FINE" in guidance_text
+    assert "ROLL_DICE" in guidance_text
+    assert any(
+        "USE_GET_OUT_OF_JAIL_CARD" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_jail_action" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_prefers_buying_landed_property_when_cash_is_healthy() -> None:
+    state = _state_landed_on_unowned_reading_railroad(cash=1500)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    assert any(action["type"] == "BUY_PROPERTY" for action in pack["legal_actions"])
+    assert any(action["type"] == "START_AUCTION" for action in pack["legal_actions"])
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_at_list_price"
+    assert guidance["purchase_guidance"]["property_id"] == "property_reading_railroad"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 1300
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_reading_railroad",
+            "price": 200,
+        },
+        "reason_code": "buy_property_at_list_price",
+    }
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "Prefer BUY_PROPERTY" in guidance_text
+    assert "START_AUCTION" in guidance_text
+    assert any(
+        "BUY_PROPERTY" in instruction and "START_AUCTION" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_purchase_action" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_keeps_auction_viable_when_buying_would_break_liquidity_floor() -> None:
+    state = _state_landed_on_unowned_reading_railroad(cash=220)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["START_AUCTION"]
+    assert "BUY_PROPERTY" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "consider_auction_for_liquidity"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 20
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "START_AUCTION",
+        "payload": {"property_id": "property_reading_railroad"},
+        "reason_code": "consider_auction_for_liquidity",
+    }
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "cash_after_price would fall below" in guidance_text
+
+
+def test_context_pack_prefers_buying_property_that_completes_group_with_thin_cash() -> None:
+    state = _state_landed_on_group_completing_tennessee(cash=400)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_to_complete_group"
+    assert guidance["purchase_guidance"]["property_id"] == "property_tennessee_avenue"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 220
+    assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_tennessee_avenue",
+            "price": 180,
+        },
+        "reason_code": "buy_property_to_complete_group",
+    }
+    assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
+        "property_new_york_avenue",
+        "property_st_james_place",
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "complete the color group" in guidance_text
+    assert "START_AUCTION" in guidance_text
+
+
+def test_context_pack_prefers_buying_railroad_that_completes_set_with_thin_cash() -> None:
+    state = _state_landed_on_group_completing_short_line(cash=400)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_to_complete_group"
+    assert guidance["purchase_guidance"]["property_id"] == "property_short_line_railroad"
+    assert guidance["purchase_guidance"]["property_kind"] == "railroad"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 200
+    assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_short_line_railroad",
+            "price": 200,
+        },
+        "reason_code": "buy_property_to_complete_group",
+    }
+    assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
+        "property_b_and_o_railroad",
+        "property_pennsylvania_railroad",
+        "property_reading_railroad",
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "railroad set" in guidance_text
+    assert "START_AUCTION" in guidance_text
+
+
+def test_context_pack_prefers_buying_utility_that_completes_set_with_thin_cash() -> None:
+    state = _state_landed_on_group_completing_water_works(cash=300)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == "buy_property_to_complete_group"
+    assert guidance["purchase_guidance"]["property_id"] == "property_water_works"
+    assert guidance["purchase_guidance"]["property_kind"] == "utility"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 150
+    assert guidance["purchase_guidance"]["completes_property_group"] is True
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_water_works",
+            "price": 150,
+        },
+        "reason_code": "buy_property_to_complete_group",
+    }
+    assert guidance["purchase_guidance"]["same_group_owned_property_ids"] == [
+        "property_electric_company",
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "utility set" in guidance_text
+    assert "START_AUCTION" in guidance_text
+
+
+def test_context_pack_prefers_buying_property_that_blocks_opponent_group_completion() -> None:
+    state = _state_landed_on_opponent_group_completing_virginia(cash=400)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["BUY_PROPERTY"]
+    assert "START_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["purchase_guidance"]["recommendation"] == (
+        "buy_property_to_block_opponent_group_completion"
+    )
+    assert guidance["purchase_guidance"]["property_id"] == "property_virginia_avenue"
+    assert guidance["purchase_guidance"]["cash_after_price"] == 240
+    assert guidance["purchase_guidance"]["recommended_purchase_action"] == {
+        "type": "BUY_PROPERTY",
+        "payload": {
+            "property_id": "property_virginia_avenue",
+            "price": 160,
+        },
+        "reason_code": "buy_property_to_block_opponent_group_completion",
+    }
+    assert guidance["purchase_guidance"]["opponent_group_completion_threats"] == [
+        {
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_owned_property_ids": [
+                "property_st_charles_place",
+                "property_states_avenue",
+            ],
+        }
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "blocks an opponent" in guidance_text
+    assert "START_AUCTION" in guidance_text
+
+
+def test_context_pack_guides_auction_bids_as_deliberate_values_not_minimum_loops() -> None:
+    state = _state_with_active_auction()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    bid_action = next(action for action in pack["legal_actions"] if action["type"] == "BID_AUCTION")
+    assert bid_action["payload"]["amount"] == 51
+    assert bid_action["schema"]["properties"]["amount"]["minimum"] == 51
+    assert bid_action["schema"]["properties"]["amount"]["maximum"] == 1500
+    assert "not a recommended bid" in bid_action["description"]
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["BID_AUCTION"]
+    assert "PASS_AUCTION" in guidance["lower_priority_action_types"]
+    assert "BID_AUCTION" not in guidance["lower_priority_action_types"]
+    assert guidance["auction_guidance"] == {
+        "property_id": "property_virginia_avenue",
+        "property_name": "Virginia Avenue",
+        "property_group": "pink",
+        "property_price": 160,
+        "current_high_bidder_id": str(OTHER_PLAYER_ID),
+        "current_high_bid_amount": 50,
+        "minimum_bid": 51,
+        "cash_available": 1500,
+        "cash_reserve_floor": 300,
+        "cash_limited_bid_ceiling": 1200,
+        "same_group_owned_property_ids": [],
+        "property_group_size": 3,
+        "completes_property_group": False,
+        "opponent_group_completion_threats": [],
+        "strategic_valuation_ceiling": 160,
+        "valuation_ceiling": 160,
+        "valuation_basis": "listed_price",
+        "recommended_auction_action_type": "BID_AUCTION",
+        "recommended_bid_amount": 160,
+        "recommended_bid_reason": "bid_deliberate_amount_at_or_below_valuation",
+        "recommended_auction_action": {
+            "type": "BID_AUCTION",
+            "payload": {
+                "property_id": "property_virginia_avenue",
+                "amount": 160,
+            },
+            "reason_code": "bid_deliberate_amount_at_or_below_valuation",
+        },
+        "pass_action_available": True,
+        "bid_payload_amount_is_floor": True,
+    }
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "not a recommendation" in guidance_text
+    assert "one-dollar increment loops" in guidance_text
+    assert "BID_AUCTION for about $160" in guidance_text
+    assert "valuation ceiling" in guidance_text
+    assert any(
+        "recommended_bid_amount" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+    assert any(
+        "recommended_auction_action" in instruction
+        for instruction in pack["instruction_contract"]["instructions"]
+    )
+
+
+def test_context_pack_guides_auction_pass_when_minimum_bid_exceeds_valuation() -> None:
+    state = _state_with_active_auction(high_bid_amount=1000)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+    assert guidance["recommended_action_types"] == ["PASS_AUCTION"]
+    assert "BID_AUCTION" in guidance["lower_priority_action_types"]
+    assert "PASS_AUCTION" not in guidance["lower_priority_action_types"]
+    assert guidance["auction_guidance"]["minimum_bid"] == 1001
+    assert guidance["auction_guidance"]["valuation_ceiling"] == 160
+    assert guidance["auction_guidance"]["recommended_auction_action_type"] == "PASS_AUCTION"
+    assert guidance["auction_guidance"]["recommended_bid_amount"] is None
+    assert guidance["auction_guidance"]["recommended_auction_action"] == {
+        "type": "PASS_AUCTION",
+        "payload": {"property_id": "property_virginia_avenue"},
+        "reason_code": "pass_minimum_above_valuation",
+    }
+
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "PASS_AUCTION" in guidance_text
+    assert "above the valuation ceiling" in guidance_text
+
+
+def test_context_pack_guides_auction_pass_when_cash_reserve_would_be_breached() -> None:
+    state = _state_with_active_auction(cash=220)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["recommended_action_types"] == ["PASS_AUCTION"]
+    assert "BID_AUCTION" in guidance["lower_priority_action_types"]
+    assert "PASS_AUCTION" not in guidance["lower_priority_action_types"]
+    assert guidance["auction_guidance"]["minimum_bid"] == 51
+    assert guidance["auction_guidance"]["valuation_ceiling"] == 0
+    assert guidance["auction_guidance"]["cash_reserve_floor"] == 300
+    assert guidance["auction_guidance"]["cash_limited_bid_ceiling"] == 0
+    assert guidance["auction_guidance"]["recommended_auction_action_type"] == "PASS_AUCTION"
+    assert guidance["auction_guidance"]["recommended_bid_amount"] is None
+    assert guidance["auction_guidance"]["recommended_auction_action"] == {
+        "type": "PASS_AUCTION",
+        "payload": {"property_id": "property_virginia_avenue"},
+        "reason_code": "pass_to_preserve_cash_reserve",
+    }
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "PASS_AUCTION" in guidance_text
+    assert "cash reserve" in guidance_text
+
+
+def test_context_pack_guides_auction_premium_to_block_opponent_group_completion() -> None:
+    state = _state_with_active_auction_to_block_opponent_group_completion()
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID)
+
+    guidance = pack["action_selection_guidance"]
+
+    assert guidance["auction_guidance"]["property_id"] == "property_virginia_avenue"
+    assert (
+        guidance["auction_guidance"]["valuation_basis"] == "block_opponent_group_completion_premium"
+    )
+    assert guidance["recommended_action_types"] == ["BID_AUCTION"]
+    assert "PASS_AUCTION" in guidance["lower_priority_action_types"]
+    assert guidance["auction_guidance"]["strategic_valuation_ceiling"] == 240
+    assert guidance["auction_guidance"]["valuation_ceiling"] == 240
+    assert guidance["auction_guidance"]["recommended_bid_amount"] == 160
+    assert guidance["auction_guidance"]["recommended_auction_action"] == {
+        "type": "BID_AUCTION",
+        "payload": {
+            "property_id": "property_virginia_avenue",
+            "amount": 160,
+        },
+        "reason_code": "bid_deliberate_amount_at_or_below_valuation",
+    }
+    assert guidance["auction_guidance"]["opponent_group_completion_threats"] == [
+        {
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_owned_property_ids": [
+                "property_st_charles_place",
+                "property_states_avenue",
+            ],
+        }
+    ]
+    guidance_text = " ".join(guidance["turn_guidance"])
+    assert "blocking" in guidance_text
+    assert "valuation ceiling" in guidance_text
 
 
 def test_context_pack_redacts_profile_seed_source_from_prompt() -> None:
@@ -308,25 +2220,18 @@ async def test_context_pack_includes_only_negotiation_messages_visible_to_acting
             )
 
         messages_by_body = {
-            message["body"]: message
-            for message in pack["negotiation_context"]["public_messages"]
+            message["body"]: message for message in pack["negotiation_context"]["public_messages"]
         }
 
-        public_message = messages_by_body[
-            "I can trade cash now for future consideration."
-        ]
+        public_message = messages_by_body["I can trade cash now for future consideration."]
         assert public_message["sender_player_id"] == str(AI_PLAYER_ID)
         assert public_message["recipient_player_id"] is None
 
-        sent_by_ai_message = messages_by_body[
-            "Grace privately offers Ada a side payment."
-        ]
+        sent_by_ai_message = messages_by_body["Grace privately offers Ada a side payment."]
         assert sent_by_ai_message["sender_player_id"] == str(AI_PLAYER_ID)
         assert sent_by_ai_message["recipient_player_id"] == str(OTHER_PLAYER_ID)
 
-        addressed_to_ai_message = messages_by_body[
-            "Ada privately asks Grace to sweeten the deal."
-        ]
+        addressed_to_ai_message = messages_by_body["Ada privately asks Grace to sweeten the deal."]
         assert addressed_to_ai_message["sender_player_id"] == str(OTHER_PLAYER_ID)
         assert addressed_to_ai_message["recipient_player_id"] == str(AI_PLAYER_ID)
 
@@ -385,8 +2290,7 @@ async def test_context_pack_persists_as_orchestrator_prompt_context_without_muta
         assert stored_context == pack
         assert rows[0]["prompt_context_hash"] == result.prompt_context_hash
         stored_message_bodies = {
-            message["body"]
-            for message in stored_context["negotiation_context"]["public_messages"]
+            message["body"] for message in stored_context["negotiation_context"]["public_messages"]
         }
         assert "I can trade cash now for future consideration." in stored_message_bodies
         assert stored_context["negotiation_context"]["public_deals"][0]["id"] == str(DEAL_ID)
@@ -429,7 +2333,9 @@ async def test_stage_8_2_memory_later_context_pack_includes_prior_memory_without
             "strategic_belief",
             "deal_history",
         }
-        own_memory = next(snippet for snippet in snippets if snippet["content"] == "Own private valuation memory.")
+        own_memory = next(
+            snippet for snippet in snippets if snippet["content"] == "Own private valuation memory."
+        )
         assert own_memory["source_decision_id"] == str(OWN_MEMORY_DECISION_ID)
     finally:
         await _delete_game(session_factory)
@@ -678,6 +2584,1036 @@ def _valid_action_output(state: GameState) -> dict[str, Any]:
     }
 
 
+def _lowball_tennessee_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(AI_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "lowball-tennessee-to-grace",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "lowball-cash",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 1,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _fair_tennessee_deal(*, amount: int = 220) -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "fair-tennessee-to-grace",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "fair-cash",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": amount,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _cash_return_tennessee_completion_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "cash-return-tennessee-completion",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "gross-cash-out",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 400,
+                },
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "cash-returned",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "amount": 200,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _boardwalk_for_tennessee_completion_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "boardwalk-for-tennessee-completion",
+            "terms": [
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "boardwalk-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_boardwalk",
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _mutual_light_blue_for_orange_completion_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "mutual-light-blue-for-orange-completion",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "sweetener-cash",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "amount": 150,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "connecticut-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_connecticut_avenue",
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _cash_round_trip_tennessee_completion_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "cash-round-trip-tennessee-completion",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "gross-cash-in",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "amount": 320,
+                },
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "cash-returned",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "amount": 200,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _cash_for_property_deal(
+    *,
+    property_id: str,
+    cash_from_player_id: str,
+    cash_to_player_id: str,
+    property_from_player_id: str,
+    property_to_player_id: str,
+    amount: int,
+) -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": cash_to_player_id,
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [cash_from_player_id, cash_to_player_id],
+            "terms_hash": f"cash-for-{property_id}",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": f"cash-for-{property_id}",
+                    "from_player_id": cash_from_player_id,
+                    "to_player_id": cash_to_player_id,
+                    "amount": amount,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": f"{property_id}-transfer",
+                    "from_player_id": property_from_player_id,
+                    "to_player_id": property_to_player_id,
+                    "property_id": property_id,
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _sell_tennessee_from_monopoly_deal(*, amount: int) -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "sell-tennessee-from-grace-monopoly",
+            "terms": [
+                {
+                    "kind": "immediate_cash_transfer",
+                    "instrument_id": "monopoly-breakup-cash",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "amount": amount,
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _swap_tennessee_for_baltic_from_monopoly_deal() -> dict[str, Any]:
+    return {
+        "id": str(DEAL_ID),
+        "negotiation_id": str(NEGOTIATION_ID),
+        "proposed_by_player_id": str(OTHER_PLAYER_ID),
+        "parent_deal_id": None,
+        "status": "proposed",
+        "version": 1,
+        "terms": {
+            "kind": "structured_deal",
+            "deal_schema_version": 1,
+            "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "terms_hash": "swap-tennessee-from-grace-monopoly-for-baltic",
+            "terms": [
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "tennessee-transfer",
+                    "from_player_id": str(AI_PLAYER_ID),
+                    "to_player_id": str(OTHER_PLAYER_ID),
+                    "property_id": "property_tennessee_avenue",
+                },
+                {
+                    "kind": "immediate_property_transfer",
+                    "instrument_id": "baltic-transfer",
+                    "from_player_id": str(OTHER_PLAYER_ID),
+                    "to_player_id": str(AI_PLAYER_ID),
+                    "property_id": "property_baltic_avenue",
+                },
+            ],
+        },
+        "validation_errors": [],
+        "created_at": "2026-07-08T00:00:03Z",
+        "updated_at": "2026-07-08T00:00:03Z",
+        "accepted_at": None,
+    }
+
+
+def _active_tennessee_negotiation() -> dict[str, Any]:
+    return {
+        "id": str(NEGOTIATION_ID),
+        "game_id": str(GAME_ID),
+        "opened_by_player_id": str(AI_PLAYER_ID),
+        "status": "active",
+        "phase": "START_TURN",
+        "round_number": 1,
+        "context": {
+            "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+            "current_deal_id": None,
+            "context": {
+                "topic": "Trade for Tennessee Avenue to complete Orange",
+                "target_property_id": "property_tennessee_avenue",
+                "target_property_name": "Tennessee Avenue",
+                "target_owner_id": str(OTHER_PLAYER_ID),
+                "target_owner_name": "Ada",
+                "suggested_offer": {
+                    "cash_budget_floor": 180,
+                    "cash_budget_ceiling": 270,
+                    "avoid_trading_away_group_property_ids": [
+                        "property_st_james_place",
+                        "property_new_york_avenue",
+                    ],
+                },
+            },
+        },
+    }
+
+
+def _state_with_orange_monopoly(*, cash: int = 3000) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    orange_property_ids = {
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id in orange_property_ids
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_orange_monopoly_and_opponent_baltic() -> GameState:
+    state = _state_with_orange_monopoly()
+    return state.model_copy(
+        update={
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(OTHER_PLAYER_ID)})
+                if ownership.property_id == "property_baltic_avenue"
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_uneven_orange_monopoly() -> GameState:
+    state = _state_with_orange_monopoly()
+    improvement_levels = {
+        "property_st_james_place": 1,
+        "property_tennessee_avenue": 2,
+        "property_new_york_avenue": 1,
+    }
+    return state.model_copy(
+        update={
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"houses": improvement_levels[ownership.property_id], "hotel": False}
+                )
+                if ownership.property_id in improvement_levels
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_brown_and_orange_monopolies() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 3000})
+    owned_property_ids = {
+        "property_mediterranean_avenue",
+        "property_baltic_avenue",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id in owned_property_ids
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_orange_near_monopoly(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_st_james_place": str(AI_PLAYER_ID),
+        "property_new_york_avenue": str(AI_PLAYER_ID),
+        "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_orange_near_monopoly_and_ai_boardwalk() -> GameState:
+    state = _state_with_orange_near_monopoly(ai_cash=1500)
+    return state.model_copy(
+        update={
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id == "property_boardwalk"
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_light_blue_near_set_and_opponent_orange_near_set() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_oriental_avenue": str(AI_PLAYER_ID),
+        "property_vermont_avenue": str(AI_PLAYER_ID),
+        "property_connecticut_avenue": str(OTHER_PLAYER_ID),
+        "property_tennessee_avenue": str(AI_PLAYER_ID),
+        "property_st_james_place": str(OTHER_PLAYER_ID),
+        "property_new_york_avenue": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_railroad_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_reading_railroad": str(AI_PLAYER_ID),
+        "property_pennsylvania_railroad": str(AI_PLAYER_ID),
+        "property_b_and_o_railroad": str(AI_PLAYER_ID),
+        "property_short_line_railroad": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_utility_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_electric_company": str(AI_PLAYER_ID),
+        "property_water_works": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_multiple_near_monopolies() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_oriental_avenue": str(AI_PLAYER_ID),
+        "property_vermont_avenue": str(AI_PLAYER_ID),
+        "property_connecticut_avenue": str(OTHER_PLAYER_ID),
+        "property_st_james_place": str(AI_PLAYER_ID),
+        "property_new_york_avenue": str(AI_PLAYER_ID),
+        "property_tennessee_avenue": str(OTHER_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, *state.players[2:]),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_opponent_orange_near_monopoly() -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": 1500})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    third_player = state.players[2].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_st_james_place": str(OTHER_PLAYER_ID),
+        "property_new_york_avenue": str(OTHER_PLAYER_ID),
+        "property_tennessee_avenue": str(THIRD_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, third_player),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_opponent_railroad_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    third_player = state.players[2].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_reading_railroad": str(OTHER_PLAYER_ID),
+        "property_pennsylvania_railroad": str(OTHER_PLAYER_ID),
+        "property_b_and_o_railroad": str(OTHER_PLAYER_ID),
+        "property_short_line_railroad": str(THIRD_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, third_player),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_opponent_utility_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    third_player = state.players[2].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_electric_company": str(OTHER_PLAYER_ID),
+        "property_water_works": str(THIRD_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, third_player),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_owned_railroad(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID)})
+                if ownership.property_id == "property_b_and_o_railroad"
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_active_debt_and_owned_railroad(*, cash: int, amount_owed: int = 350) -> GameState:
+    state = _state_with_owned_railroad(cash=cash)
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": amount_owed,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _state_with_active_debt_orange_monopoly_and_railroad(
+    *,
+    cash: int,
+    amount_owed: int,
+) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    owned_property_ids = {
+        "property_b_and_o_railroad",
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                    "mortgaged": False,
+                    "houses": 0,
+                    "hotel": False,
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": amount_owed,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _state_with_active_debt_sellable_house_and_railroad(
+    *,
+    cash: int,
+    amount_owed: int,
+) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    owned_property_ids = {
+        "property_oriental_avenue",
+        "property_vermont_avenue",
+        "property_connecticut_avenue",
+        "property_b_and_o_railroad",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                    "houses": 1 if ownership.property_id == "property_oriental_avenue" else 0,
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "bank_inventory": {
+                **state.bank_inventory.model_dump(mode="python"),
+                "houses": 31,
+            },
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PAYMENT_RESOLUTION,
+            },
+            "active_payment": {
+                "debtor_id": str(AI_PLAYER_ID),
+                "creditor_id": str(OTHER_PLAYER_ID),
+                "amount_owed": amount_owed,
+                "amount_paid": 0,
+                "reason": "rent",
+                "negotiation_allowed": False,
+            },
+        }
+    )
+
+
+def _state_with_mortgaged_railroad(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    return state.model_copy(
+        update={
+            "players": (ai_player, *state.players[1:]),
+            "property_ownership": tuple(
+                ownership.model_copy(update={"owner_id": str(AI_PLAYER_ID), "mortgaged": True})
+                if ownership.property_id == "property_b_and_o_railroad"
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_jail_card(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(
+        update={
+            "cash": cash,
+            "position": 10,
+            "in_jail": True,
+            "jail_turns": 1,
+            "get_out_of_jail_card_ids": ("card_community_get_out_of_jail",),
+        }
+    )
+    return state.model_copy(update={"players": (ai_player, *state.players[1:])})
+
+
+def _state_landed_on_unowned_reading_railroad(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 5})
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_landed_on_group_completing_tennessee(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 18})
+    owned_property_ids = {"property_st_james_place", "property_new_york_avenue"}
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_landed_on_group_completing_short_line(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 35})
+    owned_property_ids = {
+        "property_reading_railroad",
+        "property_pennsylvania_railroad",
+        "property_b_and_o_railroad",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                }
+                if ownership.property_id in owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_landed_on_group_completing_water_works(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 28})
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(AI_PLAYER_ID),
+                }
+                if ownership.property_id == "property_electric_company"
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_landed_on_opponent_group_completing_virginia(*, cash: int) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash, "position": 14})
+    opponent_owned_property_ids = {"property_st_charles_place", "property_states_avenue"}
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(OTHER_PLAYER_ID),
+                }
+                if ownership.property_id in opponent_owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _state_with_active_auction(*, cash: int = 1500, high_bid_amount: int = 50) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": cash})
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": (
+                ai_player.model_dump(mode="python"),
+                *[player.model_dump(mode="python") for player in state.players[1:]],
+            ),
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+            "active_auction": {
+                "property_id": "property_virginia_avenue",
+                "high_bidder_id": str(OTHER_PLAYER_ID),
+                "high_bid_amount": high_bid_amount,
+                "passed_player_ids": [],
+            },
+        }
+    )
+
+
+def _state_with_active_auction_to_block_opponent_group_completion() -> GameState:
+    state = _state_with_active_auction()
+    opponent_owned_property_ids = {
+        "property_st_charles_place",
+        "property_states_avenue",
+    }
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "property_ownership": [
+                {
+                    **ownership.model_dump(mode="python"),
+                    "owner_id": str(OTHER_PLAYER_ID),
+                }
+                if ownership.property_id in opponent_owned_property_ids
+                else ownership.model_dump(mode="python")
+                for ownership in state.property_ownership
+            ],
+        }
+    )
+
+
 async def _fetch_ai_decision_rows(session_factory: async_sessionmaker) -> list[dict[str, Any]]:
     async with session_factory() as session:
         result = await session.execute(
@@ -694,7 +3630,9 @@ async def _fetch_ai_decision_rows(session_factory: async_sessionmaker) -> list[d
 async def _count_events(session_factory: async_sessionmaker) -> int:
     async with session_factory() as session:
         result = await session.execute(
-            sa.select(sa.func.count()).select_from(game_events).where(game_events.c.game_id == GAME_ID)
+            sa.select(sa.func.count())
+            .select_from(game_events)
+            .where(game_events.c.game_id == GAME_ID)
         )
         return int(result.scalar_one())
 

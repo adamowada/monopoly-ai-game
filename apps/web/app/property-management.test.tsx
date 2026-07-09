@@ -2,11 +2,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PROPERTIES } from "@monopoly-ai-game/schemas";
 
 import { GamePlaySurface } from "./game-play-surface";
 import { PropertyManagementPanel } from "./property-management";
 import type { GameStateResponse, LegalAction } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
+
+const routerMock = vi.hoisted(() => ({
+  push: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => routerMock,
+}));
 
 const createdAt = "2026-07-04T00:00:00.000Z";
 const apiBaseUrl = "http://api.test";
@@ -322,6 +331,7 @@ function baseFetchMock({
 }
 
 afterEach(() => {
+  routerMock.push.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -343,11 +353,23 @@ describe("PropertyManagementPanel", () => {
     expect(within(graceGroup).getByText("Hotel")).toBeInTheDocument();
   });
 
-  it("shows Property detail, Bank inventory, and Monopoly groups from static data plus state", () => {
-    renderPanel();
+  it("keeps the full deed catalog behind a disclosure while preserving static property facts", () => {
+    const { container } = renderPanel();
+
+    const deedActions = screen.getByRole("region", { name: "Legal deed actions" });
+    expect(deedActions).not.toHaveTextContent("No deed actions available");
+    expect(container.querySelectorAll("[data-property-art]")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
 
     const detail = screen.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
     expect(detail).toHaveTextContent("Property detail");
+    expect(within(detail).getByRole("article", { name: "Property card: Mediterranean Avenue" })).toBeInTheDocument();
+    expect(within(detail).getByRole("img", { name: "Ada owns Mediterranean Avenue" })).toHaveAttribute("data-property-owner-token");
+    expect(within(detail).getByRole("img", { name: "Mediterranean Avenue has 2 houses" })).toHaveAttribute(
+      "data-development-strip",
+    );
+    expect(container.querySelectorAll("[data-property-deed-card]")).toHaveLength(PROPERTIES.length);
     expect(detail).toHaveTextContent("Brown");
     expect(detail).toHaveTextContent("Price $60");
     expect(detail).toHaveTextContent("Mortgage value $30");
@@ -358,8 +380,11 @@ describe("PropertyManagementPanel", () => {
     expect(detail).toHaveTextContent("Hotels: 0");
 
     const bankInventory = screen.getByRole("region", { name: "Bank inventory" });
-    expect(bankInventory).toHaveTextContent("Houses remaining 29");
-    expect(bankInventory).toHaveTextContent("Hotels remaining 11");
+    expect(bankInventory).toHaveTextContent("Houses");
+    expect(bankInventory).toHaveTextContent("Hotels");
+    expect(bankInventory).not.toHaveTextContent("remaining");
+    expect(within(bankInventory).getByText("29")).toBeInTheDocument();
+    expect(within(bankInventory).getByText("11")).toBeInTheDocument();
 
     const monopolyGroups = screen.getByRole("region", { name: "Monopoly groups" });
     expect(monopolyGroups).toHaveTextContent("Brown");
@@ -368,6 +393,24 @@ describe("PropertyManagementPanel", () => {
     expect(monopolyGroups).toHaveTextContent("Improved");
     expect(monopolyGroups).toHaveTextContent("Light Blue");
     expect(monopolyGroups).toHaveTextContent("Incomplete");
+  });
+
+  it("shows legal deed action cards before the full catalog", () => {
+    renderPanel({
+      legalActions: [
+        legalAction("BUY_HOUSE", "property_mediterranean_avenue", { cost: 50 }),
+        legalAction("SELL_HOUSE", "property_mediterranean_avenue", { proceeds: 25 }),
+        legalAction("MORTGAGE_PROPERTY", "property_baltic_avenue", { proceeds: 30 }),
+        legalAction("UNMORTGAGE_PROPERTY", "property_park_place", { cost: 33 }),
+      ],
+    });
+
+    const deedActions = screen.getByRole("region", { name: "Legal deed actions" });
+    expect(within(deedActions).getByRole("region", { name: "Property detail: Mediterranean Avenue" })).toBeInTheDocument();
+    expect(within(deedActions).getByRole("region", { name: "Property detail: Baltic Avenue" })).toBeInTheDocument();
+    expect(within(deedActions).getByRole("region", { name: "Property detail: Park Place" })).toBeInTheDocument();
+    expect(within(deedActions).queryByRole("region", { name: "Property detail: Boardwalk" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Deed catalog" })).not.toBeInTheDocument();
   });
 
   it("enables Mortgage, Unmortgage, Build house, and Sell house only for matching legal actions", () => {
@@ -392,11 +435,17 @@ describe("PropertyManagementPanel", () => {
     const parkPlace = screen.getByRole("region", { name: "Property detail: Park Place" });
     expect(within(parkPlace).getByRole("button", { name: "Unmortgage" })).toBeEnabled();
 
+    expect(
+      within(screen.getByRole("region", { name: "Legal deed actions" })).queryByRole("region", {
+        name: "Property detail: Boardwalk",
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
     const boardwalk = screen.getByRole("region", { name: "Property detail: Boardwalk" });
     expect(within(boardwalk).queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("shows Hotel conversion text for four-house and hotel cases using BUY_HOUSE and SELL_HOUSE controls", () => {
+  it("uses BUY_HOUSE and SELL_HOUSE controls without hotel-conversion explainer copy", () => {
     renderPanel({
       snapshot: stateFixture({
         ownership: ownershipFixture([
@@ -411,13 +460,13 @@ describe("PropertyManagementPanel", () => {
     });
 
     const mediterranean = screen.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
-    expect(mediterranean).toHaveTextContent("Hotel conversion");
-    expect(mediterranean).toHaveTextContent("Build house converts four houses to one hotel");
+    expect(mediterranean).not.toHaveTextContent("Hotel conversion");
+    expect(mediterranean).not.toHaveTextContent("Build house converts four houses to one hotel");
     expect(within(mediterranean).getByRole("button", { name: "Build house" })).toBeEnabled();
 
     const boardwalk = screen.getByRole("region", { name: "Property detail: Boardwalk" });
-    expect(boardwalk).toHaveTextContent("Hotel conversion");
-    expect(boardwalk).toHaveTextContent("Sell house converts one hotel to four houses");
+    expect(boardwalk).not.toHaveTextContent("Hotel conversion");
+    expect(boardwalk).not.toHaveTextContent("Sell house converts one hotel to four houses");
     expect(within(boardwalk).getByRole("button", { name: "Sell house" })).toBeEnabled();
   });
 });
@@ -429,16 +478,22 @@ describe("GamePlaySurface property management integration", () => {
     const baltic = await screen.findByRole("region", { name: "Property detail: Baltic Avenue" });
     await waitFor(() => expect(baltic).toHaveTextContent("Houses: 1"));
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Bank inventory" })).toHaveTextContent("Houses remaining 29"),
+      expect(within(screen.getByRole("region", { name: "Bank inventory" })).getByText("29")).toBeInTheDocument(),
     );
 
     fireEvent.click(within(baltic).getByRole("button", { name: "Build house" }));
 
-    await waitFor(() => expect(baltic).toHaveTextContent("Houses: 2"));
-    expect(screen.getByRole("region", { name: "Bank inventory" })).toHaveTextContent("Houses remaining 28");
+    await waitFor(() =>
+      expect(within(screen.getByRole("region", { name: "Bank inventory" })).getByText("28")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open deed catalog" }));
+    const updatedBaltic = screen.getByRole("region", { name: "Property detail: Baltic Avenue" });
+    expect(updatedBaltic).toHaveTextContent("Houses: 2");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Contracts" }));
     const log = screen.getByRole("region", { name: "Game log" });
-    expect(within(log).getByText(/BANK_INVENTORY_SET/)).toBeInTheDocument();
-    expect(within(log).getByText(/PROPERTY_IMPROVEMENTS_SET/)).toBeInTheDocument();
+    expect(within(log).getByText("Baltic Avenue now has 2 houses.")).toBeInTheDocument();
+    expect(within(log).queryByText(/BANK_INVENTORY_SET/)).not.toBeInTheDocument();
   });
 
   it("displays Rejected action and leaves visible mortgage, houses, hotels, and bank_inventory state intact", async () => {
@@ -454,7 +509,7 @@ describe("GamePlaySurface property management integration", () => {
     await waitFor(() => expect(baltic).toHaveTextContent("Unmortgaged"));
     await waitFor(() => expect(baltic).toHaveTextContent("Houses: 1"));
     expect(baltic).toHaveTextContent("Hotels: 0");
-    await waitFor(() => expect(bankInventory).toHaveTextContent("Houses remaining 29"));
+    await waitFor(() => expect(within(bankInventory).getByText("29")).toBeInTheDocument());
 
     fireEvent.click(within(baltic).getByRole("button", { name: "Build house" }));
 
@@ -465,6 +520,6 @@ describe("GamePlaySurface property management integration", () => {
     expect(baltic).toHaveTextContent("Unmortgaged");
     expect(baltic).toHaveTextContent("Houses: 1");
     expect(baltic).toHaveTextContent("Hotels: 0");
-    expect(bankInventory).toHaveTextContent("Houses remaining 29");
+    expect(within(bankInventory).getByText("29")).toBeInTheDocument();
   });
 });

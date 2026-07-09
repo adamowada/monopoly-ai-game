@@ -4,6 +4,8 @@
 
 `PLANS.md` is the authoritative product plan, architecture plan, phase plan, stage plan, acceptance checklist, and technical decision record for this repository. Codex must follow `PLANS.md` throughout the long-running build.
 
+`ART_PLAN.md` is the authoritative art-direction plan for this repository. When `ART_PLAN.md` conflicts with older visual-asset constraints in `PLANS.md`, follow `ART_PLAN.md` for art direction and asset format decisions while preserving the local-only and original-art requirements.
+
 One worker process may perform at most one stage of a given phase. After completing a stage, that worker must stop instead of continuing into another stage of the same phase.
 
 This project must use test-driven development. Codex writes or updates tests before implementing behavior, then implements until those tests pass.

@@ -85,10 +85,11 @@ function contractFixture(): ContractRecord {
     terms: [
       {
         kind: "rent_share",
-        summary: "Ada pays Grace $50 when the orange rent is collected.",
+        property_id: "property_reading_railroad",
+        summary: "Ada pays Grace $50 when Reading Railroad rent is collected.",
       },
     ],
-    term_summary: "Ada pays Grace $50 when the orange rent is collected.",
+    term_summary: "Ada pays Grace $50 when Reading Railroad rent is collected.",
     created_at: "2026-07-04T00:01:00.000Z",
     effective_at: "2026-07-04T00:02:00.000Z",
   };
@@ -290,7 +291,7 @@ function createContractsFetchMock({
   });
 }
 
-function renderPanel(fetchMock: FetchMock) {
+function renderPanel(fetchMock: FetchMock, events: AcceptedEvent[] = eventsFixture()) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: 0 },
@@ -306,7 +307,7 @@ function renderPanel(fetchMock: FetchMock) {
   render(
     <ContractsPanel
       apiBaseUrl={apiBaseUrl}
-      events={eventsFixture()}
+      events={events}
       game={gameFixture()}
       gameId={gameId}
       rejectedActions={[rejectedActionFixture()]}
@@ -324,41 +325,51 @@ describe("ContractsPanel", () => {
     renderPanel(createContractsFetchMock());
 
     const panel = await screen.findByRole("region", { name: "Contracts obligations panel" });
-    await within(panel).findByText("Contract contract-1");
+    await within(panel).findByText("Agreement between Ada, Grace");
 
     expect(panel).toHaveTextContent("Active contracts");
-    expect(panel).toHaveTextContent("Contract contract-1");
-    expect(panel).toHaveTextContent("Parties Ada, Grace");
-    expect(panel).toHaveTextContent("Status active");
-    expect(panel).toHaveTextContent("deal_id deal-1");
-    expect(panel).toHaveTextContent("source_agreement_id agreement-1");
-    expect(panel).toHaveTextContent("effective_event_id event-deal");
-    expect(panel).toHaveTextContent("Ada pays Grace $50 when the orange rent is collected.");
+    expect(panel).toHaveTextContent("Agreement between Ada, Grace");
+    expect(panel).not.toHaveTextContent("Parties Ada, Grace");
+    expect(panel).toHaveTextContent("Active");
+    expect(panel).toHaveTextContent("Ada pays Grace $50 when Reading Railroad rent is collected.");
     expect(panel).toHaveTextContent("Created Jul 04, 2026");
     expect(panel).toHaveTextContent("Effective Jul 04, 2026");
+    expect(panel).not.toHaveTextContent("deal_id deal-1");
+    expect(panel).not.toHaveTextContent("source_agreement_id agreement-1");
+    expect(panel).not.toHaveTextContent("effective_event_id event-deal");
 
     expect(panel).toHaveTextContent("Upcoming obligations");
-    expect(panel).toHaveTextContent("obligation_id obligation-upcoming");
-    expect(panel).toHaveTextContent("contract_id contract-1");
-    expect(panel).toHaveTextContent("due_turn 6");
+    expect(panel).toHaveTextContent("Ada owes Grace");
+    expect(panel).toHaveTextContent("Turn 6");
     expect(panel).toHaveTextContent("next orange rent collection");
     expect(panel).toHaveTextContent("$50 cash transfer");
-    expect(panel).toHaveTextContent("Counterparty Grace");
+    expect(panel).not.toHaveTextContent("Counterparty Grace");
+    expect(panel).not.toHaveTextContent("obligation_id obligation-upcoming");
+    expect(panel).not.toHaveTextContent("contract_id contract-1");
+    expect(panel).not.toHaveTextContent("due_turn 6");
 
     expect(panel).toHaveTextContent("Obligation settlement history");
-    expect(panel).toHaveTextContent("settled_at Jul 04, 2026");
-    expect(panel).toHaveTextContent("triggering event event-transfer");
-    expect(panel).toHaveTextContent("linked contract_id contract-1");
+    expect(panel).toHaveTextContent("Settled Jul 04, 2026");
     expect(panel).toHaveTextContent("Ada paid Grace $75 from the source agreement.");
 
     expect(panel).toHaveTextContent("Contract outcome explanation");
-    expect(panel).toHaveTextContent("contract_id contract-1");
-    expect(panel).toHaveTextContent("obligation_id obligation-settled");
-    expect(panel).toHaveTextContent("source_deal_id deal-1");
     expect(panel).toHaveTextContent("decision rent_share_cash_transfer");
 
-    const log = within(panel).getByRole("region", { name: "Game log" });
-    expect(log).toHaveTextContent("Full game log");
+    const activeContract = within(panel).getByRole("article", { name: "Contract between Ada, Grace" });
+    expect(within(activeContract).getByRole("button", { name: "Show property card for Reading Railroad" })).toBeInTheDocument();
+    fireEvent.click(within(activeContract).getByRole("button", { name: "Show contract technical record" }));
+    expect(activeContract).toHaveTextContent("deal_id deal-1");
+    expect(activeContract).toHaveTextContent("source_agreement_id agreement-1");
+    expect(activeContract).toHaveTextContent("effective_event_id event-deal");
+
+    const upcomingObligation = within(panel).getByRole("article", { name: "Obligation Ada to Grace" });
+    fireEvent.click(within(upcomingObligation).getByRole("button", { name: "Show obligation technical record" }));
+    expect(upcomingObligation).toHaveTextContent("obligation_id obligation-upcoming");
+    expect(upcomingObligation).toHaveTextContent("contract_id contract-1");
+    expect(upcomingObligation).toHaveTextContent("due_turn 6");
+
+    const log = within(panel).getByRole("region", { name: "Contract event history" });
+    expect(log).toHaveTextContent("Event history");
     expect(log).toHaveTextContent("Actions");
     expect(log).toHaveTextContent("Deals");
     expect(log).toHaveTextContent("AI decisions");
@@ -376,7 +387,7 @@ describe("ContractsPanel", () => {
   it("filters full game log entries while keeping rejections separate from accepted events", async () => {
     renderPanel(createContractsFetchMock());
 
-    const log = await screen.findByRole("region", { name: "Game log" });
+    const log = await screen.findByRole("region", { name: "Contract event history" });
     await within(log).findByText("Deal deal-1");
     expect(log).toHaveTextContent("DICE_ROLLED");
     expect(log).toHaveTextContent("Deal deal-1");
@@ -401,6 +412,29 @@ describe("ContractsPanel", () => {
 
     fireEvent.click(within(log).getByLabelText("Rejections"));
     expect(log).not.toHaveTextContent("Rejected action");
-    expect(log).toHaveTextContent("No log entries match the selected filters.");
+    expect(log).not.toHaveTextContent("No log entries match the selected filters.");
+    expect(log.querySelector("ol")).not.toBeInTheDocument();
+  });
+
+  it("caps mounted log rows for long browser play sessions while preserving the full count", async () => {
+    const longEvents = Array.from({ length: 320 }, (_, index): AcceptedEvent => ({
+      id: `long-event-${index + 1}`,
+      game_id: gameId,
+      sequence: index + 1,
+      actor_player_id: adaId,
+      event_type: "TURN_STATE_SET",
+      payload: { summary: `Long session event ${index + 1}` },
+      state_hash: `state-${index + 1}`,
+      created_at: new Date(Date.UTC(2026, 6, 4, 0, 0, index)).toISOString(),
+    }));
+    renderPanel(createContractsFetchMock({ deals: [] }), longEvents);
+
+    const log = await screen.findByRole("region", { name: "Contract event history" });
+    await within(log).findByText("Long session event 320");
+
+    expect(log).toHaveTextContent("200 of 321 shown");
+    expect(within(log).getAllByRole("listitem")).toHaveLength(200);
+    expect(within(log).queryByText("Long session event 1", { exact: true })).not.toBeInTheDocument();
+    expect(log).toHaveTextContent("Long session event 320");
   });
 });

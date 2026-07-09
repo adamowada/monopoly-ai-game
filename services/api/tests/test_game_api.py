@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from app.ai.context_pack import build_ai_context_pack
 from app.core.config import Settings
 from app.db.metadata import (
     deals,
@@ -23,6 +24,7 @@ from app.db.metadata import (
     rejected_actions,
 )
 from app.main import create_app
+from app.rules.state import GameState
 
 
 TEST_DATABASE_URL = os.getenv(
@@ -144,6 +146,211 @@ async def test_create_and_load_game_metadata_and_state(
 
 
 @pytest.mark.asyncio
+async def test_create_game_applies_debug_cash_and_property_allocations(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "debug-allocation-game",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [
+                        {"seat_order": 0, "cash": 2200},
+                        {"seat_order": 1, "cash": 900},
+                    ],
+                    "property_owners": [
+                        {"property_id": "property_mediterranean_avenue", "seat_order": 0}
+                    ],
+                }
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    try:
+        state_response = await client.get(f"/games/{game_id}/state")
+        assert state_response.status_code == 200
+        state = state_response.json()["state"]
+        assert state["players"][0]["cash"] == 2200
+        assert state["players"][1]["cash"] == 900
+        mediterranean = next(
+            ownership
+            for ownership in state["property_ownership"]
+            if ownership["property_id"] == "property_mediterranean_avenue"
+        )
+        assert mediterranean["owner_id"] == created["players"][0]["id"]
+        assert created["players"][0]["state"]["cash"] == 2200
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_debug_monopoly_allocation_exposes_development_actions(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "debug-monopoly-development-game",
+            "players": [
+                {"name": "Ada", "kind": "ai"},
+                {"name": "Grace", "kind": "ai"},
+                {"name": "Linus", "kind": "ai"},
+                {"name": "Marie", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [
+                        {"seat_order": 0, "cash": 3000},
+                        {"seat_order": 1, "cash": 1500},
+                        {"seat_order": 2, "cash": 1500},
+                        {"seat_order": 3, "cash": 1500},
+                    ],
+                    "property_owners": [
+                        {"property_id": "property_st_james_place", "seat_order": 0},
+                        {"property_id": "property_tennessee_avenue", "seat_order": 0},
+                        {"property_id": "property_new_york_avenue", "seat_order": 0},
+                    ],
+                }
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    try:
+        legal_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": ai_player_id},
+        )
+
+        assert legal_response.status_code == 200
+        build_actions = [
+            action
+            for action in legal_response.json()["legal_actions"]
+            if action["type"] == "BUY_HOUSE"
+        ]
+        assert [action["payload"]["property_id"] for action in build_actions] == [
+            "property_st_james_place",
+            "property_tennessee_avenue",
+            "property_new_york_avenue",
+        ]
+        assert all(action["payload"]["cost"] == 100 for action in build_actions)
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_debug_near_monopoly_allocation_exposes_ai_trade_strategy(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "debug-near-monopoly-negotiation-game",
+            "players": [
+                {"name": "Ada", "kind": "ai"},
+                {"name": "Grace", "kind": "ai"},
+                {"name": "Linus", "kind": "ai"},
+                {"name": "Marie", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [
+                        {"seat_order": 0, "cash": 1500},
+                        {"seat_order": 1, "cash": 1500},
+                        {"seat_order": 2, "cash": 1500},
+                        {"seat_order": 3, "cash": 1500},
+                    ],
+                    "property_owners": [
+                        {"property_id": "property_st_james_place", "seat_order": 0},
+                        {"property_id": "property_new_york_avenue", "seat_order": 0},
+                        {"property_id": "property_tennessee_avenue", "seat_order": 1},
+                    ],
+                }
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    ai_player_id = created["players"][0]["id"]
+    target_player_id = created["players"][1]["id"]
+    try:
+        state_response = await client.get(f"/games/{game_id}/state")
+        assert state_response.status_code == 200
+        state_body = dict(state_response.json()["state"])
+        state_body.pop("state_hash", None)
+        state = GameState.model_validate(state_body)
+
+        pack = build_ai_context_pack(
+            state,
+            player_id=UUID(ai_player_id),
+            decision_type="open_negotiation",
+        )
+        guidance = pack["negotiation_strategy_guidance"]
+
+        assert guidance["recommended_decision_types"] == ["open_negotiation"]
+        assert guidance["open_negotiation_payload_template"] == {
+            "participant_player_ids": [ai_player_id, target_player_id],
+            "context": {
+                "topic": "Trade for Tennessee Avenue to complete Orange",
+                "target_property_id": "property_tennessee_avenue",
+                "target_property_name": "Tennessee Avenue",
+                "target_owner_id": target_player_id,
+                "target_owner_name": "Grace",
+                "strategic_reason": (
+                    "Completing Orange unlocks BUY_HOUSE development and materially raises rent pressure."
+                ),
+                "suggested_offer": {
+                    "cash_budget_floor": 180,
+                    "cash_budget_ceiling": 270,
+                    "avoid_trading_away_group_property_ids": [
+                        "property_st_james_place",
+                        "property_new_york_avenue",
+                    ],
+                },
+            },
+        }
+        assert guidance["trade_opportunities"][0]["target_property_id"] == "property_tennessee_avenue"
+        assert guidance["trade_opportunities"][0]["target_owner_id"] == target_player_id
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_create_game_rejects_invalid_debug_allocations(client: httpx.AsyncClient) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "bad-debug-allocation-game",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "ai"},
+            ],
+            "settings": {
+                "debug_allocations": {
+                    "player_cash": [{"seat_order": 9, "cash": 2200}],
+                    "property_owners": [],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_game_rejects_malformed_player_setup(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/games",
@@ -151,6 +358,30 @@ async def test_create_game_rejects_malformed_player_setup(client: httpx.AsyncCli
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_end_game_marks_game_terminal(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    try:
+        response = await client.post(f"/games/{game_id}/end")
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["id"] == game_id
+        assert body["status"] == "ended"
+        assert body["current_phase"] == "ENDED"
+
+        metadata_response = await client.get(f"/games/{game_id}")
+        assert metadata_response.status_code == 200
+        assert metadata_response.json()["status"] == "ended"
+        assert metadata_response.json()["current_phase"] == "ENDED"
+    finally:
+        await delete_game(session_factory, str(game_id))
 
 
 @pytest.mark.asyncio
@@ -189,10 +420,9 @@ async def test_legal_actions_require_actor_and_return_current_actions(
         assert body["actor_player_id"] == actor_id
         assert body["state_hash"]
         assert body["event_sequence"] == 0
-        assert {action["type"] for action in body["legal_actions"]} >= {
-            "ROLL_DICE",
-            "DECLARE_BANKRUPTCY",
-        }
+        action_types = {action["type"] for action in body["legal_actions"]}
+        assert "ROLL_DICE" in action_types
+        assert "DECLARE_BANKRUPTCY" not in action_types
     finally:
         await delete_game(session_factory, str(game_id))
 
@@ -237,6 +467,247 @@ async def test_legal_action_commits_real_ordered_events_without_rejection(
         assert await table_count(session_factory, game_events, str(game_id)) == len(
             body["accepted_events"]
         )
+        assert await table_count(session_factory, rejected_actions, str(game_id)) == 0
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_final_bankruptcy_action_ends_two_player_game(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "final-bankruptcy-ends-game",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "human"},
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    bankrupt_player_id = created["players"][0]["id"]
+    winner_id = created["players"][1]["id"]
+    try:
+        legal_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": bankrupt_player_id},
+        )
+        legal_body = legal_response.json()
+        bankruptcy_action = {
+            "actor_id": bankrupt_player_id,
+            "type": "DECLARE_BANKRUPTCY",
+            "payload": {"creditor_id": None},
+            "expected_state_hash": legal_body["state_hash"],
+            "expected_event_sequence": legal_body["event_sequence"],
+        }
+
+        action_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "final-bankruptcy"},
+            json=bankruptcy_action,
+        )
+        metadata_response = await client.get(f"/games/{game_id}")
+        winner_actions_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": winner_id},
+        )
+
+        assert action_response.status_code == 200, action_response.text
+        body = action_response.json()
+        assert body["status"] == "accepted"
+        assert body["state"]["turn"]["phase"] == "GAME_OVER"
+        assert sum(not player["is_bankrupt"] for player in body["state"]["players"]) == 1
+
+        assert metadata_response.status_code == 200
+        metadata = metadata_response.json()
+        assert metadata["status"] == "ended"
+        assert metadata["current_phase"] == "GAME_OVER"
+        assert metadata["players"][0]["status"] == "bankrupt"
+        assert metadata["players"][1]["status"] == "active"
+
+        assert winner_actions_response.status_code == 200
+        assert winner_actions_response.json()["legal_actions"] == []
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_non_final_bankruptcy_rotates_to_next_active_player(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "non-final-bankruptcy-rotates",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "human"},
+                {"name": "Linus", "kind": "human"},
+                {"name": "Katherine", "kind": "human"},
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    bankrupt_player_id = created["players"][0]["id"]
+    next_player_id = created["players"][1]["id"]
+    try:
+        legal_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": bankrupt_player_id},
+        )
+        legal_body = legal_response.json()
+        bankruptcy_action = {
+            "actor_id": bankrupt_player_id,
+            "type": "DECLARE_BANKRUPTCY",
+            "payload": {"creditor_id": None},
+            "expected_state_hash": legal_body["state_hash"],
+            "expected_event_sequence": legal_body["event_sequence"],
+        }
+
+        action_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "non-final-bankruptcy"},
+            json=bankruptcy_action,
+        )
+        metadata_response = await client.get(f"/games/{game_id}")
+        next_actions_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": next_player_id},
+        )
+
+        assert action_response.status_code == 200, action_response.text
+        body = action_response.json()
+        assert body["status"] == "accepted"
+        assert body["state"]["turn"]["phase"] == "START_TURN"
+        assert body["state"]["turn"]["current_player_id"] == next_player_id
+        assert body["state"]["turn"]["turn_number"] == 2
+        assert [event["event_type"] for event in body["accepted_events"]][-3:] == [
+            "TURN_STATE_SET",
+            "TURN_STATE_SET",
+            "TURN_STATE_SET",
+        ]
+        assert body["state"]["players"][0]["is_bankrupt"] is True
+        assert sum(not player["is_bankrupt"] for player in body["state"]["players"]) == 3
+
+        assert metadata_response.status_code == 200
+        metadata = metadata_response.json()
+        assert metadata["status"] == "active"
+        assert metadata["current_phase"] == "START_TURN"
+        assert metadata["players"][0]["status"] == "bankrupt"
+
+        assert next_actions_response.status_code == 200
+        next_action_types = {action["type"] for action in next_actions_response.json()["legal_actions"]}
+        assert "ROLL_DICE" in next_action_types
+        assert "DECLARE_BANKRUPTCY" not in next_action_types
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
+@pytest.mark.asyncio
+async def test_income_tax_bank_debt_settlement_persists_clean_clear_event(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    response = await client.post(
+        "/games",
+        json={
+            "seed": "income-tax-regression-29",
+            "players": [
+                {"name": "Ada", "kind": "human"},
+                {"name": "Grace", "kind": "human"},
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    game_id = created["id"]
+    actor_id = created["players"][0]["id"]
+    try:
+        legal_response = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": actor_id},
+        )
+        roll_action = next(
+            action
+            for action in legal_response.json()["legal_actions"]
+            if action["type"] == "ROLL_DICE"
+        )
+        roll_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "income-tax-regression-roll"},
+            json=roll_action,
+        )
+
+        assert roll_response.status_code == 200, roll_response.text
+        rolled_state = roll_response.json()["state"]
+        assert rolled_state["turn"]["phase"] == "PAYMENT_RESOLUTION"
+        assert rolled_state["players"][0]["position"] == 4
+        assert rolled_state["active_payment"] == {
+            "debtor_id": actor_id,
+            "creditor_id": None,
+            "amount_owed": 200,
+            "amount_paid": 0,
+            "reason": "tax:space_income_tax",
+            "negotiation_allowed": False,
+        }
+
+        debt_actions = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": actor_id},
+        )
+        settle_action = next(
+            action
+            for action in debt_actions.json()["legal_actions"]
+            if action["type"] == "SETTLE_DEBT"
+        )
+        assert settle_action["payload"] == {
+            "debt_id": (
+                f"active-debt:{game_id}:{roll_response.json()['event_sequence']}:"
+                f"{actor_id}:bank:200:0:tax:space_income_tax"
+            ),
+            "creditor_player_id": None,
+            "amount": 200,
+        }
+
+        settle_response = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "income-tax-regression-settle"},
+            json=settle_action,
+        )
+
+        assert settle_response.status_code == 200, settle_response.text
+        settled = settle_response.json()
+        assert [event["event_type"] for event in settled["accepted_events"]] == [
+            "PLAYER_CASH_DELTA",
+            "ACTIVE_PAYMENT_SET",
+            "TURN_STATE_SET",
+        ]
+        clear_event = next(
+            event for event in settled["accepted_events"] if event["event_type"] == "ACTIVE_PAYMENT_SET"
+        )
+        assert clear_event["payload"] == {"active": False}
+        assert settled["state"]["active_payment"] is None
+        assert settled["state"]["players"][0]["cash"] == 1300
+
+        replayed = await client.get(f"/games/{game_id}/state")
+        events = await client.get(f"/games/{game_id}/events")
+
+        assert replayed.status_code == 200, replayed.text
+        assert replayed.json()["state"]["active_payment"] is None
+        assert replayed.json()["state"]["players"][0]["cash"] == 1300
+        assert events.status_code == 200
+        stored_clear_event = next(
+            event for event in events.json()["events"] if event["event_type"] == "ACTIVE_PAYMENT_SET" and event["payload"] == {"active": False}
+        )
+        assert stored_clear_event["payload"] == {"active": False}
         assert await table_count(session_factory, rejected_actions, str(game_id)) == 0
     finally:
         await delete_game(session_factory, str(game_id))
@@ -443,11 +914,53 @@ async def test_sse_stream_returns_existing_accepted_events(
         await delete_game(session_factory, str(game_id))
 
 
+@pytest.mark.asyncio
+async def test_sse_stream_does_not_replay_events_after_last_event_id(
+    client: httpx.AsyncClient,
+    session_factory: async_sessionmaker,
+) -> None:
+    created = await create_game(client)
+    game_id = created["id"]
+    actor_id = created["players"][0]["id"]
+    try:
+        legal_actions = await client.get(
+            f"/games/{game_id}/legal-actions",
+            params={"actor_player_id": actor_id},
+        )
+        accepted = await client.post(
+            f"/games/{game_id}/actions",
+            headers={"Idempotency-Key": "stage-4.4-sse-last-event-id"},
+            json=next(
+                action
+                for action in legal_actions.json()["legal_actions"]
+                if action["type"] == "ROLL_DICE"
+            ),
+        )
+        last_sequence = str(accepted.json()["event_sequence"])
+
+        async with client.stream(
+            "GET",
+            f"/games/{game_id}/events/stream",
+            headers={"Last-Event-ID": last_sequence},
+        ) as response:
+            body = await response.aread()
+
+        text = body.decode("utf-8")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert "event: game_event" not in text
+        assert "DICE_ROLLED" not in text
+        assert ": no-events" in text
+    finally:
+        await delete_game(session_factory, str(game_id))
+
+
 def test_openapi_includes_stage_4_4_endpoints(api_app: FastAPI) -> None:
     paths = api_app.openapi()["paths"]
     expected = {
         ("post", "/games"),
         ("get", "/games/{game_id}"),
+        ("post", "/games/{game_id}/end"),
         ("get", "/games/{game_id}/state"),
         ("get", "/games/{game_id}/legal-actions"),
         ("post", "/games/{game_id}/actions"),

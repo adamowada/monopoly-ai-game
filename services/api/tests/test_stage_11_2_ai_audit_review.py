@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from app.ai.orchestrator import (
     CodexExecProcessResult,
     CodexExecRunner,
-    XHIGH_REASONING_CONFIG,
+    DEFAULT_AI_MODEL,
+    LIGHT_REASONING_CONFIG,
     build_codex_exec_command,
 )
 from app.core.config import Settings
@@ -314,7 +315,7 @@ def _decision_by_id(rows: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str,
 
 
 @pytest.mark.asyncio
-async def test_stage_11_2_ai_command_uses_codex_exec_json_with_xhigh_reasoning() -> None:
+async def test_stage_11_2_ai_command_uses_codex_exec_json_with_gpt_5_4_mini_light_reasoning() -> None:
     command = build_codex_exec_command(
         schema_file=Path("tmp-schema.json"),
         sandbox_dir=Path("tmp-sandbox"),
@@ -324,10 +325,14 @@ async def test_stage_11_2_ai_command_uses_codex_exec_json_with_xhigh_reasoning()
     assert "--skip-git-repo-check" in command
     assert "--json" in command
     assert "--output-schema" in command
+    assert "--model" in command
+    assert command[command.index("--model") + 1] == DEFAULT_AI_MODEL
+    assert DEFAULT_AI_MODEL == "gpt-5.4-mini"
     assert "-c" in command
-    assert XHIGH_REASONING_CONFIG in command
+    assert LIGHT_REASONING_CONFIG in command
     assert "model_reasoning_effort" in " ".join(command)
-    assert "xhigh" in " ".join(command)
+    assert "low" in " ".join(command)
+    assert "light" not in " ".join(command)
 
 
 @pytest.mark.asyncio

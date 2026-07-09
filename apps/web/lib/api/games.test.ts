@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createGame, readGame } from "./games";
+import { createGame, endGame, readGame } from "./games";
 
 describe("game API helpers", () => {
   it("creates a game through the backend game API", async () => {
@@ -75,6 +75,10 @@ describe("game API helpers", () => {
               { seat_order: 0, color: "#0f766e" },
               { seat_order: 1, color: "#7c3aed" },
             ],
+            player_icons: [
+              { seat_order: 0, icon: "🚗" },
+              { seat_order: 1, icon: "🎩" },
+            ],
             negotiation_cutoffs: {
               max_rounds: 4,
               max_proposals_per_player: 3,
@@ -94,6 +98,10 @@ describe("game API helpers", () => {
             player_colors: [
               { seat_order: 0, color: "#0f766e" },
               { seat_order: 1, color: "#7c3aed" },
+            ],
+            player_icons: [
+              { seat_order: 0, icon: "🚗" },
+              { seat_order: 1, icon: "🎩" },
             ],
             negotiation_cutoffs: {
               max_rounds: 4,
@@ -121,6 +129,10 @@ describe("game API helpers", () => {
           { seat_order: 0, color: "#0f766e" },
           { seat_order: 1, color: "#7c3aed" },
         ],
+        player_icons: [
+          { seat_order: 0, icon: "🚗" },
+          { seat_order: 1, icon: "🎩" },
+        ],
         negotiation_cutoffs: {
           max_rounds: 4,
           max_proposals_per_player: 3,
@@ -134,6 +146,10 @@ describe("game API helpers", () => {
         player_colors: [
           { seat_order: 0, color: "#0f766e" },
           { seat_order: 1, color: "#7c3aed" },
+        ],
+        player_icons: [
+          { seat_order: 0, icon: "🚗" },
+          { seat_order: 1, icon: "🎩" },
         ],
         negotiation_cutoffs: {
           max_rounds: 4,
@@ -173,6 +189,34 @@ describe("game API helpers", () => {
     expect(error.state).toBe("error");
     if (error.state === "error") {
       expect(error.error).toContain("HTTP 404");
+    }
+  });
+
+  it("marks a game ended through the backend game API", async () => {
+    const snapshot = await endGame({
+      baseUrl: "http://api.test/",
+      gameId: "11111111-1111-1111-1111-111111111111",
+      fetcher: async (input: string, init: RequestInit): Promise<Response> => {
+        expect(input).toBe("http://api.test/games/11111111-1111-1111-1111-111111111111/end");
+        expect(init.method).toBe("POST");
+        return Response.json({
+          id: "11111111-1111-1111-1111-111111111111",
+          status: "ended",
+          ruleset_version: "classic-v1",
+          seed: "frontend-test",
+          current_phase: "ENDED",
+          settings: {},
+          created_at: "2026-07-04T00:00:00.000Z",
+          updated_at: "2026-07-04T00:05:00.000Z",
+          players: [],
+        });
+      },
+    });
+
+    expect(snapshot.state).toBe("loaded");
+    if (snapshot.state === "loaded") {
+      expect(snapshot.game.status).toBe("ended");
+      expect(snapshot.game.current_phase).toBe("ENDED");
     }
   });
 });

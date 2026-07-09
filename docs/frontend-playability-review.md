@@ -57,7 +57,7 @@ Scope: frontend playability hardening for Stage 11, covering human-only and mixe
 - Verification command:
   - `python -B .codex-supervisor/verify_phase11_stage113.py`
 - The verifier runs:
-  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/stage-11-3-playability-review.spec.ts --project=chromium`
+  - `pnpm --filter @monopoly-ai-game/web exec playwright test e2e/stage-11-3-playability-review.spec.ts --project=chrome`
   - `pnpm --filter @monopoly-ai-game/web run test:e2e`
   - `pnpm --filter @monopoly-ai-game/web run typecheck`
   - `pnpm run test:smoke:live` with `RUN_LIVE_CODEX_AI=1`

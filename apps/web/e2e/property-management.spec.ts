@@ -24,11 +24,16 @@ test("human player sees property management regions and accepted Build house upd
   await expect(page.getByRole("region", { name: "Bank inventory" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Monopoly groups" })).toBeVisible();
 
-  const mediterranean = page.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
+  const legalDeeds = page.getByRole("region", { name: "Legal deed actions" });
+  const mediterranean = legalDeeds.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
   const bankInventory = page.getByRole("region", { name: "Bank inventory" });
   await expect(mediterranean).toContainText("Owner Ada");
   await expect(mediterranean).toContainText("Houses: 0");
   await expect(bankInventory).toContainText("Houses remaining 32");
+  await management.getByRole("button", { name: "Open deed catalog" }).click();
+  const catalog = page.getByRole("region", { name: "Deed catalog" });
+  const mediterraneanCatalog = catalog.getByRole("region", { name: "Property detail: Mediterranean Avenue" });
+  await expect(mediterraneanCatalog).toContainText("Houses: 0");
 
   const actionRequest = page.waitForRequest((request) => request.url().includes("/actions") && request.method() === "POST");
   await mediterranean.getByRole("button", { name: "Build house" }).click();
@@ -39,17 +44,24 @@ test("human player sees property management regions and accepted Build house upd
     payload: { property_id: "property_mediterranean_avenue" },
   });
 
-  await expect(mediterranean).toContainText("Houses: 1");
+  await expect(mediterraneanCatalog).toContainText("Houses: 1");
   await expect(bankInventory).toContainText("Houses remaining 31");
+  await page.getByRole("tab", { name: "Contracts" }).click();
   await expect(page.getByRole("region", { name: "Game log" })).toContainText("PROPERTY_IMPROVEMENTS_SET");
 });
 
 test("accepted Mortgage action updates visible property mortgage state", async ({ page }) => {
   await createGame(page, "stage-5-property-management-accept");
 
-  const baltic = page.getByRole("region", { name: "Property detail: Baltic Avenue" });
+  const management = page.getByRole("region", { name: "Property management" });
+  const legalDeeds = page.getByRole("region", { name: "Legal deed actions" });
+  const baltic = legalDeeds.getByRole("region", { name: "Property detail: Baltic Avenue" });
   await expect(baltic).toContainText("Owner Ada");
   await expect(baltic).toContainText("Unmortgaged");
+  await management.getByRole("button", { name: "Open deed catalog" }).click();
+  const catalog = page.getByRole("region", { name: "Deed catalog" });
+  const balticCatalog = catalog.getByRole("region", { name: "Property detail: Baltic Avenue" });
+  await expect(balticCatalog).toContainText("Unmortgaged");
 
   const actionRequest = page.waitForRequest((request) => request.url().includes("/actions") && request.method() === "POST");
   await baltic.getByRole("button", { name: "Mortgage" }).click();
@@ -60,7 +72,8 @@ test("accepted Mortgage action updates visible property mortgage state", async (
     payload: { property_id: "property_baltic_avenue" },
   });
 
-  await expect(baltic).toContainText("Mortgaged");
+  await expect(balticCatalog).toContainText("Mortgaged");
+  await page.getByRole("tab", { name: "Contracts" }).click();
   await expect(page.getByRole("region", { name: "Game log" })).toContainText("PROPERTY_MORTGAGE_SET");
 });
 

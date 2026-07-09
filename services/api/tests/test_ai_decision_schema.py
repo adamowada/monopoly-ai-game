@@ -8,6 +8,7 @@ import pytest
 from app.ai.decision_schema import (
     AI_OUTPUT_SCHEMA,
     AI_MEMORY_CATEGORIES,
+    ActionDecisionOutput,
     AIDecisionValidationError,
     DECISION_TYPES,
     MALFORMED_AI_OUTPUT_REASON_CODE,
@@ -161,6 +162,42 @@ def test_valid_ai_decision_shapes_parse_before_mutation() -> None:
         assert str(parsed.root.player_id) == PLAYER_ID
         assert parsed.root.confidence == raw_output["confidence"]
         assert parsed.root.rationale == raw_output["rationale"]
+
+
+def test_provided_self_dialogue_without_text_normalizes_to_empty_dialogue() -> None:
+    raw_output = {
+        **_base("action_decision"),
+        "expected_state_hash": "state-hash-empty-dialogue",
+        "expected_event_sequence": 12,
+        "action": {
+            "type": "END_TURN",
+            "payload": {},
+        },
+        "self_dialogue": {"status": "provided"},
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert parsed.root.self_dialogue.status == "empty"
+    assert parsed.root.self_dialogue.text is None
+    assert parsed.root.self_dialogue.reason == "No self-dialogue text provided."
+
+
+def test_jail_fine_payload_string_normalizes_to_empty_object() -> None:
+    raw_output = {
+        **_base("action_decision"),
+        "expected_state_hash": "state-hash-jail-fine",
+        "expected_event_sequence": 12,
+        "action": {
+            "type": "PAY_JAIL_FINE",
+            "payload": ":{",
+        },
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert isinstance(parsed.root, ActionDecisionOutput)
+    assert parsed.root.action.payload == {}
 
 
 def test_schema_export_is_serializable_for_codex_exec_output_schema() -> None:
@@ -486,6 +523,39 @@ def test_stage_8_2_memory_canonical_categories_are_accepted(category: str) -> No
     parsed = validate_ai_decision_output(raw_output)
 
     assert parsed.root.memory_updates[0].category == category
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ("", {}),
+        ("not-json", {}),
+        (json.dumps(["not", "an", "object"]), {}),
+        (json.dumps("not an object"), {}),
+        (json.dumps({"source": "ai-note", "turn": 3}), {"source": "ai-note", "turn": 3}),
+    ],
+)
+def test_memory_metadata_strings_are_audit_safe_optional_objects(
+    metadata: str,
+    expected: dict[str, Any],
+) -> None:
+    raw_output = {
+        **_base("memory_update"),
+        "self_dialogue": {"status": "empty", "reason": "No private reasoning."},
+        "memory_updates": [
+            {
+                "visibility": "private",
+                "category": "strategic_belief",
+                "importance": 5,
+                "content": "Optional metadata should not block a legal AI action.",
+                "metadata": metadata,
+            }
+        ],
+    }
+
+    parsed = validate_ai_decision_output(raw_output)
+
+    assert parsed.root.memory_updates[0].metadata == expected
 
 
 def test_stage_8_2_memory_invalid_category_is_rejected_before_persistence() -> None:

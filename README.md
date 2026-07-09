@@ -82,7 +82,7 @@ pnpm --filter @monopoly-ai-game/web run dev
 pnpm --filter @monopoly-ai-game/api run dev
 ```
 
-Run the live Codex AI smoke. This launches real `codex exec --json` with schema validation and xhigh reasoning; the smoke is skipped unless `RUN_LIVE_CODEX_AI=1` is set.
+Run the live Codex AI smoke. This launches real `codex exec --json` with schema validation, `gpt-5.4-mini`, and light reasoning; the smoke is skipped unless `RUN_LIVE_CODEX_AI=1` is set.
 
 ```powershell
 $env:RUN_LIVE_CODEX_AI = "1"
@@ -104,7 +104,7 @@ The frontend does not decide game legality. It renders backend state and backend
 
 ## AI Runtime
 
-AI players use real Codex CLI subprocesses through `codex exec --json`. The backend builds the command with `--ephemeral`, `--output-schema services/api/app/ai/schemas/agent_decision.schema.json`, `-c 'model_reasoning_effort="xhigh"'`, `-a never`, and an isolated AI sandbox directory. Outputs are parsed from Codex JSON events, validated against the decision schema, and then audited.
+AI players use real Codex CLI subprocesses through `codex exec --json`. The backend builds the command with `--ephemeral`, `--model gpt-5.4-mini`, `--output-schema services/api/app/ai/schemas/agent_decision.schema.json`, `-c 'model_reasoning_effort="light"'`, `-a never`, and an isolated AI sandbox directory. Outputs are parsed from Codex JSON events, validated against the decision schema, and then audited.
 
 There are no fallback moves. Malformed output, invalid schema output, invalid actions, process errors, and timeouts are rejected or can place the game in `AI_BLOCKED` when a mandatory AI action cannot proceed.
 

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Literal, TypeAlias
 
+from app.rules.deterministic import bounded_int, deterministic_shuffle
 from app.rules.events import (
     CardDrawnPayload,
     DeckShuffledPayload,
@@ -19,8 +18,8 @@ DeckName: TypeAlias = Literal["chance", "community_chest"]
 
 def generate_dice_roll_event(state: GameState, event_id: str, player_id: str) -> GameEvent:
     roll_counter = state.rng.dice_roll_count + 1
-    die_1 = _bounded_int(state.rng.seed, 1, 6, "dice", roll_counter, "die_1")
-    die_2 = _bounded_int(state.rng.seed, 1, 6, "dice", roll_counter, "die_2")
+    die_1 = bounded_int(state.rng.seed, 1, 6, "dice", roll_counter, "die_1")
+    die_2 = bounded_int(state.rng.seed, 1, 6, "dice", roll_counter, "die_2")
 
     return GameEvent(
         event_id=event_id,
@@ -40,7 +39,7 @@ def generate_dice_roll_event(state: GameState, event_id: str, player_id: str) ->
 def generate_deck_shuffle_event(state: GameState, event_id: str, deck: DeckName) -> GameEvent:
     deck_state = _deck_state_for_name(state, deck)
     shuffle_counter = _shuffle_counter(state, deck) + 1
-    draw_pile = _deterministic_shuffle(
+    draw_pile = deterministic_shuffle(
         seed=state.rng.seed,
         deck=deck,
         shuffle_counter=shuffle_counter,
@@ -75,32 +74,6 @@ def generate_card_draw_event(state: GameState, event_id: str, deck: DeckName) ->
             draw_counter=draw_counter,
         ),
     )
-
-
-def _bounded_int(seed: str, minimum: int, maximum: int, *parts: object) -> int:
-    span = maximum - minimum + 1
-    if span <= 0:
-        raise ValueError("maximum must be greater than or equal to minimum")
-    return minimum + (_digest_int(seed, *parts) % span)
-
-
-def _deterministic_shuffle(
-    seed: str,
-    deck: DeckName,
-    shuffle_counter: int,
-    card_ids: tuple[str, ...],
-) -> tuple[str, ...]:
-    shuffled = list(card_ids)
-    for index in range(len(shuffled) - 1, 0, -1):
-        swap_index = _digest_int(seed, "deck_shuffle", deck, shuffle_counter, index) % (index + 1)
-        shuffled[index], shuffled[swap_index] = shuffled[swap_index], shuffled[index]
-    return tuple(shuffled)
-
-
-def _digest_int(seed: str, *parts: object) -> int:
-    payload = json.dumps([seed, *parts], ensure_ascii=True, separators=(",", ":"))
-    digest = hashlib.sha256(payload.encode("utf-8")).digest()
-    return int.from_bytes(digest, byteorder="big")
 
 
 def _deck_state_for_name(state: GameState, deck: DeckName) -> DeckState:

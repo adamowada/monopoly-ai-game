@@ -35,7 +35,9 @@ from app.ai.orchestrator import (
     CodexExecRunner,
     CodexExecTimeoutError,
     CodexSubprocessRunner,
+    DEFAULT_AI_MODEL,
     DEFAULT_AI_SCHEMA_FILE,
+    LIGHT_REASONING_CONFIG,
     build_codex_exec_command,
     build_prompt,
     parse_codex_jsonl_events,
@@ -389,13 +391,18 @@ def test_builds_verified_codex_exec_command_and_writes_schema(tmp_path: Path) ->
     assert "plugins" in command
     assert "plugin_hooks" in command
     assert "shell_snapshot" in command
+    assert command[command.index("--model") + 1] == DEFAULT_AI_MODEL
+    assert DEFAULT_AI_MODEL == "gpt-5.4-mini"
     config_values = [command[index + 1] for index, value in enumerate(command[:-1]) if value == "-c"]
     assert "mcp_servers.robinhood-trading.enabled=false" in config_values
-    assert 'model_reasoning_effort="xhigh"' in config_values
+    assert LIGHT_REASONING_CONFIG in config_values
+    assert LIGHT_REASONING_CONFIG == 'model_reasoning_effort="low"'
+    assert 'model_reasoning_effort="light"' not in config_values
     assert command[command.index("--output-schema") + 1] == str(schema_path)
     assert command[command.index("-C") + 1] == str(sandbox_dir)
     assert command[command.index("--output-last-message") + 1] == str(last_message_path)
-    assert command[-1] == "-"
+    assert "-" not in command
+    assert command[-1] == str(last_message_path)
     written_schema = json.loads(schema_path.read_text(encoding="utf-8"))
     assert written_schema["type"] == "object"
     assert written_schema["properties"]["decision_type"]["const"] == "action_decision"
@@ -602,7 +609,9 @@ async def test_codex_exec_orchestrator_persists_valid_raw_and_parsed_output(
         assert "--output-schema" in call["command"]
         assert "--json" in call["command"]
         assert "--ephemeral" in call["command"]
-        assert 'model_reasoning_effort="xhigh"' in call["command"]
+        assert call["command"][call["command"].index("--model") + 1] == "gpt-5.4-mini"
+        assert 'model_reasoning_effort="low"' in call["command"]
+        assert 'model_reasoning_effort="light"' not in call["command"]
         assert "stage 7.3 fake subprocess request" in call["stdin"]
     finally:
         await delete_game(session_factory)

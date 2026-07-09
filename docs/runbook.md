@@ -45,7 +45,7 @@ Optional but useful checks:
 
 ```powershell
 codex exec --help
-codex exec --json -c 'model_reasoning_effort="xhigh"' --help
+codex exec --json --model gpt-5.4-mini -c 'model_reasoning_effort="light"' --help
 docker compose version
 ```
 
@@ -146,7 +146,8 @@ AI players are driven by the backend through real Codex CLI subprocesses. The co
 - `codex exec --json`
 - `--ephemeral`
 - `-a never`
-- `-c 'model_reasoning_effort="xhigh"'`
+- `--model gpt-5.4-mini`
+- `-c 'model_reasoning_effort="light"'`
 - `--output-schema services/api/app/ai/schemas/agent_decision.schema.json`
 - `-C services/api/app/ai/sandbox`
 - stdin prompt input
@@ -358,7 +359,7 @@ pnpm run test:smoke:live
 
 Check:
 
-- `codex exec --json -c 'model_reasoning_effort="xhigh"' --help` succeeds locally.
+- `codex exec --json --model gpt-5.4-mini -c 'model_reasoning_effort="light"' --help` succeeds locally.
 - `CODEX_HOST_HOME` points at the authenticated host `.codex` directory for Docker.
 - The API container can find `CODEX_AI_EXECUTABLE=codex`.
 - The decision is reconstructable in `ai_decisions` with validation errors and raw output.

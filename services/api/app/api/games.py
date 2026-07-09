@@ -155,6 +155,37 @@ class PlayerCreateRequest(BaseModel):
     kind: Literal["human", "ai"]
 
 
+class DebugPlayerCashAllocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seat_order: int = Field(ge=0, le=4)
+    cash: int = Field(ge=0, le=100_000)
+
+
+class DebugPropertyOwnerAllocation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    property_id: str = Field(min_length=1)
+    seat_order: int | None = Field(default=None, ge=0, le=4)
+
+
+class DebugAllocations(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_cash: list[DebugPlayerCashAllocation] = Field(default_factory=list)
+    property_owners: list[DebugPropertyOwnerAllocation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_entries(self) -> "DebugAllocations":
+        cash_seats = [entry.seat_order for entry in self.player_cash]
+        if len(set(cash_seats)) != len(cash_seats):
+            raise ValueError("debug player_cash seat_order values must be unique")
+        property_ids = [entry.property_id for entry in self.property_owners]
+        if len(set(property_ids)) != len(property_ids):
+            raise ValueError("debug property_owners property_id values must be unique")
+        return self
+
+
 class CreateGameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -168,6 +199,42 @@ class CreateGameRequest(BaseModel):
         if len(set(names)) != len(names):
             raise ValueError("player names must be unique within a game")
         return self
+
+
+def _debug_initial_state_overrides(
+    settings: Mapping[str, Any],
+    player_ids: Sequence[UUID],
+) -> tuple[dict[str, int], dict[str, str | None]]:
+    raw_debug_allocations = settings.get("debug_allocations")
+    if raw_debug_allocations is None:
+        return {}, {}
+    try:
+        allocations = DebugAllocations.model_validate(raw_debug_allocations)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+
+    cash_by_player_id: dict[str, int] = {}
+    for allocation in allocations.player_cash:
+        if allocation.seat_order >= len(player_ids):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"debug player_cash seat_order {allocation.seat_order} does not reference a player",
+            )
+        cash_by_player_id[str(player_ids[allocation.seat_order])] = allocation.cash
+
+    owner_by_property_id: dict[str, str | None] = {}
+    for allocation in allocations.property_owners:
+        if allocation.seat_order is None:
+            owner_by_property_id[allocation.property_id] = None
+            continue
+        if allocation.seat_order >= len(player_ids):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"debug property_owners seat_order {allocation.seat_order} does not reference a player",
+            )
+        owner_by_property_id[allocation.property_id] = str(player_ids[allocation.seat_order])
+
+    return cash_by_player_id, owner_by_property_id
 
 
 class PlayerRecordResponse(BaseModel):
@@ -710,12 +777,25 @@ async def create_game(request: Request, payload: CreateGameRequest) -> GameMetad
     game_id = uuid4()
     seed = payload.seed or f"game-{game_id}"
     player_ids = [uuid4() for _ in payload.players]
+    settings = dict(payload.settings)
+    initial_cash_by_player_id, initial_property_owner_by_property_id = _debug_initial_state_overrides(
+        settings,
+        player_ids,
+    )
     player_setups = tuple(
         PlayerSetup(id=str(player_id), name=player.name, kind=player.kind)
         for player_id, player in zip(player_ids, payload.players, strict=True)
     )
-    initial_state = create_initial_game_state(seed=seed, players=player_setups, game_id=str(game_id))
-    settings = dict(payload.settings)
+    try:
+        initial_state = create_initial_game_state(
+            seed=seed,
+            players=player_setups,
+            game_id=str(game_id),
+            initial_cash_by_player_id=initial_cash_by_player_id,
+            initial_property_owner_by_property_id=initial_property_owner_by_property_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     async with session_factory() as session:
         async with session.begin():
@@ -749,6 +829,23 @@ async def create_game(request: Request, payload: CreateGameRequest) -> GameMetad
 @router.get("/{game_id}", response_model=GameMetadataResponse)
 async def get_game(game_id: UUID, request: Request) -> GameMetadataResponse:
     return await _load_game_metadata(_session_factory(request), game_id)
+
+
+@router.post("/{game_id}/end", response_model=GameMetadataResponse)
+async def end_game(game_id: UUID, request: Request) -> GameMetadataResponse:
+    session_factory = _session_factory(request)
+    async with session_factory() as session:
+        async with session.begin():
+            result = await session.execute(
+                sa.update(games)
+                .where(games.c.id == game_id)
+                .values(status="ended", current_phase="ENDED", updated_at=sa.func.now())
+                .returning(games.c.id)
+            )
+            if result.scalar_one_or_none() is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found")
+
+    return await _load_game_metadata(session_factory, game_id)
 
 
 @router.get("/{game_id}/state", response_model=GameStateResponse)
@@ -915,7 +1012,7 @@ async def submit_action(
                     event_templates=[
                         AcceptedEventTemplate(
                             event_type=event.type,
-                            payload=event.payload.model_dump(mode="json"),
+                            payload=event.payload.model_dump(mode="json", exclude_unset=True),
                         )
                         for event in execution.events
                     ],
@@ -1929,6 +2026,31 @@ async def execute_negotiation(
                     "round_number": negotiation_row["round_number"],
                 },
             )
+            try:
+                contract_result = await create_contract_from_accepted_deal(
+                    session=session,
+                    session_factory=session_factory,
+                    game_id=game_id,
+                    deal_id=current_deal_id,
+                )
+                await settle_contract(
+                    session=session,
+                    session_factory=session_factory,
+                    game_id=game_id,
+                    contract_id=contract_result.contract["id"],
+                    trigger_context={
+                        "type": "immediate",
+                        "source": "negotiation_execute",
+                        "negotiation_id": str(negotiation_id),
+                        "deal_id": str(current_deal_id),
+                    },
+                )
+            except ContractExecutionError as exc:
+                if exc.reason_code == "deal_not_found":
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="deal not found") from exc
+                return _lifecycle_rejection_response(exc.reason_code, exc.message, field=exc.field)
+            except SettlementEngineError as exc:
+                return _lifecycle_rejection_response(exc.reason_code, exc.message, field=exc.field)
             updated = await _load_negotiation_row_by_id(session, negotiation_id)
             if updated is None:
                 raise HTTPException(
@@ -3352,12 +3474,19 @@ async def _game_status_in_session(session: AsyncSession, game_id: UUID) -> str |
     },
 )
 async def stream_events(game_id: UUID, request: Request) -> StreamingResponse:
+    last_sequence = _last_event_id_sequence(request)
     try:
-        records = await EventPersistence(_session_factory(request)).list_accepted_events(game_id)
+        records = await EventPersistence(_session_factory(request)).list_accepted_events_after(
+            game_id,
+            sequence=last_sequence,
+        )
     except GameNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="game not found") from exc
 
     async def event_stream() -> AsyncIterator[str]:
+        if not records:
+            yield ": no-events\n\n"
+            return
         for record in records:
             data = json.dumps(_event_response(record).model_dump(mode="json"), separators=(",", ":"))
             yield f"id: {record.sequence}\nevent: game_event\ndata: {data}\n\n"
@@ -3367,6 +3496,16 @@ async def stream_events(game_id: UUID, request: Request) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"cache-control": "no-store"},
     )
+
+
+def _last_event_id_sequence(request: Request) -> int:
+    raw_last_event_id = request.headers.get("last-event-id")
+    if raw_last_event_id is None:
+        return 0
+    try:
+        return max(0, int(raw_last_event_id))
+    except ValueError:
+        return 0
 
 
 async def _load_game_metadata(

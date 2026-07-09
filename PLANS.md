@@ -23,7 +23,7 @@ The project is an educational and research playground for strategic, competitive
 - There is no online multiplayer, no controller support, and no deployed/public mode.
 - The game must implement classic Monopoly rules, card effects, property data, rents, houses, hotels, auctions, mortgages, jail, bankruptcy, and game-over behavior.
 - Visual assets must be original local vector art. Do not copy board scans, logos, illustrations, or other IP-protected visual assets from the internet.
-- AI players must be controlled by real `codex exec --json` subprocesses using xhigh reasoning.
+- AI players must be controlled by real `codex exec --json` subprocesses using `gpt-5.4-mini` with light reasoning.
 - No fallback actions are allowed, ever.
 - Legal actions are accepted and committed.
 - Illegal actions are rejected with structured validation errors.
@@ -63,13 +63,14 @@ The rules engine is event-sourced. Every accepted action becomes an immutable ev
 AI players are persistent identities backed by memory and audit history. Each decision is made by a real subprocess using:
 
 ```powershell
-codex exec --json --ephemeral -a never `
-  -c 'model_reasoning_effort="xhigh"' `
+codex -a never exec --json --ephemeral `
+  --model gpt-5.4-mini `
+  -c 'model_reasoning_effort="light"' `
   --output-schema services/api/app/ai/schemas/agent_decision.schema.json `
   -C services/api/app/ai/sandbox -
 ```
 
-The implementation must create the referenced schema and sandbox paths. The AI runtime must use `codex exec --json`, xhigh reasoning, structured output, backend validation, and no fallback moves.
+The implementation must create the referenced schema and sandbox paths. The AI runtime must use `codex exec --json`, `gpt-5.4-mini` with light reasoning, structured output, backend validation, and no fallback moves.
 
 ## Fixed Technical Decisions
 
@@ -220,7 +221,7 @@ Deliverables:
 - Configure uv as the Python package manager and task runner.
 - Install project Python `3.14.6` through uv.
 - Verify `codex exec --json` support.
-- Verify the local Codex config supports xhigh reasoning through `-c model_reasoning_effort="xhigh"`.
+- Verify the local Codex config supports `gpt-5.4-mini` with light reasoning through `--model gpt-5.4-mini -c model_reasoning_effort="light"`.
 - Document required commands in README.
 
 Done when:
@@ -1455,7 +1456,7 @@ Review AI runtime, memory, and no-fallback behavior.
 Deliverables:
 
 - Verify Codex subprocess command.
-- Verify xhigh reasoning config.
+- Verify `gpt-5.4-mini` light reasoning config.
 - Verify schema validation.
 - Verify invalid output rejection.
 - Verify no fallback action path exists.

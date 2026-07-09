@@ -24,9 +24,20 @@ test("renders a 40-space board and updates token position after mocked state mov
   const board = page.getByRole("region", { name: "Classic Monopoly-style board" });
   await expect(board).toBeVisible();
   await expect(page.locator("[data-board-space]")).toHaveCount(40);
+  await expect(board).toContainText("Monopoly 2.0");
+  await expect(board.getByRole("img", { name: "Chance deck art" })).toBeVisible();
+  await expect(board.getByRole("img", { name: "Community Chest deck art" })).toBeVisible();
+  await expect(board.locator("[data-space-art]")).toHaveCount(18);
   await expect(page.locator('[data-board-space][data-space-index="0"]')).toContainText("GO");
   await expect(page.locator('[data-board-space][data-space-index="39"]')).toContainText("Boardwalk");
   await expect(page.getByLabel("Ada token at GO, position 0")).toBeVisible();
+  await expect(page.getByLabel("Ada token at GO, position 0")).toHaveAttribute("data-token-shape", "shield");
+  await expect(page.getByLabel("Ada token at GO, position 0")).toHaveAttribute("data-token-icon", "🚗");
+  await expect(page.getByLabel("Ada token at GO, position 0").locator("[data-token-puck]")).toBeVisible();
+  await expect(page.getByLabel("Ada token at GO, position 0").locator("[data-token-silhouette]")).toHaveCount(0);
+  await expect(page.getByLabel("Grace token at GO, position 0")).toHaveAttribute("data-token-shape", "diamond");
+  await expect(page.getByLabel("Grace token at GO, position 0")).toHaveAttribute("data-token-icon", "🎩");
+  await expect(page.getByLabel("Grace token at GO, position 0").locator("[data-token-puck]")).toBeVisible();
 
   const response = await page.request.post(
     `${mockApiBaseUrl}/__test/games/${encodeURIComponent(currentGameId(page.url()))}/players/0/position`,

@@ -370,17 +370,27 @@ def _collect_invariant_violations(state: GameState) -> tuple[InvariantViolation,
                 f"property_ownership.{ownership.property_id}",
             )
 
+    chance_card_ids = {card.id for card in data.decks.chance}
+    community_chest_card_ids = {card.id for card in data.decks.community_chest}
     _collect_deck_invariant_violations(
         violations,
         "chance",
-        (*state.decks.chance.draw_pile, *state.decks.chance.discard_pile),
-        {card.id for card in data.decks.chance},
+        (
+            *state.decks.chance.draw_pile,
+            *state.decks.chance.discard_pile,
+            *_held_card_ids_for_deck(state, chance_card_ids),
+        ),
+        chance_card_ids,
     )
     _collect_deck_invariant_violations(
         violations,
         "community_chest",
-        (*state.decks.community_chest.draw_pile, *state.decks.community_chest.discard_pile),
-        {card.id for card in data.decks.community_chest},
+        (
+            *state.decks.community_chest.draw_pile,
+            *state.decks.community_chest.discard_pile,
+            *_held_card_ids_for_deck(state, community_chest_card_ids),
+        ),
+        community_chest_card_ids,
     )
 
     auction = state.active_auction
@@ -489,6 +499,15 @@ def _collect_deck_invariant_violations(
                 path=f"decks.{deck_name}",
             )
         )
+
+
+def _held_card_ids_for_deck(state: GameState, expected_card_ids: set[str]) -> tuple[str, ...]:
+    return tuple(
+        card_id
+        for player in state.players
+        for card_id in player.get_out_of_jail_card_ids
+        if card_id in expected_card_ids
+    )
 
 
 def _build_failure(

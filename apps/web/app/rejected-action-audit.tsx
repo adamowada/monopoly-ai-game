@@ -40,7 +40,7 @@ function ReasonBadge({ reasonCode }: Readonly<{ reasonCode: string }>) {
 
 function validationSummary(record: RejectedActionRecord): string {
   if (record.validation_errors.length === 0) {
-    return "No validation details supplied.";
+    return "";
   }
   return record.validation_errors
     .map((error) => {
@@ -56,11 +56,8 @@ export function RejectedActionAuditView({ records }: RejectedActionAuditViewProp
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 id="rejected-actions-title" className="text-base font-semibold text-neutral-950">
-            Rejected action audit
+            Rule rulings
           </h2>
-          <p className="mt-2 text-sm text-neutral-600">
-            Invalid submissions stay separate from accepted game events and snapshots.
-          </p>
         </div>
         <div className="flex items-center gap-2 text-sm text-neutral-600">
           <ShieldAlert aria-hidden="true" className="size-4 text-rose-600" />
@@ -68,11 +65,7 @@ export function RejectedActionAuditView({ records }: RejectedActionAuditViewProp
         </div>
       </div>
 
-      {records.length === 0 ? (
-        <div className="mt-5 border-y border-neutral-200 bg-white px-4 py-6 text-sm text-neutral-600 sm:px-6">
-          No rejected actions recorded.
-        </div>
-      ) : (
+      {records.length > 0 ? (
         <div className="mt-5 overflow-hidden border-y border-neutral-200 bg-white">
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
@@ -128,7 +121,7 @@ export function RejectedActionAuditView({ records }: RejectedActionAuditViewProp
             </table>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

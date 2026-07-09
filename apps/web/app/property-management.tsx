@@ -6,12 +6,11 @@ import {
   CircleDollarSign,
   Hammer,
   Home,
-  Hotel,
   Loader2,
   LockKeyhole,
   Undo2,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   PROPERTIES,
   PROPERTIES_BY_ID,
@@ -24,6 +23,7 @@ import { Button } from "../components/ui/button";
 import type { GameStateResponse, LegalAction } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
 import { cn } from "../lib/ui";
+import { PropertyDeedCard } from "./property-deed-card";
 
 const MANAGEMENT_ACTION_TYPES = [
   "BUY_HOUSE",
@@ -52,6 +52,12 @@ type OwnerGroup = {
   key: string;
   label: string;
   properties: StaticDataProperty[];
+};
+
+type PropertyActionCard = {
+  property: StaticDataProperty;
+  ownership: PropertyOwnershipView;
+  actions: Record<ManagementActionType, LegalAction | null>;
 };
 
 export type PropertyManagementPanelProps = {
@@ -173,23 +179,32 @@ function isManagementAction(action: LegalAction): boolean {
   return MANAGEMENT_ACTION_TYPES.includes(action.type as ManagementActionType);
 }
 
-function propertyFacts(property: StaticDataProperty): string[] {
-  if (property.kind === "street") {
-    return [
-      `Rent ${formatMoney(property.rents[0])} base`,
-      `1 house ${formatMoney(property.rents[1])}`,
-      `Hotel rent ${formatMoney(property.rents[5])}`,
-      `House cost ${formatMoney(property.house_cost)}`,
-    ];
-  }
-  if (property.kind === "railroad") {
-    return [
-      `Rent ${formatMoney(property.rent_by_owned_count[0])}-${formatMoney(
-        property.rent_by_owned_count[property.rent_by_owned_count.length - 1],
-      )} by railroads owned`,
-    ];
-  }
-  return [`Rent multiplier ${property.rent_multipliers[0]}x/${property.rent_multipliers[1]}x dice`];
+function actionsForProperty(legalActions: LegalAction[], propertyId: string): Record<ManagementActionType, LegalAction | null> {
+  return {
+    BUY_HOUSE: legalActionFor(legalActions, "BUY_HOUSE", propertyId),
+    SELL_HOUSE: legalActionFor(legalActions, "SELL_HOUSE", propertyId),
+    MORTGAGE_PROPERTY: legalActionFor(legalActions, "MORTGAGE_PROPERTY", propertyId),
+    UNMORTGAGE_PROPERTY: legalActionFor(legalActions, "UNMORTGAGE_PROPERTY", propertyId),
+  };
+}
+
+function hasAnyManagementAction(actions: Record<ManagementActionType, LegalAction | null>): boolean {
+  return Boolean(actions.BUY_HOUSE ?? actions.SELL_HOUSE ?? actions.MORTGAGE_PROPERTY ?? actions.UNMORTGAGE_PROPERTY);
+}
+
+function buildPropertyActionCards(
+  legalActions: LegalAction[],
+  ownerships: Map<string, PropertyOwnershipView>,
+  onlyActionable: boolean,
+): PropertyActionCard[] {
+  return PROPERTIES.map((propertyRef) => {
+    const property = PROPERTIES_BY_ID[propertyRef.id];
+    return {
+      property,
+      ownership: ownerships.get(property.id) ?? defaultOwnership(property.id),
+      actions: actionsForProperty(legalActions, property.id),
+    };
+  }).filter((card) => !onlyActionable || hasAnyManagementAction(card.actions));
 }
 
 function buildOwnerGroups(game: GameMetadata, ownerships: Map<string, PropertyOwnershipView>): OwnerGroup[] {
@@ -248,28 +263,6 @@ function monopolyGroupStatus(
   };
 }
 
-function hotelConversionText(
-  property: StaticDataProperty,
-  ownership: PropertyOwnershipView,
-  buyAction: LegalAction | null,
-  sellAction: LegalAction | null,
-): string {
-  if (property.kind !== "street") {
-    return "Hotel conversion: Not available for railroads or utilities.";
-  }
-  if (ownership.hotel || ownership.hotels > 0) {
-    return sellAction
-      ? "Hotel conversion: hotel-to-houses ready. Sell house converts one hotel to four houses."
-      : "Hotel conversion: hotel-to-houses unavailable because SELL_HOUSE was not returned.";
-  }
-  if (ownership.houses === 4) {
-    return buyAction
-      ? "Hotel conversion: four-house-to-hotel ready. Build house converts four houses to one hotel."
-      : "Hotel conversion: four-house-to-hotel unavailable because BUY_HOUSE was not returned.";
-  }
-  return "Hotel conversion: Not at conversion threshold.";
-}
-
 function ManagementActionButton({
   action,
   label,
@@ -289,11 +282,8 @@ function ManagementActionButton({
     <Button
       onClick={() => onSubmit(action)}
       disabled={disabled}
-      className={cn(
-        "min-h-9 justify-start px-2.5 py-1.5 text-xs",
-        label === "Mortgage" && "bg-neutral-800 hover:bg-neutral-900",
-        label === "Sell house" && "bg-amber-700 hover:bg-amber-800",
-      )}
+      className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+      variant={label === "Mortgage" ? "dark" : label === "Sell house" ? "warning" : "primary"}
     >
       {isPending ? (
         <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
@@ -325,9 +315,7 @@ function OwnerPropertyList({
               <h4 className="text-xs font-semibold uppercase text-neutral-500">{group.label}</h4>
               <span className="text-xs font-medium text-neutral-500">{group.properties.length}</span>
             </div>
-            {group.properties.length === 0 ? (
-              <p className="mt-2 text-sm text-neutral-500">No properties.</p>
-            ) : (
+            {group.properties.length > 0 ? (
               <ul className="mt-2 space-y-2 text-sm">
                 {group.properties.map((property) => {
                   const ownership = ownerships.get(property.id) ?? defaultOwnership(property.id);
@@ -343,7 +331,7 @@ function OwnerPropertyList({
                   );
                 })}
               </ul>
-            )}
+            ) : null}
           </div>
         ))}
       </div>
@@ -360,12 +348,12 @@ function BankInventoryPanel({ inventory }: Readonly<{ inventory: BankInventoryVi
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
         <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2">
-          <p className="text-xs font-medium uppercase text-neutral-500">Houses remaining</p>
-          <p className="mt-1 font-semibold text-neutral-950">Houses remaining {inventory.houses ?? "Unknown"}</p>
+          <div className="text-xs font-medium uppercase text-neutral-500">Houses</div>
+          <div className="mt-1 font-semibold text-neutral-950">{inventory.houses ?? "Unknown"}</div>
         </div>
         <div className="rounded border border-neutral-200 bg-neutral-50 px-3 py-2">
-          <p className="text-xs font-medium uppercase text-neutral-500">Hotels remaining</p>
-          <p className="mt-1 font-semibold text-neutral-950">Hotels remaining {inventory.hotels ?? "Unknown"}</p>
+          <div className="text-xs font-medium uppercase text-neutral-500">Hotels</div>
+          <div className="mt-1 font-semibold text-neutral-950">{inventory.hotels ?? "Unknown"}</div>
         </div>
       </div>
     </section>
@@ -428,12 +416,11 @@ function PropertyDetailCard({
   pendingActionType: string | null;
   onSubmit: (action: LegalAction) => void;
 }>) {
-  const facts = propertyFacts(property);
   const buyAction = actions.BUY_HOUSE;
   const sellAction = actions.SELL_HOUSE;
   const mortgageAction = actions.MORTGAGE_PROPERTY;
   const unmortgageAction = actions.UNMORTGAGE_PROPERTY;
-  const hasAnyAction = Boolean(buyAction ?? sellAction ?? mortgageAction ?? unmortgageAction);
+  const hasAnyAction = hasAnyManagementAction(actions);
 
   return (
     <article
@@ -441,31 +428,8 @@ function PropertyDetailCard({
       className="rounded-md border border-neutral-200 bg-white p-3"
       role="region"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase text-neutral-500">Property detail</p>
-          <h4 className="mt-1 text-sm font-semibold text-neutral-950">{property.name}</h4>
-          <p className="mt-1 text-xs font-medium text-neutral-600">{propertyGroupName(property)}</p>
-        </div>
-        <span
-          aria-hidden="true"
-          className="mt-1 size-4 shrink-0 rounded-sm border border-neutral-300"
-          style={{ backgroundColor: groupById.get(property.group)?.color ?? "#d4d4d4" }}
-        />
-      </div>
-
-      <div className="mt-3 grid gap-1.5 text-xs text-neutral-700">
-        <p>Price {formatMoney(property.price)}</p>
-        <p>Mortgage value {formatMoney(property.mortgage_value)}</p>
-        <p>Owner {ownerName(game, ownership.owner_id)}</p>
-        <p>{ownership.mortgaged ? "Mortgaged" : "Unmortgaged"}</p>
-        <p>Houses: {ownership.houses}</p>
-        <p>Hotels: {ownership.hotels}</p>
-        {facts.map((fact) => (
-          <p key={fact}>{fact}</p>
-        ))}
-        <p>{hotelConversionText(property, ownership, buyAction, sellAction)}</p>
-      </div>
+      <span className="sr-only">Property detail</span>
+      <PropertyDeedCard game={game} ownership={ownership} property={property} />
 
       {hasAnyAction ? (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -519,55 +483,85 @@ export function PropertyManagementPanel({
   pendingActionType,
   onSubmit,
 }: PropertyManagementPanelProps) {
+  const [showDeedCatalog, setShowDeedCatalog] = useState(false);
   const ownerships = useMemo(() => ownershipByProperty(snapshot), [snapshot]);
   const inventory = useMemo(() => bankInventory(snapshot), [snapshot]);
   const ownerGroups = useMemo(() => buildOwnerGroups(game, ownerships), [game, ownerships]);
   const managementLegalActions = useMemo(() => legalActions.filter(isManagementAction), [legalActions]);
+  const legalActionCards = useMemo(
+    () => buildPropertyActionCards(managementLegalActions, ownerships, true),
+    [managementLegalActions, ownerships],
+  );
+  const deedCatalogCards = useMemo(
+    () => buildPropertyActionCards(managementLegalActions, ownerships, false),
+    [managementLegalActions, ownerships],
+  );
 
   return (
     <section aria-label="Property management" className="rounded-md border border-neutral-200 bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-neutral-950">Property management</h2>
-          <p className="mt-1 text-xs text-neutral-600">
-            Mortgage, building, and sale controls appear only when /legal-actions returns them for a property.
-          </p>
         </div>
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
-          {managementLegalActions.length} management actions
+          {managementLegalActions.length} available moves
         </span>
       </div>
 
       <div className="mt-4 grid gap-4">
+        <section aria-label="Legal deed actions" className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-neutral-950">Legal deed actions</h3>
+            </div>
+            <Button
+              aria-expanded={showDeedCatalog}
+              className="w-fit"
+              onClick={() => setShowDeedCatalog((current) => !current)}
+              type="button"
+              variant="secondary"
+            >
+              {showDeedCatalog ? "Close deed catalog" : "Open deed catalog"}
+            </Button>
+          </div>
+          {legalActionCards.length > 0 ? (
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {legalActionCards.map((card) => (
+                <PropertyDetailCard
+                  key={card.property.id}
+                  actions={card.actions}
+                  controlsDisabled={controlsDisabled}
+                  game={game}
+                  onSubmit={onSubmit}
+                  ownership={card.ownership}
+                  pendingActionType={pendingActionType}
+                  property={card.property}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
         <OwnerPropertyList groups={ownerGroups} ownerships={ownerships} />
         <div className="grid gap-4 lg:grid-cols-2">
           <BankInventoryPanel inventory={inventory} />
           <MonopolyGroupsPanel game={game} ownerships={ownerships} />
         </div>
-        <section aria-label="Property detail cards" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {PROPERTIES.map((propertyRef) => {
-            const property = PROPERTIES_BY_ID[propertyRef.id];
-            const ownership = ownerships.get(property.id) ?? defaultOwnership(property.id);
-            const actions: Record<ManagementActionType, LegalAction | null> = {
-              BUY_HOUSE: legalActionFor(managementLegalActions, "BUY_HOUSE", property.id),
-              SELL_HOUSE: legalActionFor(managementLegalActions, "SELL_HOUSE", property.id),
-              MORTGAGE_PROPERTY: legalActionFor(managementLegalActions, "MORTGAGE_PROPERTY", property.id),
-              UNMORTGAGE_PROPERTY: legalActionFor(managementLegalActions, "UNMORTGAGE_PROPERTY", property.id),
-            };
-            return (
+        {showDeedCatalog ? (
+          <section aria-label="Deed catalog" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {deedCatalogCards.map((card) => (
               <PropertyDetailCard
-                key={property.id}
-                actions={actions}
+                key={card.property.id}
+                actions={card.actions}
                 controlsDisabled={controlsDisabled}
                 game={game}
                 onSubmit={onSubmit}
-                ownership={ownership}
+                ownership={card.ownership}
                 pendingActionType={pendingActionType}
-                property={property}
+                property={card.property}
               />
-            );
-          })}
-        </section>
+            ))}
+          </section>
+        ) : null}
       </div>
     </section>
   );

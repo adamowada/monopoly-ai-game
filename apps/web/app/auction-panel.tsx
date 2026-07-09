@@ -1,13 +1,12 @@
 "use client";
 
 import { Bot, Gavel, HandCoins, Loader2, LogOut, Trophy } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { PROPERTIES, PROPERTIES_BY_ID, type StaticDataProperty } from "@monopoly-ai-game/schemas";
 
 import { Button } from "../components/ui/button";
 import type { AcceptedEvent, GameStateResponse, LegalAction } from "../lib/api/gameplay";
 import type { GameMetadata } from "../lib/api/games";
-import { cn } from "../lib/ui";
 
 export const AUCTION_ACTION_TYPES = new Set(["START_AUCTION", "BID_AUCTION", "PASS_AUCTION"]);
 
@@ -128,10 +127,20 @@ function bidMinimumFromSchema(action: LegalAction): number | null {
   return amount ? readNumber(amount.minimum) : null;
 }
 
-function concreteBidAction(action: LegalAction, auction: AuctionStateView): LegalAction {
+function minimumBidAmount(action: LegalAction, auction: AuctionStateView): number {
+  const schemaMinimum = bidMinimumFromSchema(action);
+  if (schemaMinimum !== null) {
+    return schemaMinimum;
+  }
+  return auction.high_bid_amount === null ? 1 : auction.high_bid_amount + 1;
+}
+
+function defaultBidAmount(action: LegalAction, auction: AuctionStateView): number {
   const payloadAmount = isRecord(action.payload) ? readNumber(action.payload.amount) : null;
-  const fallbackAmount = auction.high_bid_amount === null ? 1 : auction.high_bid_amount + 1;
-  const amount = payloadAmount ?? bidMinimumFromSchema(action) ?? fallbackAmount;
+  return payloadAmount ?? minimumBidAmount(action, auction);
+}
+
+function concreteBidAction(action: LegalAction, auction: AuctionStateView, amount = defaultBidAmount(action, auction)): LegalAction {
   return {
     ...action,
     payload: {
@@ -143,17 +152,11 @@ function concreteBidAction(action: LegalAction, auction: AuctionStateView): Lega
 }
 
 function latestAuctionResultEvent(events: AcceptedEvent[]): AcceptedEvent | null {
-  const resultEvents = events.filter(
-    (event) => event.event_type === "AUCTION_RESULT" || event.event_type === "PROPERTY_OWNER_SET",
-  );
+  const resultEvents = events.filter((event) => event.event_type === "AUCTION_RESULT");
   return [...resultEvents].sort((left, right) => right.sequence - left.sequence)[0] ?? null;
 }
 
-function auctionResultText(game: GameMetadata, event: AcceptedEvent | null): string {
-  if (!event) {
-    return "No auction result yet.";
-  }
-
+function auctionResultText(game: GameMetadata, event: AcceptedEvent): string {
   if (event.event_type === "AUCTION_RESULT") {
     const propertyId = readString(event.payload.property_id);
     const winnerId = readString(event.payload.winner_id);
@@ -163,9 +166,7 @@ function auctionResultText(game: GameMetadata, event: AcceptedEvent | null): str
     return `Winner ${winner}. ${winner} won ${propertyName(propertyId)} for ${bidText}.`;
   }
 
-  const propertyId = readString(event.payload.property_id);
-  const ownerId = readString(event.payload.owner_id);
-  return `Winner ${playerName(game, ownerId)}. ${playerName(game, ownerId)} owns ${propertyName(propertyId)}.`;
+  return "";
 }
 
 function playerAuctionStatus(playerId: string, auction: AuctionStateView): string {
@@ -198,11 +199,8 @@ function AuctionActionButton({
     <Button
       onClick={() => onSubmit(action)}
       disabled={disabled}
-      className={cn(
-        "min-h-9 justify-start px-2.5 py-1.5 text-xs",
-        label === "Pass" && "bg-neutral-800 hover:bg-neutral-900",
-        label === "Bid" && "bg-amber-700 hover:bg-amber-800 focus-visible:outline-amber-700",
-      )}
+      className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+      variant={label === "Pass" ? "dark" : label === "Bid" ? "warning" : "primary"}
     >
       {isSubmitting ? (
         <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
@@ -227,7 +225,8 @@ function AuctionAiStepButton({
     <Button
       onClick={onStep}
       disabled={disabled}
-      className="min-h-9 justify-start bg-purple-700 px-2.5 py-1.5 text-xs hover:bg-purple-800 focus-visible:outline-purple-700"
+      className="min-h-9 justify-start px-2.5 py-1.5 text-xs"
+      variant="ai"
     >
       {isPending ? (
         <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
@@ -236,6 +235,57 @@ function AuctionAiStepButton({
       )}
       Step AI
     </Button>
+  );
+}
+
+function AuctionBidControl({
+  action,
+  auction,
+  controlsDisabled,
+  disabled,
+  pendingActionType,
+  playerName,
+  onSubmit,
+}: Readonly<{
+  action: LegalAction;
+  auction: AuctionStateView;
+  controlsDisabled: boolean;
+  disabled: boolean;
+  pendingActionType: string | null;
+  playerName: string;
+  onSubmit: (action: LegalAction) => void;
+}>) {
+  const minimumBid = minimumBidAmount(action, auction);
+  const initialBid = defaultBidAmount(action, auction);
+  const [bidAmount, setBidAmount] = useState(String(initialBid));
+  const parsedBid = Number.parseInt(bidAmount, 10);
+  const submittedBid = Number.isFinite(parsedBid) ? Math.max(parsedBid, minimumBid) : minimumBid;
+  const concreteBid = concreteBidAction(action, auction, submittedBid);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="grid gap-1 text-xs font-medium text-neutral-700">
+        <span>{playerName} bid amount</span>
+        <input
+          aria-label={`${playerName} bid amount`}
+          className="h-9 w-24 rounded-md border border-neutral-300 bg-white px-2 text-sm font-semibold text-neutral-950 outline-none focus:border-amber-700 focus:ring-2 focus:ring-amber-700/20 disabled:bg-neutral-100 disabled:text-neutral-500"
+          disabled={controlsDisabled || disabled}
+          min={minimumBid}
+          onChange={(event) => setBidAmount(event.target.value)}
+          step={1}
+          type="number"
+          value={bidAmount}
+        />
+      </label>
+      <AuctionActionButton
+        action={concreteBid}
+        disabled={controlsDisabled || disabled}
+        icon={HandCoins}
+        label="Bid"
+        onSubmit={onSubmit}
+        pendingActionType={pendingActionType}
+      />
+    </div>
   );
 }
 
@@ -269,9 +319,6 @@ export function AuctionPanel({
             <Gavel aria-hidden="true" className="size-4 text-teal-700" />
             <h2 className="text-sm font-semibold text-neutral-950">Auction</h2>
           </div>
-          <p className="mt-1 text-xs text-neutral-600">
-            Bid and pass controls appear only from /legal-actions for eligible bidders.
-          </p>
         </div>
         <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600">
           {legalActions.filter(isAuctionAction).length} auction actions
@@ -339,8 +386,7 @@ export function AuctionPanel({
               {game.players.map((player) => {
                 const bidAction = legalActionFor(legalActions, "BID_AUCTION", auction.property_id, player.id);
                 const passAction = legalActionFor(legalActions, "PASS_AUCTION", auction.property_id, player.id);
-                const concreteBid = bidAction ? concreteBidAction(bidAction, auction) : null;
-                const hasControls = Boolean(concreteBid ?? passAction);
+                const hasControls = Boolean(bidAction ?? passAction);
                 const canStepAiBidder =
                   player.controller_type === "ai" &&
                   player.id !== activeAiPlayerId &&
@@ -354,19 +400,20 @@ export function AuctionPanel({
                     className="flex flex-col gap-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
-                      <p className="font-medium text-neutral-950">{player.name}</p>
-                      <p className="mt-0.5 text-xs text-neutral-600">{playerAuctionStatus(player.id, auction)}</p>
+                      <div className="font-medium text-neutral-950">{player.name}</div>
+                      <div className="mt-0.5 text-xs text-neutral-600">{playerAuctionStatus(player.id, auction)}</div>
                     </div>
                     {hasControls ? (
                       <div className="flex flex-wrap gap-2">
-                        {concreteBid ? (
-                          <AuctionActionButton
-                            action={concreteBid}
-                            disabled={controlsDisabled || isActionDisabled(concreteBid)}
-                            icon={HandCoins}
-                            label="Bid"
+                        {bidAction ? (
+                          <AuctionBidControl
+                            action={bidAction}
+                            auction={auction}
+                            controlsDisabled={controlsDisabled}
+                            disabled={isActionDisabled(bidAction)}
                             onSubmit={onSubmit}
                             pendingActionType={pendingActionType}
+                            playerName={player.name}
                           />
                         ) : null}
                         {passAction ? (
@@ -387,9 +434,7 @@ export function AuctionPanel({
                           />
                         ) : null}
                       </div>
-                    ) : (
-                      <span className="text-xs font-medium text-neutral-500">No legal auction action</span>
-                    )}
+                    ) : null}
                   </li>
                 );
               })}
@@ -397,13 +442,15 @@ export function AuctionPanel({
           </section>
         ) : null}
 
-        <section aria-label="Auction result" className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
-          <div className="flex items-center gap-2">
-            <Trophy aria-hidden="true" className="size-4 text-teal-700" />
-            <h3 className="text-sm font-semibold text-neutral-950">Auction result</h3>
-          </div>
-          <p className="mt-2 text-sm text-neutral-700">{auctionResultText(game, resultEvent)}</p>
-        </section>
+        {resultEvent ? (
+          <section aria-label="Auction result" className="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+            <div className="flex items-center gap-2">
+              <Trophy aria-hidden="true" className="size-4 text-teal-700" />
+              <h3 className="text-sm font-semibold text-neutral-950">Auction result</h3>
+            </div>
+            <div className="mt-2 text-sm text-neutral-700">{auctionResultText(game, resultEvent)}</div>
+          </section>
+        ) : null}
       </div>
     </section>
   );

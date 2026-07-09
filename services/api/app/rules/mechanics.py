@@ -283,7 +283,15 @@ def pay_tax_for_space(
     space = _space_by_id(space_id)
     if space.type != "tax" or space.amount is None:
         raise IllegalRuleActionError(f"{space_id} is not a tax space")
-    return _adjust_cash(_EventStream(event_id_prefix), state, player_id, -space.amount)
+    return _pay_or_create_debt(
+        _EventStream(event_id_prefix),
+        state,
+        debtor_id=player_id,
+        creditor_id=None,
+        amount=space.amount,
+        reason=f"tax:{space.id}",
+        negotiation_allowed=False,
+    )
 
 
 def apply_card_effect(
@@ -361,7 +369,15 @@ def apply_card_effect(
         return _adjust_cash(stream, state, player_id, _effect_int(effect, "amount"))
 
     if effect_type == "pay_bank":
-        return _adjust_cash(stream, state, player_id, -_effect_int(effect, "amount"))
+        return _pay_or_create_debt(
+            stream,
+            state,
+            debtor_id=player_id,
+            creditor_id=None,
+            amount=_effect_int(effect, "amount"),
+            reason=f"card_bank:{card.id}",
+            negotiation_allowed=False,
+        )
 
     if effect_type == "get_out_of_jail":
         player = _player_by_id(state, player_id)
@@ -384,20 +400,46 @@ def apply_card_effect(
             house_count * _effect_int(effect, "per_house")
             + hotel_count * _effect_int(effect, "per_hotel")
         )
-        return _adjust_cash(stream, state, player_id, -amount)
+        return _pay_or_create_debt(
+            stream,
+            state,
+            debtor_id=player_id,
+            creditor_id=None,
+            amount=amount,
+            reason=f"card_bank:{card.id}",
+            negotiation_allowed=False,
+        )
 
     if effect_type == "pay_each_other_player":
         amount = _effect_int(effect, "amount")
         for other_player in _other_active_players(state, player_id):
-            state = _adjust_cash(stream, state, player_id, -amount)
-            state = _adjust_cash(stream, state, other_player.id, amount)
+            state = _pay_or_create_debt(
+                stream,
+                state,
+                debtor_id=player_id,
+                creditor_id=other_player.id,
+                amount=amount,
+                reason=f"card_player:{card.id}",
+                negotiation_allowed=True,
+            )
+            if state.active_payment is not None:
+                return state
         return state
 
     if effect_type == "collect_from_each_player":
         amount = _effect_int(effect, "amount")
         for other_player in _other_active_players(state, player_id):
-            state = _adjust_cash(stream, state, other_player.id, -amount)
-            state = _adjust_cash(stream, state, player_id, amount)
+            state = _pay_or_create_debt(
+                stream,
+                state,
+                debtor_id=other_player.id,
+                creditor_id=player_id,
+                amount=amount,
+                reason=f"card_player:{card.id}",
+                negotiation_allowed=True,
+            )
+            if state.active_payment is not None:
+                return state
         return state
 
     raise IllegalRuleActionError(f"unsupported card effect {effect_type}")
@@ -848,6 +890,32 @@ def _pay_card_rent_or_create_debt(
     amount: int,
     reason: str,
 ) -> GameState:
+    return _pay_or_create_debt(
+        stream,
+        state,
+        debtor_id=debtor_id,
+        creditor_id=creditor_id,
+        amount=amount,
+        reason=reason,
+        negotiation_allowed=True,
+    )
+
+
+def _pay_or_create_debt(
+    stream: _EventStream,
+    state: GameState,
+    *,
+    debtor_id: str,
+    creditor_id: str | None,
+    amount: int,
+    reason: str,
+    negotiation_allowed: bool,
+) -> GameState:
+    if amount <= 0:
+        return state
+    if state.active_payment is not None:
+        raise IllegalRuleActionError("cannot create a new payment while another payment is unresolved")
+
     debtor = _player_by_id(state, debtor_id)
     if debtor.cash < amount:
         return stream.apply(
@@ -860,11 +928,13 @@ def _pay_card_rent_or_create_debt(
                 amount_owed=amount,
                 amount_paid=0,
                 reason=reason,
-                negotiation_allowed=True,
+                negotiation_allowed=negotiation_allowed,
             ),
         )
 
     state = _adjust_cash(stream, state, debtor_id, -amount)
+    if creditor_id is None:
+        return state
     return _adjust_cash(stream, state, creditor_id, amount)
 
 
@@ -982,13 +1052,13 @@ def _move_player_to_position(
 def _remove_card_from_deck_discard(stream: _EventStream, state: GameState, card_id: str) -> GameState:
     card = _card_data(card_id)
     deck_state = _deck_state_for_card(state, card)
-    if card_id not in deck_state.discard_pile:
+    if card_id not in deck_state.draw_pile and card_id not in deck_state.discard_pile:
         return state
     return _set_deck_state(
         stream,
         state,
         deck=card.deck,
-        draw_pile=deck_state.draw_pile,
+        draw_pile=tuple(current_card_id for current_card_id in deck_state.draw_pile if current_card_id != card_id),
         discard_pile=tuple(current_card_id for current_card_id in deck_state.discard_pile if current_card_id != card_id),
     )
 
@@ -1002,8 +1072,8 @@ def _return_card_to_deck_discard(stream: _EventStream, state: GameState, card_id
         stream,
         state,
         deck=card.deck,
-        draw_pile=deck_state.draw_pile,
-        discard_pile=(*deck_state.discard_pile, card_id),
+        draw_pile=(*deck_state.draw_pile, card_id),
+        discard_pile=deck_state.discard_pile,
     )
 
 

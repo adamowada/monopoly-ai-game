@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightLeft, Bot, CalendarClock, FileText, History, Info, ListFilter, Loader2, ShieldAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "../components/ui/button";
 import {
@@ -20,6 +20,7 @@ import type { GameMetadata } from "../lib/api/games";
 import { readDeals, type Deal } from "../lib/api/negotiations";
 import type { RejectedActionRecord } from "../lib/api/rejected-actions";
 import { cn } from "../lib/ui";
+import { PropertyReference, propertyIdsFromText } from "./property-deed-card";
 
 type ContractsPanelProps = {
   game: GameMetadata;
@@ -51,6 +52,7 @@ const filterLabels: Record<LogFilter, string> = {
   rejections: "Rejections",
 };
 
+const maxRenderedLogEntries = 200;
 const upcomingStatuses = new Set<ObligationRecord["status"]>(["pending", "due", "scheduled"]);
 
 function formatDate(value: string | null | undefined): string {
@@ -107,6 +109,63 @@ function contractTermText(contract: ContractRecord): string {
   return summaries.join("; ") || "No term summary supplied.";
 }
 
+function propertyIdsFromTermRecord(term: Record<string, unknown>): string[] {
+  const ids = new Set<string>();
+  const propertyId = payloadString(term, "property_id");
+  if (propertyId) {
+    ids.add(propertyId);
+  }
+  const collateralPropertyIds = term.collateral_property_ids;
+  if (Array.isArray(collateralPropertyIds)) {
+    for (const item of collateralPropertyIds) {
+      if (typeof item === "string") {
+        ids.add(item);
+      }
+    }
+  }
+  const trigger = term.trigger;
+  if (trigger && typeof trigger === "object" && !Array.isArray(trigger)) {
+    const triggerPropertyId = payloadString(trigger as Record<string, unknown>, "property_id");
+    if (triggerPropertyId) {
+      ids.add(triggerPropertyId);
+    }
+  }
+  const summary = typeof term.summary === "string" ? term.summary : "";
+  for (const id of propertyIdsFromText(summary)) {
+    ids.add(id);
+  }
+  return [...ids];
+}
+
+function propertyIdsFromContract(contract: ContractRecord): string[] {
+  const ids = new Set<string>(propertyIdsFromText(contractTermText(contract)));
+  for (const term of contract.terms) {
+    for (const propertyId of propertyIdsFromTermRecord(term)) {
+      ids.add(propertyId);
+    }
+  }
+  return [...ids];
+}
+
+function PropertyReferences({
+  game,
+  propertyIds,
+}: Readonly<{
+  game: GameMetadata;
+  propertyIds: string[];
+}>) {
+  if (propertyIds.length === 0) {
+    return null;
+  }
+  return (
+    <span className="mt-2 flex flex-wrap gap-1.5" data-contract-property-references="">
+      {propertyIds.map((propertyId) => (
+        <PropertyReference key={propertyId} game={game} propertyId={propertyId} />
+      ))}
+    </span>
+  );
+}
+
 function obligationAssetText(obligation: ObligationRecord): string {
   if (obligation.asset_summary) {
     return obligation.asset_summary;
@@ -118,7 +177,7 @@ function obligationAssetText(obligation: ObligationRecord): string {
 function dueText(obligation: ObligationRecord): string {
   const parts = [];
   if (obligation.due_turn !== null) {
-    parts.push(`due_turn ${obligation.due_turn}`);
+    parts.push(`Turn ${obligation.due_turn}`);
   }
   if (obligation.due_condition) {
     parts.push(obligation.due_condition);
@@ -152,9 +211,9 @@ function eventDetail(game: GameMetadata, event: AcceptedEvent): string {
     const totalText = total !== null ? `total ${total}` : "";
     return `${diceText} ${totalText}`.trim();
   }
-  if (event.event_type === "TOKEN_MOVED") {
+  if (event.event_type === "TOKEN_MOVED" || event.event_type === "PLAYER_POSITION_SET") {
     const playerId = payloadString(payload, "player_id");
-    const toPosition = payloadNumber(payload, "to_position");
+    const toPosition = payloadNumber(payload, event.event_type === "TOKEN_MOVED" ? "to_position" : "position");
     return `${playerName(game, playerId)} moved to position ${toPosition ?? "unknown"}`;
   }
   if (event.event_type === "CONTRACT_TRIGGERED_TRANSFER") {
@@ -248,20 +307,45 @@ function buildLogEntries({
   });
 }
 
-function EmptyState({ text }: Readonly<{ text: string }>) {
-  return (
-    <div className="rounded-md border border-dashed border-neutral-200 bg-neutral-50 px-3 py-4 text-sm text-neutral-600">
-      {text}
-    </div>
-  );
-}
-
 function ErrorNote({ text }: Readonly<{ text: string }>) {
   return <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{text}</div>;
 }
 
 function pluralize(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function TechnicalRecord({
+  buttonLabel,
+  children,
+}: Readonly<{
+  buttonLabel: string;
+  children: ReactNode;
+}>) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="mt-3">
+      <Button
+        aria-expanded={isOpen}
+        className="min-h-8 px-2.5 py-1.5 text-xs"
+        onClick={() => setIsOpen((current) => !current)}
+        type="button"
+        variant="secondary"
+      >
+        {isOpen ? "Hide technical record" : buttonLabel}
+      </Button>
+      {isOpen ? (
+        <div
+          aria-label="Technical record"
+          className="mt-2 grid gap-1 rounded border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-700"
+          role="group"
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function ContractEnforcementStatus({ result }: Readonly<{ result: ContractEnforcementResult }>) {
@@ -305,45 +389,45 @@ function ActiveContracts({
           <h2 id="active-contracts-title" className="text-sm font-semibold text-neutral-950">
             Active contracts
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Server-owned agreements that can create future obligations.</p>
         </div>
         <FileText aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-3">
-        {isLoading ? (
-          <EmptyState text="Loading active contracts from the API." />
-        ) : activeContracts.length === 0 ? (
-          <EmptyState text="No active contracts returned by the API." />
-        ) : (
-          activeContracts.map((contract) => (
+        {!isLoading
+          ? activeContracts.map((contract) => (
             <article
               key={contract.id}
-              aria-label={`Contract ${contract.id}`}
+              aria-label={`Contract between ${playerNames(game, contract.party_player_ids)}`}
               className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h3 className="font-semibold text-neutral-950">Contract {contract.id}</h3>
-                  <p className="mt-1 text-neutral-700">Parties {playerNames(game, contract.party_player_ids)}</p>
+                  <h3 className="font-semibold text-neutral-950">
+                    Agreement between {playerNames(game, contract.party_player_ids)}
+                  </h3>
                 </div>
                 <span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                  Status {contract.status}
+                  {contract.status === "active" ? "Active" : contract.status}
                 </span>
               </div>
               <div className="mt-3 grid gap-1 text-xs text-neutral-700">
-                <p>deal_id {contract.deal_id ?? "not linked"}</p>
-                <p>source_agreement_id {contract.source_agreement_id ?? "not linked"}</p>
-                <p>effective_event_id {contract.effective_event_id ?? "not linked"}</p>
-                <p>Created {formatDate(contract.created_at)}</p>
-                <p>Effective {formatDate(contract.effective_at)}</p>
+                <div>Created {formatDate(contract.created_at)}</div>
+                <div>Effective {formatDate(contract.effective_at)}</div>
               </div>
-              <p className="mt-3 rounded-md bg-white px-3 py-2 text-xs leading-5 text-neutral-700">
+              <div className="mt-3 rounded-md bg-white px-3 py-2 text-xs leading-5 text-neutral-700">
                 {contractTermText(contract)}
-              </p>
+                <PropertyReferences game={game} propertyIds={propertyIdsFromContract(contract)} />
+              </div>
+              <TechnicalRecord buttonLabel="Show contract technical record">
+                <div>contract_id {contract.id}</div>
+                <div>deal_id {contract.deal_id ?? "not linked"}</div>
+                <div>source_agreement_id {contract.source_agreement_id ?? "not linked"}</div>
+                <div>effective_event_id {contract.effective_event_id ?? "not linked"}</div>
+              </TechnicalRecord>
             </article>
           ))
-        )}
+          : null}
       </div>
     </section>
   );
@@ -372,43 +456,42 @@ function UpcomingObligations({
           <h2 id="upcoming-obligations-title" className="text-sm font-semibold text-neutral-950">
             Upcoming obligations
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Scheduled and pending obligations returned by the API.</p>
         </div>
         <CalendarClock aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-3">
-        {isLoading ? (
-          <EmptyState text="Loading upcoming obligations from the API." />
-        ) : upcoming.length === 0 ? (
-          <EmptyState text="No upcoming obligations returned by the API." />
-        ) : (
-          upcoming.map((obligation) => {
+        {!isLoading
+          ? upcoming.map((obligation) => {
             const canSettle = canSettleObligation(obligation);
             const isCurrentEnforcement = enforcingObligationId === obligation.id;
-            const unavailableDescriptionId = `obligation-${obligation.id}-settlement-unavailable`;
 
             return (
               <article
                 key={obligation.id}
-                aria-label={`Obligation ${obligation.id}`}
+                aria-label={`Obligation ${playerName(game, obligation.obligated_player_id)} to ${playerName(
+                  game,
+                  obligation.counterparty_player_id,
+                )}`}
                 className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <h3 className="font-semibold text-neutral-950">obligation_id {obligation.id}</h3>
+                  <h3 className="font-semibold text-neutral-950">
+                    {playerName(game, obligation.obligated_player_id)} owes {playerName(game, obligation.counterparty_player_id)}
+                  </h3>
                   <span className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
                     {obligation.status}
                   </span>
                 </div>
                 <div className="mt-3 grid gap-1 text-xs text-neutral-700">
-                  <p>contract_id {obligation.contract_id}</p>
-                  <p>{dueText(obligation)}</p>
-                  <p>{obligationAssetText(obligation)}</p>
-                  <p>Counterparty {playerName(game, obligation.counterparty_player_id)}</p>
+                  <div>{dueText(obligation)}</div>
+                  <div>
+                    {obligationAssetText(obligation)}
+                    <PropertyReferences game={game} propertyIds={propertyIdsFromText(obligationAssetText(obligation))} />
+                  </div>
                 </div>
                 <div className="mt-3 grid gap-2">
                   <Button
-                    aria-describedby={!canSettle ? unavailableDescriptionId : undefined}
                     onClick={() => {
                       if (canSettle) {
                         onEnforce(obligation);
@@ -426,16 +509,17 @@ function UpcomingObligations({
                     )}
                     {isCurrentEnforcement ? "Enforcing..." : canSettle ? "Enforce obligation" : "Unavailable until due"}
                   </Button>
-                  {!canSettle ? (
-                    <p id={unavailableDescriptionId} className="text-xs text-neutral-600">
-                      Settlement unavailable until this obligation is due.
-                    </p>
-                  ) : null}
                 </div>
+                <TechnicalRecord buttonLabel="Show obligation technical record">
+                  <div>obligation_id {obligation.id}</div>
+                  <div>contract_id {obligation.contract_id}</div>
+                  <div>due_turn {obligation.due_turn ?? "not set"}</div>
+                  <div>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</div>
+                </TechnicalRecord>
               </article>
             );
           })
-        )}
+          : null}
       </div>
     </section>
   );
@@ -456,28 +540,27 @@ function SettlementHistory({
           <h2 id="settlement-history-title" className="text-sm font-semibold text-neutral-950">
             Obligation settlement history
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Past settlements and their triggering events.</p>
         </div>
         <History aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-2">
-        {isLoading ? (
-          <EmptyState text="Loading obligation settlement history from the API." />
-        ) : settled.length === 0 ? (
-          <EmptyState text="No settled obligations returned by the API." />
-        ) : (
-          settled.map((obligation) => (
+        {!isLoading
+          ? settled.map((obligation) => (
             <article key={obligation.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
-              <p className="font-semibold text-neutral-950">settled_at {formatDate(obligation.settled_at)}</p>
-              <p className="mt-1">triggering event {obligation.triggering_event_id ?? "not linked"}</p>
-              <p className="mt-1">linked contract_id {obligation.contract_id}</p>
-              <p className="mt-2 rounded-md bg-white px-3 py-2 leading-5">
+              <div className="font-semibold text-neutral-950">Settled {formatDate(obligation.settled_at)}</div>
+              <div className="mt-2 rounded-md bg-white px-3 py-2 leading-5">
                 {obligation.transfer_summary ?? obligationAssetText(obligation)}
-              </p>
+              </div>
+              <TechnicalRecord buttonLabel="Show settlement technical record">
+                <div>obligation_id {obligation.id}</div>
+                <div>contract_id {obligation.contract_id}</div>
+                <div>triggering_event_id {obligation.triggering_event_id ?? "not linked"}</div>
+                <div>settled_at {formatDate(obligation.settled_at)}</div>
+              </TechnicalRecord>
             </article>
           ))
-        )}
+          : null}
       </div>
     </section>
   );
@@ -500,33 +583,31 @@ function ContractOutcomeExplanations({
           <h2 id="contract-outcome-explanation-title" className="text-sm font-semibold text-neutral-950">
             Contract outcome explanation
           </h2>
-          <p className="mt-1 text-xs text-neutral-600">Classic-rule effects returned by the API.</p>
         </div>
         <Info aria-hidden="true" className="size-4 text-teal-700" />
       </div>
 
       <div className="mt-3 grid gap-2">
-        {isLoading ? (
-          <EmptyState text="Loading contract outcome explanations from the API." />
-        ) : outcomes.length === 0 ? (
-          <EmptyState text="No contract outcome explanations returned by the API." />
-        ) : (
-          outcomes.map((outcome) => (
+        {!isLoading
+          ? outcomes.map((outcome) => (
             <article key={outcome.id} className="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs">
               <div className="flex flex-wrap items-center gap-2 text-neutral-700">
-                <span className="font-semibold text-neutral-950">contract_id {outcome.contract_id}</span>
+                <span className="font-semibold text-neutral-950">Contract outcome</span>
                 <span className="rounded bg-white px-1.5 py-0.5 font-medium text-neutral-600">
                   {String(outcome.decision.status ?? "recorded")}
                 </span>
               </div>
-              <p className="mt-1 text-neutral-600">obligation_id {outcome.obligation_id ?? "contract"}</p>
-              <p className="mt-1 text-neutral-600">source_deal_id {outcome.source_deal_id ?? "not linked"}</p>
-              <p className="mt-2 rounded-md bg-white px-3 py-2 leading-5 text-neutral-700">
+              <div className="mt-2 rounded-md bg-white px-3 py-2 leading-5 text-neutral-700">
                 {outcome.explanation_text}
-              </p>
+              </div>
+              <TechnicalRecord buttonLabel="Show outcome technical record">
+                <div>contract_id {outcome.contract_id}</div>
+                <div>obligation_id {outcome.obligation_id ?? "contract"}</div>
+                <div>source_deal_id {outcome.source_deal_id ?? "not linked"}</div>
+              </TechnicalRecord>
             </article>
           ))
-        )}
+          : null}
       </div>
     </section>
   );
@@ -567,7 +648,7 @@ function LogKindIcon({ kind }: Readonly<{ kind: LogFilter }>) {
   return <ArrowRightLeft aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-neutral-700" />;
 }
 
-function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
+function FullGameLog({ entries, game }: Readonly<{ entries: GameLogEntry[]; game: GameMetadata }>) {
   const [filters, setFilters] = useState<Record<LogFilter, boolean>>({
     actions: true,
     deals: true,
@@ -576,21 +657,29 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
   });
 
   const visibleEntries = entries.filter((entry) => filters[entry.kind]);
+  const renderedEntries = visibleEntries.slice(-maxRenderedLogEntries);
+  const shownCountText =
+    renderedEntries.length < visibleEntries.length
+      ? `${renderedEntries.length} of ${visibleEntries.length} shown`
+      : `${visibleEntries.length} shown`;
 
   function toggleFilter(filter: LogFilter) {
     setFilters((current) => ({ ...current, [filter]: !current[filter] }));
   }
 
   return (
-    <section aria-label="Game log" className="rounded-md border border-neutral-200 bg-white p-4">
+    <section
+      id="contract-event-history"
+      aria-label="Contract event history"
+      className="rounded-md border border-neutral-200 bg-white p-4"
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-neutral-950">Full game log</h2>
-          <p className="mt-1 text-xs text-neutral-600">Accepted events, deals, AI decisions, and rejections.</p>
+          <h2 className="text-sm font-semibold text-neutral-950">Event history</h2>
         </div>
         <div className="flex items-center gap-2 text-xs text-neutral-500">
           <ListFilter aria-hidden="true" className="size-3.5" />
-          <span>{visibleEntries.length} shown</span>
+          <span>{shownCountText}</span>
         </div>
       </div>
 
@@ -600,19 +689,15 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
         ))}
       </div>
 
-      {visibleEntries.length === 0 ? (
-        <div className="mt-3">
-          <EmptyState text="No log entries match the selected filters." />
-        </div>
-      ) : (
+      {visibleEntries.length > 0 ? (
         <ol className="mt-3 divide-y divide-neutral-200 text-sm">
-          {visibleEntries.map((entry) => (
+          {renderedEntries.map((entry) => (
             <li key={entry.id} className="py-2">
               <div className="flex items-start gap-2">
                 <LogKindIcon kind={entry.kind} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-neutral-950">{entry.title}</p>
+                    <div className="font-semibold text-neutral-950">{entry.title}</div>
                     <span
                       className={cn(
                         "rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-600",
@@ -623,23 +708,24 @@ function FullGameLog({ entries }: Readonly<{ entries: GameLogEntry[] }>) {
                       {entry.badge}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs leading-5 text-neutral-700">{entry.detail}</p>
+                  <div className="mt-1 text-xs leading-5 text-neutral-700">{entry.detail}</div>
+                  <PropertyReferences game={game} propertyIds={propertyIdsFromText(entry.detail)} />
                   {entry.sourceAgreementId || entry.dealId || entry.contractId ? (
-                    <p className="mt-1 text-xs text-neutral-500">
+                    <div className="mt-1 text-xs text-neutral-500">
                       {entry.sourceAgreementId ? `Source agreement ${entry.sourceAgreementId}` : null}
                       {entry.sourceAgreementId && entry.dealId ? " / " : null}
                       {entry.dealId ? `deal ${entry.dealId}` : null}
                       {(entry.sourceAgreementId || entry.dealId) && entry.contractId ? " / " : null}
                       {entry.contractId ? `contract ${entry.contractId}` : null}
-                    </p>
+                    </div>
                   ) : null}
-                  <p className="mt-1 text-[11px] text-neutral-500">{formatDate(entry.timestamp)}</p>
+                  <div className="mt-1 text-[11px] text-neutral-500">{formatDate(entry.timestamp)}</div>
                 </div>
               </div>
             </li>
           ))}
         </ol>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -729,7 +815,7 @@ export function ContractsPanel({
       />
       <SettlementHistory isLoading={obligationsQuery.isLoading} obligations={obligations} />
       <ContractOutcomeExplanations isLoading={outcomesQuery.isLoading} outcomes={outcomes} />
-      <FullGameLog entries={logEntries} />
+      <FullGameLog entries={logEntries} game={game} />
     </section>
   );
 }

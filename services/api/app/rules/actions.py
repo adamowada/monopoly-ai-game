@@ -17,6 +17,7 @@ from app.rules.debt import (
 )
 from app.rules.event_capture import capture_rule_events, record_rule_event
 from app.rules.events import (
+    ActiveAuctionSetPayload,
     ActivePaymentSetPayload,
     CardDrawnPayload,
     DiceRolledPayload,
@@ -34,6 +35,7 @@ from app.rules.mechanics import (
     close_auction,
     declare_bankruptcy,
     end_turn,
+    is_game_over,
     mortgage_property,
     pass_auction,
     pay_jail_fine,
@@ -51,6 +53,7 @@ from app.rules.static_data import (
     BoardSpace,
     CardData,
     PropertyData,
+    PropertyGroup,
     load_classic_monopoly_data,
 )
 from app.rules.state import GameState, PlayerState, PropertyOwnershipState
@@ -288,17 +291,27 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
         if actor_id not in auction.passed_player_ids and actor_id != auction.high_bidder_id:
             minimum_bid = _minimum_auction_bid(state)
             if player.cash >= minimum_bid:
+                property_data = _property_data(auction.property_id)
                 add(
                     "BID_AUCTION",
                     {"property_id": auction.property_id, "amount": minimum_bid},
                     schema=_object_schema(
                         {
                             "property_id": _const_string_schema(auction.property_id),
-                            "amount": {"type": "integer", "minimum": minimum_bid},
+                            "amount": {
+                                "type": "integer",
+                                "minimum": minimum_bid,
+                                "maximum": player.cash,
+                            },
                         },
                         required=("amount",),
                     ),
-                    description=f"Bid at least {minimum_bid} for {_property_data(auction.property_id).name}.",
+                    description=(
+                        f"Bid any integer from {minimum_bid} to {player.cash} for "
+                        f"{property_data.name}; {minimum_bid} is the legal floor, "
+                        "not a recommended bid. The maximum reflects cash affordability, "
+                        "not strategic value."
+                    ),
                 )
             add(
                 "PASS_AUCTION",
@@ -309,16 +322,10 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
                 description=f"Pass on the auction for {_property_data(auction.property_id).name}.",
             )
 
-        add(
-            "DECLARE_BANKRUPTCY",
-            {"creditor_id": None},
-            schema=_bankruptcy_schema(state, actor_id),
-            description="Declare bankruptcy and liquidate assets.",
-        )
         return tuple(actions)
 
     if actor_id == state.turn.current_player_id:
-        add("ROLL_DICE", description="Roll deterministic dice for the current turn.")
+        add("ROLL_DICE", description="Roll dice for the current turn.")
         add("END_TURN", description="End the current player's turn.")
 
         if player.in_jail:
@@ -370,12 +377,6 @@ def list_legal_actions(state: GameState, actor_id: str) -> tuple[LegalAction, ..
 
     _add_management_actions(state, player, add)
 
-    add(
-        "DECLARE_BANKRUPTCY",
-        {"creditor_id": None},
-        schema=_bankruptcy_schema(state, actor_id),
-        description="Declare bankruptcy and liquidate assets.",
-    )
     return tuple(actions)
 
 
@@ -560,8 +561,8 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
         creditor_id = _bankruptcy_creditor_for_payload(state, action.actor_id, payload)
         next_state = declare_bankruptcy(state, action.actor_id, creditor_id, event_id_prefix)
         if state.active_payment is not None and state.active_payment.debtor_id == action.actor_id:
-            return clear_active_debt(next_state, event_id_prefix)
-        return next_state
+            next_state = clear_active_debt(next_state, event_id_prefix)
+        return _complete_bankruptcy_action(next_state, event_id_prefix)
 
     if action.type == "SETTLE_DEBT":
         next_state = settle_debt_with_cash(
@@ -570,7 +571,7 @@ def apply_action(state: GameState, action: GameAction, event_id_prefix: str) -> 
             _required_int(payload, "amount"),
             event_id_prefix,
         )
-        return _complete_resolved_timing_window(next_state, event_id_prefix)
+        return _complete_debt_action(next_state, action.actor_id, event_id_prefix)
 
     _raise_issue("unknown_action", f"unknown action type {action.type}", "type")
 
@@ -636,7 +637,8 @@ def _resolve_landed_space(
             reason=f"tax:{space.id}",
             negotiation_allowed=False,
         )
-        return _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+        state = _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+        return _complete_forced_debt_bankruptcy(state, actor_id, event_id_prefix)
 
     if space.type in {"chance", "community_chest"}:
         if space.deck is None:
@@ -673,7 +675,8 @@ def _resolve_landed_space(
             reason=f"rent:{space.property_id}",
             negotiation_allowed=True,
         )
-        return _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+        state = _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+        return _complete_forced_debt_bankruptcy(state, actor_id, event_id_prefix)
 
     return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
 
@@ -707,6 +710,8 @@ def _draw_apply_and_resolve_card(
         dice_total=dice_total,
         apply_card_rent=False,
     )
+    if state.active_payment is not None:
+        return _enter_payment_resolution(state, event_id_prefix)
 
     if effect_type == "go_to_jail":
         return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
@@ -731,6 +736,14 @@ def _draw_apply_and_resolve_card(
         )
 
     return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
+
+
+def _enter_payment_resolution(state: GameState, event_id_prefix: str) -> GameState:
+    active_payment = state.active_payment
+    if active_payment is None:
+        return state
+    state = _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+    return _complete_forced_debt_bankruptcy(state, active_payment.debtor_id, event_id_prefix)
 
 
 def _resolve_nearest_card_landing(
@@ -790,7 +803,8 @@ def _resolve_nearest_card_landing(
         reason=f"card_rent:{target_space.property_id}",
         negotiation_allowed=True,
     )
-    return _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+    state = _set_turn_phase(state, TurnPhase.PAYMENT_RESOLUTION, event_id_prefix)
+    return _complete_forced_debt_bankruptcy(state, actor_id, event_id_prefix)
 
 
 def _set_active_payment(
@@ -840,6 +854,19 @@ def _set_turn_phase(state: GameState, phase: TurnPhase, event_id_prefix: str) ->
     return apply_event(state, event)
 
 
+def _clear_active_auction(state: GameState, event_id_prefix: str) -> GameState:
+    if state.active_auction is None:
+        return state
+    event = GameEvent(
+        event_id=f"{event_id_prefix}-{state.event_sequence + 1}",
+        sequence=state.event_sequence + 1,
+        type="ACTIVE_AUCTION_SET",
+        payload=ActiveAuctionSetPayload(active=False),
+    )
+    record_rule_event(event)
+    return apply_event(state, event)
+
+
 def _complete_resolved_timing_window(state: GameState, event_id_prefix: str) -> GameState:
     try:
         current_phase = TurnPhase(state.turn.phase)
@@ -851,6 +878,124 @@ def _complete_resolved_timing_window(state: GameState, event_id_prefix: str) -> 
     if current_phase == TurnPhase.PAYMENT_RESOLUTION and state.active_payment is None:
         return _set_turn_phase(state, TurnPhase.POST_ROLL_MANAGEMENT, event_id_prefix)
     return state
+
+
+def _complete_debt_action(state: GameState, debtor_id: str, event_id_prefix: str) -> GameState:
+    forced_state = _complete_forced_debt_bankruptcy(state, debtor_id, event_id_prefix)
+    if forced_state is not state:
+        return forced_state
+    return _complete_resolved_timing_window(state, event_id_prefix)
+
+
+def _complete_forced_debt_bankruptcy(state: GameState, debtor_id: str, event_id_prefix: str) -> GameState:
+    active_payment = state.active_payment
+    if active_payment is None or active_payment.debtor_id != debtor_id:
+        return state
+    if not _debt_has_no_resolution_route(state, debtor_id):
+        return state
+
+    next_state = declare_bankruptcy(state, debtor_id, active_payment.creditor_id, event_id_prefix)
+    next_state = clear_active_debt(next_state, event_id_prefix)
+    return _complete_bankruptcy_action(next_state, event_id_prefix)
+
+
+def _debt_has_no_resolution_route(state: GameState, debtor_id: str) -> bool:
+    active_payment = state.active_payment
+    player = _player_by_id(state, debtor_id)
+    if active_payment is None or player is None or active_payment.debtor_id != debtor_id:
+        return False
+    if outstanding_debt_amount(state) <= 0:
+        return False
+    if player.cash > 0:
+        return False
+
+    return not (_has_sellable_debt_improvement(state, debtor_id) or _has_mortgageable_debt_property(state, debtor_id))
+
+
+def _has_sellable_debt_improvement(state: GameState, player_id: str) -> bool:
+    for ownership in state.property_ownership:
+        if ownership.owner_id != player_id:
+            continue
+        property_data = _property_data(ownership.property_id)
+        if property_data.kind != "street" or not (ownership.houses > 0 or ownership.hotel):
+            continue
+        group = _property_group(property_data.group)
+        levels = _group_improvement_levels(state, group)
+        current_level = levels[ownership.property_id]
+        if current_level <= 0 or current_level != max(levels.values()):
+            continue
+        if ownership.hotel:
+            if state.bank_inventory.houses >= 4 and state.bank_inventory.hotels < 12:
+                return True
+            continue
+        if state.bank_inventory.houses < 32:
+            return True
+    return False
+
+
+def _has_mortgageable_debt_property(state: GameState, player_id: str) -> bool:
+    for ownership in state.property_ownership:
+        if ownership.owner_id != player_id or ownership.mortgaged:
+            continue
+        property_data = _property_data(ownership.property_id)
+        if property_data.kind == "street" and _group_has_improvements(state, property_data.group):
+            continue
+        return True
+    return False
+
+
+def _group_has_improvements(state: GameState, group_id: str) -> bool:
+    group = _property_group(group_id)
+    return any(
+        ownership.houses > 0 or ownership.hotel
+        for ownership in (_property_ownership(state, property_id) for property_id in group.property_ids)
+    )
+
+
+def _group_improvement_levels(state: GameState, group: PropertyGroup) -> dict[str, int]:
+    return {
+        property_id: 5 if (ownership := _property_ownership(state, property_id)).hotel else ownership.houses
+        for property_id in group.property_ids
+    }
+
+
+def _complete_bankruptcy_action(state: GameState, event_id_prefix: str) -> GameState:
+    state = _clear_active_auction(state, event_id_prefix)
+    state = _set_turn_phase(state, TurnPhase.BANKRUPTCY_RESOLUTION, event_id_prefix)
+    if is_game_over(state):
+        return _set_turn_phase(state, TurnPhase.GAME_OVER, event_id_prefix)
+
+    state = _set_turn_phase(state, TurnPhase.END_TURN, event_id_prefix)
+    return _advance_to_next_active_start_turn(state, event_id_prefix)
+
+
+def _advance_to_next_active_start_turn(state: GameState, event_id_prefix: str) -> GameState:
+    next_player_index = _next_active_player_index(state)
+    next_player = state.players[next_player_index]
+    event = GameEvent(
+        event_id=f"{event_id_prefix}-{state.event_sequence + 1}",
+        sequence=state.event_sequence + 1,
+        type="TURN_STATE_SET",
+        payload=TurnStateSetPayload(
+            turn_number=state.turn.turn_number + 1,
+            current_player_index=next_player_index,
+            current_player_id=next_player.id,
+            phase=TurnPhase.START_TURN.value,
+            consecutive_doubles=0,
+        ),
+    )
+    record_rule_event(event)
+    return apply_event(state, event)
+
+
+def _next_active_player_index(state: GameState) -> int:
+    player_count = len(state.players)
+    for offset in range(1, player_count + 1):
+        player_index = (state.turn.current_player_index + offset) % player_count
+        if not state.players[player_index].is_bankrupt:
+            return player_index
+
+    raise IllegalRuleActionError("no active players remain")
 
 
 def _prepare_pending_doubles_roll(state: GameState, actor_id: str, event_id_prefix: str) -> GameState:
@@ -1267,7 +1412,8 @@ def _mechanic_accepts(
     mechanic: Callable[[GameState, str, str, str], GameState],
 ) -> bool:
     try:
-        mechanic(state, actor_id, property_id, _probe_prefix(state, action_type, property_id))
+        with capture_rule_events():
+            mechanic(state, actor_id, property_id, _probe_prefix(state, action_type, property_id))
     except IllegalRuleActionError:
         return False
     return True
@@ -1275,7 +1421,8 @@ def _mechanic_accepts(
 
 def _mechanic_accepts_bankruptcy(state: GameState, actor_id: str, creditor_id: str | None) -> bool:
     try:
-        declare_bankruptcy(state, actor_id, creditor_id, _probe_prefix(state, "DECLARE_BANKRUPTCY", actor_id))
+        with capture_rule_events():
+            declare_bankruptcy(state, actor_id, creditor_id, _probe_prefix(state, "DECLARE_BANKRUPTCY", actor_id))
     except IllegalRuleActionError:
         return False
     return True
@@ -1428,6 +1575,13 @@ def _property_data(property_id: str) -> PropertyData:
         if property_data.id == property_id:
             return property_data
     _raise_issue("illegal_action", f"unknown property {property_id}", "payload.property_id")
+
+
+def _property_group(group_id: str) -> PropertyGroup:
+    for group in load_classic_monopoly_data().property_groups:
+        if group.id == group_id:
+            return group
+    _raise_issue("illegal_action", f"unknown property group {group_id}", "payload.property_id")
 
 
 def _space_for_position(position: int) -> BoardSpace:

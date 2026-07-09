@@ -48,7 +48,7 @@ export function GameApiPanel() {
       <div className="mx-auto grid max-w-7xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] lg:px-8">
         <div>
           <h2 id="game-api-title" className="text-base font-semibold text-neutral-950">
-            Game API
+            Saved table
           </h2>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
             <div className="border-y border-neutral-200 py-3">
@@ -58,7 +58,7 @@ export function GameApiPanel() {
               </dd>
             </div>
             <div className="border-y border-neutral-200 py-3">
-              <dt className="text-xs font-medium uppercase text-neutral-500">Phase</dt>
+              <dt className="text-xs font-medium uppercase text-neutral-500">Turn step</dt>
               <dd className="mt-1 font-medium text-neutral-950">
                 {snapshot?.state === "loaded" ? snapshot.game.current_phase : "Unverified"}
               </dd>

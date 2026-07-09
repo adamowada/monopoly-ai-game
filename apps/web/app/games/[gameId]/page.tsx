@@ -23,7 +23,7 @@ export default async function GameBoardPage({ params }: GamePageProps) {
       <main className="min-h-screen bg-[var(--color-page)] px-4 py-8 text-neutral-950 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-5xl rounded-md border border-rose-200 bg-rose-50 p-5">
           <h1 className="text-xl font-semibold">Game board unavailable</h1>
-          <p className="mt-2 text-sm text-rose-700">{snapshot.error}</p>
+          <div className="mt-2 text-sm text-rose-700">{snapshot.error}</div>
           <Button asChild className="mt-4">
             <Link href="/">
               <ArrowLeft aria-hidden="true" className="size-4" />
@@ -39,24 +39,6 @@ export default async function GameBoardPage({ params }: GamePageProps) {
 
   return (
     <main className="min-h-screen bg-[var(--color-page)] text-neutral-950">
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <div>
-            <p className="text-xs font-semibold uppercase text-teal-700">Phase 5 Stage 5.7</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-normal">Game board {game.id}</h1>
-            <p className="mt-2 text-sm text-neutral-600">
-              Legal action controls, auctions, property management, negotiations, contracts, obligations, and logs backed by the FastAPI referee.
-            </p>
-          </div>
-          <Button asChild className="w-fit bg-white text-neutral-700 ring-1 ring-inset ring-neutral-300 hover:bg-neutral-100">
-            <Link href="/">
-              <ArrowLeft aria-hidden="true" className="size-4" />
-              Setup
-            </Link>
-          </Button>
-        </div>
-      </header>
-
       <GamePlaySurface gameId={game.id} initialGame={game} />
     </main>
   );

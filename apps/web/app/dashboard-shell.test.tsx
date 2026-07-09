@@ -1,5 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DashboardShell } from "./dashboard-shell";
@@ -35,67 +34,46 @@ const rejectedAction: RejectedActionRecord = {
 };
 
 function renderDashboard(rejectedActions: RejectedActionRecord[] = []) {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
-    },
-  });
-
   return render(
-    <QueryClientProvider client={queryClient}>
-      <DashboardShell
-        initialHealth={{
-          state: "online",
-          checkedAt: "2026-07-04T00:00:00.000Z",
-          health: {
-            status: "ok",
-            service: "api",
-            stage: "phase-1-stage-1.3",
-            environment: "test",
-            database: "configured",
-          },
-        }}
-        initialRejectedActions={rejectedActions}
-      />
-    </QueryClientProvider>,
+    <DashboardShell initialRejectedActions={rejectedActions} />,
   );
 }
 
 describe("DashboardShell", () => {
-  it("renders the operational app shell with backend health and tier records", () => {
+  it("renders a board-game setup surface instead of an admin dashboard shell", () => {
     renderDashboard();
 
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: "Local Game Research Console",
+        name: "Monopoly 2.0 Game Table",
       }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveClass("bg-[#eaf3d7]");
 
-    const navigation = screen.getAllByRole("navigation", { name: "Stack navigation" })[0];
-    expect(within(navigation).getByRole("link", { name: /Overview/ })).toHaveAttribute("href", "#overview");
-    expect(within(navigation).getByRole("link", { name: /Tier health/ })).toHaveAttribute("href", "#tier-health");
-    expect(within(navigation).getByRole("link", { name: /Rejected actions/ })).toHaveAttribute(
-      "href",
-      "#rejected-actions",
-    );
+    expect(screen.queryByRole("navigation", { name: "Game prep navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Setup" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connection details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Referee readiness" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "Set the seats, then open the board." }),
+    ).not.toBeInTheDocument();
 
-    const healthStatus = screen.getByRole("status", { name: "Backend health" });
-    expect(healthStatus).toHaveTextContent("ok");
-    expect(healthStatus).toHaveTextContent("phase-1-stage-1.3");
-    expect(healthStatus).toHaveTextContent("test");
-
-    expect(screen.getByRole("row", { name: /FastAPI service ok phase-1-stage-1.3/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Next.js app ready Stage 1.4 shell/ })).toBeInTheDocument();
-    expect(screen.getByRole("row", { name: /Postgres configured compose service/ })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Choose seats" })).toBeInTheDocument();
+    expect(screen.queryByText("Local tabletop setup")).not.toBeInTheDocument();
+    expect(screen.queryByText("2 ready")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Table check" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Table areas" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connection details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Rules referee ready Move validation/ })).not.toBeInTheDocument();
   });
 
-  it("mounts the rejected action audit view inside the app shell", () => {
+  it("keeps rule rulings inside troubleshooting details", () => {
     renderDashboard([rejectedAction]);
 
-    expect(screen.getByRole("heading", { level: 2, name: "Rejected action audit" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Rule rulings" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Rule rulings" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Rule rulings" })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /illegal_action START_TURN BUY_PROPERTY/ })).toBeInTheDocument();
   });
 });

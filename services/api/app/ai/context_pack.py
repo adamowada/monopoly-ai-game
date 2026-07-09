@@ -15,7 +15,6 @@ from uuid import UUID, uuid4
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.ai.decision_schema import AI_OUTPUT_SCHEMA
 from app.ai.memory import (
     MEMORY_COMPACTION_REASON_ON_DEMAND,
     MEMORY_COMPACTION_THRESHOLD,
@@ -47,6 +46,10 @@ VISIBLE_MEMORY_SCOPES = frozenset({"public", "table", "audit"})
 ACTIVE_NEGOTIATION_STATUSES = ("opened", "active", "countered", "accepted")
 _FIELD_JOINER = "".join
 AIContextPack: TypeAlias = dict[str, Any]
+MORTGAGE_HEALTHY_CASH_FLOOR = 200
+PURCHASE_HEALTHY_CASH_FLOOR = 300
+GROUP_COMPLETION_PURCHASE_CASH_FLOOR = 100
+UNMORTGAGE_HEALTHY_CASH_FLOOR = 300
 
 
 def build_ai_context_pack(
@@ -72,7 +75,9 @@ def build_ai_context_pack(
     """
 
     actor_id = str(player_id)
-    legal_actions = [action.model_dump(mode="json") for action in list_legal_actions(state, actor_id)]
+    legal_actions = [
+        action.model_dump(mode="json") for action in list_legal_actions(state, actor_id)
+    ]
     pack = {
         "context_pack_schema_version": CONTEXT_PACK_SCHEMA_VERSION,
         "decision_type": decision_type,
@@ -82,10 +87,15 @@ def build_ai_context_pack(
         "public_game_state": public_game_state_summary(state),
         "timing": _timing_context(state, legal_actions),
         "legal_actions": legal_actions,
+        "action_selection_guidance": _action_selection_guidance(state, actor_id, legal_actions),
+        "negotiation_strategy_guidance": _negotiation_strategy_guidance(
+            state,
+            actor_id,
+            negotiations,
+        ),
+        "deal_proposal_guidance": _deal_proposal_guidance(state, actor_id, negotiations),
         "negotiation_context": {
-            "active_negotiations": [
-                _public_negotiation(row) for row in _sorted_rows(negotiations)
-            ],
+            "active_negotiations": [_public_negotiation(row) for row in _sorted_rows(negotiations)],
             "public_messages": [
                 _public_negotiation_message(row)
                 for row in _sorted_rows(negotiation_messages)
@@ -93,6 +103,8 @@ def build_ai_context_pack(
             ],
             "public_deals": [_public_deal(row) for row in _sorted_rows(deals)],
         },
+        "deal_evaluation_guidance": _deal_evaluation_guidance(state, actor_id, deals),
+        "counteroffer_guidance": _counteroffer_guidance(state, actor_id, deals),
         "contracts": {
             "active_contracts": [_public_contract(row) for row in _sorted_rows(contracts)],
             "active_obligations": [_public_obligation(row) for row in _sorted_rows(obligations)],
@@ -113,7 +125,6 @@ def build_ai_context_pack(
             "snippets": _rule_snippets(rule_snippets, legal_actions=legal_actions, state=state),
         },
         "personality_profile": _profile_summary(ai_profile),
-        "required_output_schema": _json_safe(AI_OUTPUT_SCHEMA),
         "instruction_contract": _instruction_contract(),
     }
     return _json_safe(pack)
@@ -361,14 +372,8 @@ async def _load_retrieved_context_rows(
         audit=audit,
     )
 
-    rule_snippets = [
-        result.to_rule_snippet()
-        for result in rule_results
-    ]
-    memory_rows = [
-        result.to_memory_row()
-        for result in memory_results
-    ]
+    rule_snippets = [result.to_rule_snippet() for result in rule_results]
+    memory_rows = [result.to_memory_row() for result in memory_results]
     return rule_snippets, memory_rows, retrieval_audit_context_id
 
 
@@ -402,11 +407,11 @@ def _context_retrieval_query_text(
         if value is not None:
             return value
 
+    if decision_type == "action_decision":
+        return ""
+
     legal_action_types = sorted(
-        {
-            str(action.type)
-            for action in list_legal_actions(state, str(player_id))
-        }
+        {str(action.type) for action in list_legal_actions(state, str(player_id))}
     )
     current_player = next(
         (player for player in state.players if player.id == str(player_id)),
@@ -681,6 +686,2492 @@ def _timing_context(
     }
 
 
+def _action_selection_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    legal_action_types = [
+        str(action["type"]) for action in legal_actions if isinstance(action.get("type"), str)
+    ]
+    development_opportunities = _development_opportunities(state, actor_id, legal_actions)
+    recommended_development_opportunities = [
+        opportunity
+        for opportunity in development_opportunities
+        if bool(opportunity.get("cash_after_cost_is_healthy"))
+    ]
+    deferred_development_opportunities = [
+        opportunity
+        for opportunity in development_opportunities
+        if not bool(opportunity.get("cash_after_cost_is_healthy"))
+    ]
+    recommended_development_action = (
+        _development_action_template(recommended_development_opportunities[0])
+        if recommended_development_opportunities
+        else None
+    )
+    recommended_action_types: list[str] = []
+    recommended_before_roll: list[str] = []
+    lower_priority_action_types: list[str] = []
+    turn_guidance: list[str] = []
+    recommended_turn_flow_action: dict[str, Any] | None = None
+    purchase_guidance = _purchase_guidance(state, actor_id, legal_actions)
+    auction_guidance = _auction_guidance(state, actor_id, legal_actions)
+    debt_resolution_guidance = _debt_resolution_guidance(state, actor_id, legal_actions)
+    mortgage_guidance = _mortgage_guidance(state, actor_id, legal_actions)
+    unmortgage_guidance = _unmortgage_guidance(state, actor_id, legal_actions)
+    jail_guidance = _jail_guidance(state, actor_id, legal_actions)
+
+    if purchase_guidance is not None:
+        recommendation = _string_or_none(purchase_guidance.get("recommendation"))
+        if recommendation == "buy_property_at_list_price":
+            recommended_action_types.append("BUY_PROPERTY")
+            if "START_AUCTION" in legal_action_types:
+                lower_priority_action_types.append("START_AUCTION")
+            turn_guidance.append(
+                "Prefer BUY_PROPERTY for this landed unowned property while cash_after_price "
+                "remains healthy; START_AUCTION lets competitors win the property and should "
+                "need a concrete liquidity or valuation reason."
+            )
+        elif recommendation == "buy_property_to_complete_group":
+            recommended_action_types.append("BUY_PROPERTY")
+            if "START_AUCTION" in legal_action_types:
+                lower_priority_action_types.append("START_AUCTION")
+            turn_guidance.append(
+                "Prefer BUY_PROPERTY because this landed property would complete the color group, "
+                "railroad set, or utility set; START_AUCTION risks losing set leverage and should "
+                "need an immediate cash-survival reason."
+            )
+        elif recommendation == "buy_property_to_block_opponent_group_completion":
+            recommended_action_types.append("BUY_PROPERTY")
+            if "START_AUCTION" in legal_action_types:
+                lower_priority_action_types.append("START_AUCTION")
+            turn_guidance.append(
+                "Prefer BUY_PROPERTY because this landed property blocks an opponent from "
+                "completing a color group, railroad set, or utility set; START_AUCTION risks "
+                "handing set leverage to a competitor and should need an immediate cash-survival "
+                "reason."
+            )
+        elif recommendation == "consider_auction_for_liquidity":
+            if "START_AUCTION" in legal_action_types:
+                recommended_action_types.append("START_AUCTION")
+            if "BUY_PROPERTY" in legal_action_types:
+                lower_priority_action_types.append("BUY_PROPERTY")
+            turn_guidance.append(
+                "START_AUCTION may be reasonable because BUY_PROPERTY cash_after_price would "
+                "fall below the healthy liquidity floor; if buying anyway, explain the "
+                "monopoly, railroad, utility, or blocking value."
+            )
+
+    if recommended_development_opportunities:
+        recommended_before_roll.append("BUY_HOUSE")
+        if "ROLL_DICE" in legal_action_types:
+            lower_priority_action_types.append("ROLL_DICE")
+        turn_guidance.append(
+            "BUY_HOUSE is legal on a complete color group; prefer even monopoly "
+            "development before ROLL_DICE when cash_after_cost remains healthy. "
+            "When multiple groups can develop, choose from the highest "
+            "development_priority_score group first, then choose a least-developed property "
+            "under the even-building rule with the highest marginal_rent_gain."
+        )
+    elif deferred_development_opportunities:
+        if "BUY_HOUSE" not in lower_priority_action_types:
+            lower_priority_action_types.append("BUY_HOUSE")
+        turn_guidance.append(
+            "Wait on BUY_HOUSE even though it is legal because every available build would "
+            "fall below the cash reserve floor; prefer ROLL_DICE unless a concrete rent, "
+            "debt, or bankruptcy-prevention reason justifies the liquidity risk."
+        )
+
+    if auction_guidance is not None:
+        minimum_bid = _int_or_zero(auction_guidance.get("minimum_bid"))
+        valuation_ceiling = _int_or_zero(auction_guidance.get("valuation_ceiling"))
+        cash_limited_bid_ceiling = _int_or_zero(auction_guidance.get("cash_limited_bid_ceiling"))
+        recommended_auction_action_type = _string_or_none(
+            auction_guidance.get("recommended_auction_action_type")
+        )
+        recommended_bid_amount = _int_or_none(auction_guidance.get("recommended_bid_amount"))
+        if (
+            recommended_auction_action_type is not None
+            and recommended_auction_action_type in legal_action_types
+            and recommended_auction_action_type not in recommended_action_types
+        ):
+            recommended_action_types.append(recommended_auction_action_type)
+        auction_alternative_action_type = (
+            "PASS_AUCTION" if recommended_auction_action_type == "BID_AUCTION" else "BID_AUCTION"
+        )
+        if (
+            auction_alternative_action_type in legal_action_types
+            and auction_alternative_action_type not in lower_priority_action_types
+        ):
+            lower_priority_action_types.append(auction_alternative_action_type)
+        turn_guidance.append(
+            "For BID_AUCTION, the payload amount is the minimum legal floor, "
+            "not a recommendation. If bidding, choose a deliberate value based "
+            "on property price, current high bid, and cash while staying near "
+            "the valuation ceiling, or PASS_AUCTION; avoid one-dollar increment loops."
+        )
+        if recommended_auction_action_type == "BID_AUCTION" and recommended_bid_amount is not None:
+            turn_guidance.append(
+                f"Auction guidance recommends BID_AUCTION for about ${recommended_bid_amount}; "
+                "that is a deliberate bid target, while the legal payload amount is only the "
+                "minimum floor."
+            )
+        if minimum_bid > valuation_ceiling:
+            if minimum_bid > cash_limited_bid_ceiling:
+                turn_guidance.append(
+                    "Choose PASS_AUCTION when the minimum BID_AUCTION amount would breach "
+                    "the cash reserve floor unless a concrete bankruptcy-prevention reason "
+                    "justifies spending below reserve."
+                )
+            else:
+                turn_guidance.append(
+                    "Choose PASS_AUCTION when the minimum BID_AUCTION amount is "
+                    "above the valuation ceiling unless a concrete monopoly-completion "
+                    "reason justifies the overpay."
+                )
+        if auction_guidance.get("opponent_group_completion_threats"):
+            turn_guidance.append(
+                "For BID_AUCTION, a block_opponent_group_completion_premium valuation can justify "
+                "bidding above list price when blocking an opponent from completing a color group, "
+                "railroad set, or utility set while still staying at or below the valuation ceiling."
+            )
+
+    if debt_resolution_guidance is not None:
+        recommendation = _string_or_none(debt_resolution_guidance.get("recommendation"))
+        if recommendation == "settle_cash_debt":
+            recommended_action_types.append("SETTLE_DEBT")
+            for action_type in ("SELL_HOUSE", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"):
+                if (
+                    action_type in legal_action_types
+                    and action_type not in lower_priority_action_types
+                ):
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "SETTLE_DEBT is legal and cash covers the active debt; choose it before "
+                "liquidation actions or DECLARE_BANKRUPTCY."
+            )
+        elif recommendation == "sell_improvements_before_mortgage":
+            recommended_action_types.append("SELL_HOUSE")
+            for action_type in ("MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY"):
+                if (
+                    action_type in legal_action_types
+                    and action_type not in lower_priority_action_types
+                ):
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "SELL_HOUSE can cover the active debt from improvements; choose a legal "
+                "SELL_HOUSE before MORTGAGE_PROPERTY so rent-producing property is not "
+                "disabled unnecessarily."
+            )
+        elif recommendation == "mortgage_only_enough_for_debt":
+            if "MORTGAGE_PROPERTY" in legal_action_types:
+                recommended_action_types.append("MORTGAGE_PROPERTY")
+            recommended_mortgage_property_ids = _string_list(
+                mortgage_guidance.get("recommended_mortgage_property_ids")
+                if mortgage_guidance is not None
+                else []
+            )
+            for action_type in ("DECLARE_BANKRUPTCY",):
+                if (
+                    action_type in legal_action_types
+                    and action_type not in lower_priority_action_types
+                ):
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "MORTGAGE_PROPERTY may be necessary for the active debt; mortgage only "
+                "enough to cover the remaining amount and avoid DECLARE_BANKRUPTCY."
+            )
+            if recommended_mortgage_property_ids:
+                turn_guidance.append(
+                    "Prefer MORTGAGE_PROPERTY on "
+                    f"{', '.join(recommended_mortgage_property_ids)} first because it "
+                    "covers the debt while preserving stronger set leverage."
+                )
+
+    if mortgage_guidance is not None:
+        recommendation = _string_or_none(mortgage_guidance.get("recommendation"))
+        if recommendation == "avoid_unless_debt_or_liquidity_pressure":
+            if "MORTGAGE_PROPERTY" not in lower_priority_action_types:
+                lower_priority_action_types.append("MORTGAGE_PROPERTY")
+            turn_guidance.append(
+                "Avoid MORTGAGE_PROPERTY while cash is healthy and no active debt exists; "
+                "mortgaging disables rent and creates future unmortgage interest. Use it "
+                "only for active debt, bankruptcy prevention, or urgent liquidity."
+            )
+        elif recommendation == "liquidate_only_enough_for_active_debt":
+            turn_guidance.append(
+                "For MORTGAGE_PROPERTY during active debt, mortgage only enough property "
+                "to cover the outstanding amount after using available cash and cheaper "
+                "liquidation actions."
+            )
+
+    if unmortgage_guidance is not None:
+        recommendation = _string_or_none(unmortgage_guidance.get("recommendation"))
+        if recommendation == "restore_rent_when_cash_healthy":
+            recommended_before_roll.append("UNMORTGAGE_PROPERTY")
+            if "ROLL_DICE" in legal_action_types and "ROLL_DICE" not in lower_priority_action_types:
+                lower_priority_action_types.append("ROLL_DICE")
+            turn_guidance.append(
+                "UNMORTGAGE_PROPERTY can restore rent collection on owned property; prefer it "
+                "before ROLL_DICE when cash_after_cost remains healthy."
+            )
+
+    if jail_guidance is not None:
+        recommendation = _string_or_none(jail_guidance.get("recommendation"))
+        if recommendation == "use_card_before_paying_or_rolling":
+            recommended_before_roll.append("USE_GET_OUT_OF_JAIL_CARD")
+            for action_type in ("PAY_JAIL_FINE", "ROLL_DICE"):
+                if (
+                    action_type in legal_action_types
+                    and action_type not in lower_priority_action_types
+                ):
+                    lower_priority_action_types.append(action_type)
+            turn_guidance.append(
+                "USE_GET_OUT_OF_JAIL_CARD is legal and costs no cash; prefer it before "
+                "PAY_JAIL_FINE or ROLL_DICE when the plan is to leave jail and keep moving."
+            )
+
+    has_higher_priority_recommendation = bool(
+        recommended_action_types or recommended_before_roll
+    )
+    if not has_higher_priority_recommendation:
+        if state.turn.phase in {
+            TurnPhase.START_TURN,
+            TurnPhase.PRE_ROLL_MANAGEMENT,
+            TurnPhase.ROLL_REQUIRED,
+        }:
+            recommended_turn_flow_action = _legal_action_template_for_type(
+                legal_actions,
+                "ROLL_DICE",
+                "roll_when_no_higher_priority_action",
+            )
+            if recommended_turn_flow_action is not None:
+                recommended_action_types.append("ROLL_DICE")
+                turn_guidance.append(
+                    "ROLL_DICE advances the turn when no legal development, unmortgage, "
+                    "jail, purchase, auction, debt, or liquidity action has higher priority."
+                )
+        elif state.turn.phase in {
+            TurnPhase.POST_ROLL_MANAGEMENT,
+            TurnPhase.NEGOTIATION_WINDOW,
+            TurnPhase.END_TURN,
+        }:
+            recommended_turn_flow_action = _legal_action_template_for_type(
+                legal_actions,
+                "END_TURN",
+                "end_turn_when_no_higher_priority_action",
+            )
+            if recommended_turn_flow_action is not None:
+                recommended_action_types.append("END_TURN")
+                turn_guidance.append(
+                    "END_TURN advances play when no legal purchase, auction, debt, "
+                    "development, unmortgage, jail, or liquidity action has higher priority."
+                )
+
+    return {
+        "recommended_action_types": recommended_action_types,
+        "recommended_action_types_before_roll": recommended_before_roll,
+        "lower_priority_action_types": lower_priority_action_types,
+        "recommended_turn_flow_action": recommended_turn_flow_action,
+        "purchase_guidance": purchase_guidance,
+        "development_opportunities": development_opportunities,
+        "recommended_development_opportunities": recommended_development_opportunities,
+        "recommended_development_action": recommended_development_action,
+        "deferred_development_opportunities": deferred_development_opportunities,
+        "auction_guidance": auction_guidance,
+        "debt_resolution_guidance": debt_resolution_guidance,
+        "mortgage_guidance": mortgage_guidance,
+        "unmortgage_guidance": unmortgage_guidance,
+        "jail_guidance": jail_guidance,
+        "turn_guidance": turn_guidance,
+    }
+
+
+def _development_action_template(opportunity: Mapping[str, Any]) -> dict[str, Any] | None:
+    property_id = _string_or_none(opportunity.get("property_id"))
+    if property_id is None:
+        return None
+    cost = _int_or_zero(opportunity.get("cost"))
+    return {
+        "type": "BUY_HOUSE",
+        "payload": {
+            "property_id": property_id,
+            "cost": cost,
+        },
+        "reason_code": "highest_priority_even_monopoly_development",
+        "property_id": property_id,
+        "property_name": _string_or_none(opportunity.get("property_name")),
+        "group": _string_or_none(opportunity.get("group")),
+        "group_name": _string_or_none(opportunity.get("group_name")),
+        "development_priority_score": _int_or_zero(
+            opportunity.get("development_priority_score")
+        ),
+        "marginal_rent_gain": _int_or_zero(opportunity.get("marginal_rent_gain")),
+    }
+
+
+def _purchase_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    buy_action = next(
+        (action for action in legal_actions if action.get("type") == "BUY_PROPERTY"), None
+    )
+    if buy_action is None:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    payload = _mapping(buy_action.get("payload"))
+    property_id = _string_or_none(payload.get("property_id"))
+    if property_id is None:
+        return None
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    property_data = properties_by_id.get(property_id)
+    if property_data is None:
+        return None
+
+    price = _int_or_zero(payload.get("price")) or property_data.price
+    cash_after_price = player.cash - price
+    start_auction_action = next(
+        (action for action in legal_actions if action.get("type") == "START_AUCTION"),
+        None,
+    )
+    start_auction_available = start_auction_action is not None
+
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    group = groups_by_id.get(property_data.group)
+    same_group_owned_property_ids: list[str] = []
+    same_group_other_owner_ids: list[str] = []
+    opponent_group_completion_threats: list[dict[str, Any]] = []
+    completes_property_group = False
+    if group is not None:
+        for group_property_id in group.property_ids:
+            if group_property_id == property_id:
+                continue
+            ownership = ownership_by_property_id.get(group_property_id)
+            if ownership is None or ownership.owner_id is None:
+                continue
+            if ownership.owner_id == actor_id:
+                same_group_owned_property_ids.append(group_property_id)
+            elif ownership.owner_id not in same_group_other_owner_ids:
+                same_group_other_owner_ids.append(ownership.owner_id)
+        completes_property_group = (
+            property_id in group.property_ids
+            and len(group.property_ids) > 1
+            and len(same_group_owned_property_ids) == len(group.property_ids) - 1
+        )
+        if property_id in group.property_ids:
+            for other_owner_id in sorted(same_group_other_owner_ids):
+                opponent_owned_property_ids = [
+                    group_property_id
+                    for group_property_id in group.property_ids
+                    if group_property_id != property_id
+                    and ownership_by_property_id.get(group_property_id) is not None
+                    and ownership_by_property_id[group_property_id].owner_id == other_owner_id
+                ]
+                if len(opponent_owned_property_ids) == len(group.property_ids) - 1:
+                    opponent_group_completion_threats.append(
+                        {
+                            "opponent_player_id": other_owner_id,
+                            "opponent_owned_property_ids": opponent_owned_property_ids,
+                        }
+                    )
+
+    if completes_property_group and cash_after_price >= GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
+        recommendation = "buy_property_to_complete_group"
+    elif (
+        opponent_group_completion_threats
+        and cash_after_price >= GROUP_COMPLETION_PURCHASE_CASH_FLOOR
+    ):
+        recommendation = "buy_property_to_block_opponent_group_completion"
+    elif cash_after_price >= PURCHASE_HEALTHY_CASH_FLOOR:
+        recommendation = "buy_property_at_list_price"
+    else:
+        recommendation = "consider_auction_for_liquidity"
+    recommended_purchase_action = _recommended_purchase_action_template(
+        buy_action=buy_action,
+        start_auction_action=start_auction_action,
+        recommendation=recommendation,
+    )
+
+    return {
+        "action_available": True,
+        "recommendation": recommendation,
+        "recommended_purchase_action": recommended_purchase_action,
+        "property_id": property_data.id,
+        "property_name": property_data.name,
+        "property_kind": property_data.kind,
+        "property_group": property_data.group,
+        "property_price": property_data.price,
+        "property_group_size": len(group.property_ids) if group is not None else 1,
+        "buy_payload_price": price,
+        "cash_available": player.cash,
+        "cash_after_price": cash_after_price,
+        "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+        "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
+        "start_auction_available": start_auction_available,
+        "same_group_owned_property_ids": sorted(same_group_owned_property_ids),
+        "same_group_other_owner_ids": sorted(same_group_other_owner_ids),
+        "completes_property_group": completes_property_group,
+        "opponent_group_completion_threats": opponent_group_completion_threats,
+    }
+
+
+def _recommended_purchase_action_template(
+    *,
+    buy_action: Mapping[str, Any],
+    start_auction_action: Mapping[str, Any] | None,
+    recommendation: str,
+) -> dict[str, Any] | None:
+    if recommendation in {
+        "buy_property_at_list_price",
+        "buy_property_to_complete_group",
+        "buy_property_to_block_opponent_group_completion",
+    }:
+        return _legal_action_template(buy_action, recommendation)
+    if recommendation == "consider_auction_for_liquidity" and start_auction_action is not None:
+        return _legal_action_template(start_auction_action, recommendation)
+    return None
+
+
+def _mortgage_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    mortgage_actions = [
+        action for action in legal_actions if action.get("type") == "MORTGAGE_PROPERTY"
+    ]
+    if not mortgage_actions:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    has_active_debt = (
+        state.active_payment is not None and state.active_payment.debtor_id == actor_id
+    )
+    outstanding_debt = 0
+    if has_active_debt and state.active_payment is not None:
+        outstanding_debt = max(
+            state.active_payment.amount_owed - state.active_payment.amount_paid,
+            0,
+        )
+
+    remaining_after_cash = max(outstanding_debt - player.cash, 0)
+    ranked_mortgage_options = _ranked_mortgage_options(
+        state,
+        actor_id,
+        mortgage_actions,
+        remaining_after_cash=remaining_after_cash,
+    )
+    mortgageable_property_ids = [
+        str(option["property_id"]) for option in ranked_mortgage_options
+    ]
+    total_available_proceeds = sum(
+        _int_or_zero(option.get("proceeds")) for option in ranked_mortgage_options
+    )
+    recommended_mortgage_property_ids = _recommended_mortgage_property_ids(
+        ranked_mortgage_options,
+        remaining_after_cash=remaining_after_cash,
+    )
+
+    recommendation = "reserve_for_specific_liquidity_need"
+    if has_active_debt:
+        recommendation = "liquidate_only_enough_for_active_debt"
+    elif player.cash >= MORTGAGE_HEALTHY_CASH_FLOOR:
+        recommendation = "avoid_unless_debt_or_liquidity_pressure"
+
+    return {
+        "action_available": True,
+        "recommendation": recommendation,
+        "has_active_debt": has_active_debt,
+        "outstanding_debt": outstanding_debt,
+        "remaining_after_cash": remaining_after_cash,
+        "cash_available": player.cash,
+        "healthy_cash_floor": MORTGAGE_HEALTHY_CASH_FLOOR,
+        "mortgageable_property_count": len(mortgage_actions),
+        "mortgageable_property_ids": mortgageable_property_ids,
+        "recommended_mortgage_property_ids": recommended_mortgage_property_ids,
+        "ranked_mortgage_options": ranked_mortgage_options,
+        "total_available_proceeds": total_available_proceeds,
+    }
+
+
+def _ranked_mortgage_options(
+    state: GameState,
+    actor_id: str,
+    mortgage_actions: Sequence[Mapping[str, Any]],
+    *,
+    remaining_after_cash: int,
+) -> list[dict[str, Any]]:
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+
+    options: list[dict[str, Any]] = []
+    for action in mortgage_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is None:
+            continue
+        property_data = properties_by_id.get(property_id)
+        if property_data is None:
+            continue
+        proceeds = _int_or_zero(payload.get("proceeds"))
+        group = groups_by_id.get(property_data.group)
+        breaks_complete_street_group = False
+        if group is not None and group.kind == "street":
+            breaks_complete_street_group = all(
+                ownership_by_property_id.get(group_property_id) is not None
+                and ownership_by_property_id[group_property_id].owner_id == actor_id
+                and not ownership_by_property_id[group_property_id].mortgaged
+                for group_property_id in group.property_ids
+            )
+        covers_remaining_debt = remaining_after_cash <= 0 or proceeds >= remaining_after_cash
+        liquidation_gap = (
+            max(proceeds - remaining_after_cash, 0)
+            if covers_remaining_debt
+            else remaining_after_cash - proceeds
+        )
+        priority_reason = (
+            "covers_debt_without_breaking_complete_street_group"
+            if covers_remaining_debt and not breaks_complete_street_group
+            else "covers_debt_but_breaks_complete_street_group"
+            if covers_remaining_debt
+            else "partial_liquidation_without_breaking_complete_street_group"
+            if not breaks_complete_street_group
+            else "partial_liquidation_breaks_complete_street_group"
+        )
+        options.append(
+            {
+                "property_id": property_data.id,
+                "property_name": property_data.name,
+                "property_kind": property_data.kind,
+                "group": property_data.group,
+                "proceeds": proceeds,
+                "covers_remaining_debt": covers_remaining_debt,
+                "liquidation_gap": liquidation_gap,
+                "breaks_complete_street_group": breaks_complete_street_group,
+                "priority_reason": priority_reason,
+            }
+        )
+
+    return sorted(
+        options,
+        key=lambda option: (
+            bool(option["breaks_complete_street_group"]),
+            not bool(option["covers_remaining_debt"]),
+            _int_or_zero(option.get("liquidation_gap")),
+            _int_or_zero(option.get("proceeds")),
+            str(option["property_id"]),
+        ),
+    )
+
+
+def _recommended_mortgage_property_ids(
+    ranked_mortgage_options: Sequence[Mapping[str, Any]],
+    *,
+    remaining_after_cash: int,
+) -> list[str]:
+    if remaining_after_cash <= 0:
+        return []
+
+    covering_options = [
+        option for option in ranked_mortgage_options if option.get("covers_remaining_debt") is True
+    ]
+    if covering_options:
+        property_id = _string_or_none(covering_options[0].get("property_id"))
+        return [] if property_id is None else [property_id]
+
+    recommended: list[str] = []
+    accumulated = 0
+    for option in ranked_mortgage_options:
+        property_id = _string_or_none(option.get("property_id"))
+        if property_id is None:
+            continue
+        recommended.append(property_id)
+        accumulated += _int_or_zero(option.get("proceeds"))
+        if accumulated >= remaining_after_cash:
+            break
+    return recommended
+
+
+def _debt_resolution_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    active_payment = state.active_payment
+    if active_payment is None or active_payment.debtor_id != actor_id:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    outstanding_debt = max(active_payment.amount_owed - active_payment.amount_paid, 0)
+    if outstanding_debt <= 0:
+        return None
+
+    settle_actions = [action for action in legal_actions if action.get("type") == "SETTLE_DEBT"]
+    sell_house_actions = [action for action in legal_actions if action.get("type") == "SELL_HOUSE"]
+    mortgage_actions = [
+        action for action in legal_actions if action.get("type") == "MORTGAGE_PROPERTY"
+    ]
+    bankruptcy_available = any(
+        action.get("type") == "DECLARE_BANKRUPTCY" for action in legal_actions
+    )
+
+    settle_amount = 0
+    for action in settle_actions:
+        settle_amount = max(
+            settle_amount, _int_or_zero(_mapping(action.get("payload")).get("amount"))
+        )
+
+    sell_house_property_ids: list[str] = []
+    sell_house_total_proceeds = 0
+    for action in sell_house_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is not None:
+            sell_house_property_ids.append(property_id)
+        sell_house_total_proceeds += _int_or_zero(payload.get("proceeds"))
+
+    mortgageable_property_ids: list[str] = []
+    mortgage_total_proceeds = 0
+    for action in mortgage_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is not None:
+            mortgageable_property_ids.append(property_id)
+        mortgage_total_proceeds += _int_or_zero(payload.get("proceeds"))
+
+    remaining_after_cash = max(outstanding_debt - player.cash, 0)
+    recommendation = "avoid_bankruptcy_if_any_liquidation_available"
+    if settle_amount >= outstanding_debt:
+        recommendation = "settle_cash_debt"
+    elif sell_house_total_proceeds >= remaining_after_cash and sell_house_actions:
+        recommendation = "sell_improvements_before_mortgage"
+    elif mortgage_actions:
+        recommendation = "mortgage_only_enough_for_debt"
+    recommended_debt_action = _recommended_debt_action_template(
+        state=state,
+        actor_id=actor_id,
+        recommendation=recommendation,
+        settle_actions=settle_actions,
+        sell_house_actions=sell_house_actions,
+        mortgage_actions=mortgage_actions,
+        outstanding_debt=outstanding_debt,
+        remaining_after_cash=remaining_after_cash,
+    )
+
+    return {
+        "action_available": bool(
+            settle_actions or sell_house_actions or mortgage_actions or bankruptcy_available
+        ),
+        "recommendation": recommendation,
+        "recommended_debt_action": recommended_debt_action,
+        "outstanding_debt": outstanding_debt,
+        "cash_available": player.cash,
+        "remaining_after_cash": remaining_after_cash,
+        "settle_amount": settle_amount,
+        "settlement_available": bool(settle_actions),
+        "sell_house_available": bool(sell_house_actions),
+        "sell_house_property_ids": sell_house_property_ids,
+        "sell_house_total_proceeds": sell_house_total_proceeds,
+        "mortgage_available": bool(mortgage_actions),
+        "mortgageable_property_ids": mortgageable_property_ids,
+        "mortgage_total_proceeds": mortgage_total_proceeds,
+        "bankruptcy_available": bankruptcy_available,
+    }
+
+
+def _recommended_debt_action_template(
+    *,
+    state: GameState,
+    actor_id: str,
+    recommendation: str,
+    settle_actions: Sequence[Mapping[str, Any]],
+    sell_house_actions: Sequence[Mapping[str, Any]],
+    mortgage_actions: Sequence[Mapping[str, Any]],
+    outstanding_debt: int,
+    remaining_after_cash: int,
+) -> dict[str, Any] | None:
+    if recommendation == "settle_cash_debt":
+        candidates = sorted(
+            settle_actions,
+            key=lambda action: (
+                -_int_or_zero(_mapping(action.get("payload")).get("amount")),
+                str(_mapping(action.get("payload")).get("debt_id", "")),
+            ),
+        )
+        return _legal_action_template(candidates[0], "settle_cash_debt") if candidates else None
+
+    if recommendation == "sell_improvements_before_mortgage":
+        candidates = sorted(
+            sell_house_actions,
+            key=lambda action: (
+                _int_or_zero(_mapping(action.get("payload")).get("proceeds"))
+                < remaining_after_cash,
+                abs(
+                    _int_or_zero(_mapping(action.get("payload")).get("proceeds"))
+                    - remaining_after_cash
+                ),
+                _int_or_zero(_mapping(action.get("payload")).get("proceeds")),
+                str(_mapping(action.get("payload")).get("property_id", "")),
+            ),
+        )
+        return (
+            _legal_action_template(candidates[0], "sell_improvements_before_mortgage")
+            if candidates
+            else None
+        )
+
+    if recommendation == "mortgage_only_enough_for_debt":
+        ranked_options = _ranked_mortgage_options(
+            state,
+            actor_id,
+            mortgage_actions,
+            remaining_after_cash=remaining_after_cash,
+        )
+        recommended_property_ids = _recommended_mortgage_property_ids(
+            ranked_options,
+            remaining_after_cash=remaining_after_cash,
+        )
+        for property_id in recommended_property_ids:
+            matching_action = next(
+                (
+                    action
+                    for action in mortgage_actions
+                    if _string_or_none(_mapping(action.get("payload")).get("property_id"))
+                    == property_id
+                ),
+                None,
+            )
+            if matching_action is not None:
+                return _legal_action_template(
+                    matching_action,
+                    "mortgage_only_enough_for_active_debt",
+                )
+        return (
+            _legal_action_template(mortgage_actions[0], "mortgage_only_enough_for_active_debt")
+            if mortgage_actions and outstanding_debt > 0
+            else None
+        )
+
+    return None
+
+
+def _legal_action_template(
+    action: Mapping[str, Any],
+    reason_code: str,
+) -> dict[str, Any] | None:
+    action_type = _string_or_none(action.get("type"))
+    if action_type is None:
+        return None
+    return {
+        "type": action_type,
+        "payload": dict(_mapping(action.get("payload"))),
+        "reason_code": reason_code,
+    }
+
+
+def _legal_action_template_for_type(
+    legal_actions: Sequence[Mapping[str, Any]],
+    action_type: str,
+    reason_code: str,
+) -> dict[str, Any] | None:
+    action = next(
+        (candidate for candidate in legal_actions if candidate.get("type") == action_type),
+        None,
+    )
+    return _legal_action_template(action, reason_code) if action is not None else None
+
+
+def _unmortgage_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    unmortgage_actions = [
+        action for action in legal_actions if action.get("type") == "UNMORTGAGE_PROPERTY"
+    ]
+    if not unmortgage_actions:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return None
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    unmortgageable_property_ids: list[str] = []
+    unmortgageable_property_names: list[str] = []
+    unmortgage_costs: list[int] = []
+    for action in unmortgage_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is None:
+            continue
+        unmortgageable_property_ids.append(property_id)
+        property_data = properties_by_id.get(property_id)
+        if property_data is not None:
+            unmortgageable_property_names.append(property_data.name)
+        unmortgage_costs.append(_int_or_zero(payload.get("cost")))
+
+    cheapest_cost = min(unmortgage_costs) if unmortgage_costs else 0
+    cash_after_cheapest = player.cash - cheapest_cost
+    recommendation = (
+        "restore_rent_when_cash_healthy"
+        if cheapest_cost > 0 and cash_after_cheapest >= UNMORTGAGE_HEALTHY_CASH_FLOOR
+        else "defer_until_cash_after_cost_is_healthy"
+    )
+    recommended_unmortgage_action = None
+    if recommendation == "restore_rent_when_cash_healthy":
+        cheapest_action = min(
+            unmortgage_actions,
+            key=lambda action: (
+                _int_or_zero(_mapping(action.get("payload")).get("cost")),
+                str(_mapping(action.get("payload")).get("property_id", "")),
+            ),
+        )
+        recommended_unmortgage_action = _legal_action_template(
+            cheapest_action,
+            recommendation,
+        )
+
+    return {
+        "action_available": True,
+        "recommendation": recommendation,
+        "recommended_unmortgage_action": recommended_unmortgage_action,
+        "cash_available": player.cash,
+        "healthy_cash_floor": UNMORTGAGE_HEALTHY_CASH_FLOOR,
+        "unmortgageable_property_count": len(unmortgage_actions),
+        "unmortgageable_property_ids": unmortgageable_property_ids,
+        "unmortgageable_property_names": unmortgageable_property_names,
+        "cheapest_unmortgage_cost": cheapest_cost,
+        "cash_after_cheapest_unmortgage": cash_after_cheapest,
+    }
+
+
+def _jail_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    card_actions = [
+        action for action in legal_actions if action.get("type") == "USE_GET_OUT_OF_JAIL_CARD"
+    ]
+    if not card_actions:
+        return None
+
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None or not player.in_jail:
+        return None
+
+    jail_card_ids: list[str] = []
+    for action in card_actions:
+        payload = _mapping(action.get("payload"))
+        card_id = _string_or_none(payload.get("card_id"))
+        if card_id is not None:
+            jail_card_ids.append(card_id)
+    recommended_jail_action = _legal_action_template(
+        sorted(
+            card_actions,
+            key=lambda action: str(_mapping(action.get("payload")).get("card_id", "")),
+        )[0],
+        "use_card_before_paying_or_rolling",
+    )
+
+    return {
+        "action_available": True,
+        "recommendation": "use_card_before_paying_or_rolling",
+        "recommended_jail_action": recommended_jail_action,
+        "cash_available": player.cash,
+        "jail_turns": player.jail_turns,
+        "jail_card_ids": jail_card_ids,
+        "pay_fine_available": any(
+            action.get("type") == "PAY_JAIL_FINE" for action in legal_actions
+        ),
+        "roll_dice_available": any(action.get("type") == "ROLL_DICE" for action in legal_actions),
+    }
+
+
+def _auction_guidance(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    auction = state.active_auction
+    if auction is None:
+        return None
+
+    bid_action = next(
+        (action for action in legal_actions if action.get("type") == "BID_AUCTION"), None
+    )
+    if bid_action is None:
+        return None
+    pass_action = next(
+        (action for action in legal_actions if action.get("type") == "PASS_AUCTION"),
+        None,
+    )
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    property_data = properties_by_id.get(auction.property_id)
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if property_data is None or player is None:
+        return None
+
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    group = groups_by_id.get(property_data.group)
+    same_group_owned_property_ids: list[str] = []
+    if group is not None:
+        same_group_owned_property_ids = [
+            property_id
+            for property_id in group.property_ids
+            if ownership_by_property_id.get(property_id) is not None
+            and ownership_by_property_id[property_id].owner_id == actor_id
+        ]
+    property_group_size = len(group.property_ids) if group is not None else 1
+    completes_property_group = (
+        group is not None
+        and auction.property_id not in same_group_owned_property_ids
+        and len(same_group_owned_property_ids) == property_group_size - 1
+    )
+    opponent_group_completion_threats: list[dict[str, Any]] = []
+    if group is not None and auction.property_id in group.property_ids:
+        owner_ids = {
+            ownership_by_property_id[property_id].owner_id
+            for property_id in group.property_ids
+            if property_id != auction.property_id
+            and ownership_by_property_id.get(property_id) is not None
+            and ownership_by_property_id[property_id].owner_id not in {None, actor_id}
+        }
+        for owner_id in sorted(str(owner_id) for owner_id in owner_ids if owner_id is not None):
+            owned_property_ids = [
+                property_id
+                for property_id in group.property_ids
+                if property_id != auction.property_id
+                and ownership_by_property_id.get(property_id) is not None
+                and ownership_by_property_id[property_id].owner_id == owner_id
+            ]
+            if len(owned_property_ids) == property_group_size - 1:
+                opponent_group_completion_threats.append(
+                    {
+                        "opponent_player_id": owner_id,
+                        "opponent_owned_property_ids": owned_property_ids,
+                    }
+                )
+    if completes_property_group:
+        strategic_valuation_ceiling = property_data.price * 3 // 2
+        valuation_basis = "property_group_completion_premium"
+        cash_reserve_floor = GROUP_COMPLETION_PURCHASE_CASH_FLOOR
+    elif opponent_group_completion_threats:
+        strategic_valuation_ceiling = property_data.price * 3 // 2
+        valuation_basis = "block_opponent_group_completion_premium"
+        cash_reserve_floor = PURCHASE_HEALTHY_CASH_FLOOR
+    elif same_group_owned_property_ids:
+        strategic_valuation_ceiling = property_data.price * 5 // 4
+        valuation_basis = "same_group_position_premium"
+        cash_reserve_floor = PURCHASE_HEALTHY_CASH_FLOOR
+    else:
+        strategic_valuation_ceiling = property_data.price
+        valuation_basis = "listed_price"
+        cash_reserve_floor = PURCHASE_HEALTHY_CASH_FLOOR
+
+    bid_payload = _mapping(bid_action.get("payload"))
+    minimum_bid = _int_or_zero(bid_payload.get("amount"))
+    cash_limited_bid_ceiling = max(player.cash - cash_reserve_floor, 0)
+    valuation_ceiling = min(strategic_valuation_ceiling, cash_limited_bid_ceiling)
+    if minimum_bid <= valuation_ceiling and valuation_ceiling > 0:
+        recommended_auction_action_type = "BID_AUCTION"
+        recommended_bid_amount = min(
+            valuation_ceiling,
+            max(minimum_bid, property_data.price),
+        )
+        recommended_bid_reason = "bid_deliberate_amount_at_or_below_valuation"
+    else:
+        recommended_auction_action_type = "PASS_AUCTION"
+        recommended_bid_amount = None
+        recommended_bid_reason = (
+            "pass_to_preserve_cash_reserve"
+            if minimum_bid > cash_limited_bid_ceiling
+            else "pass_minimum_above_valuation"
+        )
+    recommended_auction_action = _recommended_auction_action_template(
+        bid_action=bid_action,
+        pass_action=pass_action,
+        property_id=auction.property_id,
+        recommended_auction_action_type=recommended_auction_action_type,
+        recommended_bid_amount=recommended_bid_amount,
+        recommended_bid_reason=recommended_bid_reason,
+    )
+    return {
+        "property_id": auction.property_id,
+        "property_name": property_data.name,
+        "property_group": property_data.group,
+        "property_price": property_data.price,
+        "current_high_bidder_id": auction.high_bidder_id,
+        "current_high_bid_amount": auction.high_bid_amount,
+        "minimum_bid": _int_or_zero(bid_payload.get("amount")),
+        "cash_available": player.cash,
+        "cash_reserve_floor": cash_reserve_floor,
+        "cash_limited_bid_ceiling": cash_limited_bid_ceiling,
+        "same_group_owned_property_ids": same_group_owned_property_ids,
+        "property_group_size": property_group_size,
+        "completes_property_group": completes_property_group,
+        "opponent_group_completion_threats": opponent_group_completion_threats,
+        "strategic_valuation_ceiling": strategic_valuation_ceiling,
+        "valuation_ceiling": valuation_ceiling,
+        "valuation_basis": valuation_basis,
+        "recommended_auction_action_type": recommended_auction_action_type,
+        "recommended_bid_amount": recommended_bid_amount,
+        "recommended_bid_reason": recommended_bid_reason,
+        "recommended_auction_action": recommended_auction_action,
+        "pass_action_available": any(
+            action.get("type") == "PASS_AUCTION" for action in legal_actions
+        ),
+        "bid_payload_amount_is_floor": True,
+    }
+
+
+def _recommended_auction_action_template(
+    *,
+    bid_action: Mapping[str, Any],
+    pass_action: Mapping[str, Any] | None,
+    property_id: str,
+    recommended_auction_action_type: str,
+    recommended_bid_amount: int | None,
+    recommended_bid_reason: str,
+) -> dict[str, Any] | None:
+    if (
+        recommended_auction_action_type == "BID_AUCTION"
+        and recommended_bid_amount is not None
+    ):
+        payload = dict(_mapping(bid_action.get("payload")))
+        payload["property_id"] = property_id
+        payload["amount"] = recommended_bid_amount
+        return {
+            "type": "BID_AUCTION",
+            "payload": payload,
+            "reason_code": recommended_bid_reason,
+        }
+    if recommended_auction_action_type == "PASS_AUCTION" and pass_action is not None:
+        return _legal_action_template(pass_action, recommended_bid_reason)
+    return None
+
+
+def _development_opportunities(
+    state: GameState,
+    actor_id: str,
+    legal_actions: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    build_actions = [action for action in legal_actions if action.get("type") == "BUY_HOUSE"]
+    if not build_actions:
+        return []
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    player = next((candidate for candidate in state.players if candidate.id == actor_id), None)
+    if player is None:
+        return []
+
+    opportunities: list[dict[str, Any]] = []
+    for action in build_actions:
+        payload = _mapping(action.get("payload"))
+        property_id = _string_or_none(payload.get("property_id"))
+        if property_id is None:
+            continue
+        property_data = properties_by_id.get(property_id)
+        if property_data is None or property_data.kind != "street":
+            continue
+        group = groups_by_id.get(property_data.group)
+        if group is None:
+            continue
+        group_properties = [
+            properties_by_id[group_property_id]
+            for group_property_id in group.property_ids
+            if group_property_id in properties_by_id
+        ]
+        group_ownerships = [
+            ownership_by_property_id.get(group_property_id)
+            for group_property_id in group.property_ids
+        ]
+        if not all(
+            ownership is not None and ownership.owner_id == actor_id and not ownership.mortgaged
+            for ownership in group_ownerships
+        ):
+            continue
+
+        cost = _int_or_zero(payload.get("cost"))
+        group_improvement_levels = {
+            ownership.property_id: 5 if ownership.hotel else ownership.houses
+            for ownership in group_ownerships
+            if ownership is not None
+        }
+        minimum_group_improvement_level = min(group_improvement_levels.values(), default=0)
+        maximum_group_improvement_level = max(group_improvement_levels.values(), default=0)
+        development_priority_score = _street_group_completion_priority_score(
+            group_properties,
+            group.house_cost,
+        )
+        current_improvement_level = group_improvement_levels.get(property_id, 0)
+        even_building_priority = maximum_group_improvement_level - current_improvement_level
+        marginal_rent_gain = _marginal_rent_gain(property_data, current_improvement_level)
+        cash_after_cost = player.cash - cost
+        opportunities.append(
+            {
+                "action_type": "BUY_HOUSE",
+                "property_id": property_id,
+                "property_name": property_data.name,
+                "group": property_data.group,
+                "group_name": group.name,
+                "development_priority_score": development_priority_score,
+                "development_priority_basis": (
+                    "three_house_group_rent_pressure_minus_one_even_round_development_cost"
+                ),
+                "marginal_rent_gain": marginal_rent_gain,
+                "marginal_rent_gain_basis": "rent_after_next_improvement_minus_current_rent",
+                "cost": cost,
+                "cash_before": player.cash,
+                "cash_after_cost": cash_after_cost,
+                "cash_reserve_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                "cash_after_cost_is_healthy": cash_after_cost >= PURCHASE_HEALTHY_CASH_FLOOR,
+                "current_improvement_level": current_improvement_level,
+                "minimum_group_improvement_level": minimum_group_improvement_level,
+                "maximum_group_improvement_level": maximum_group_improvement_level,
+                "even_building_priority": even_building_priority,
+                "group_improvement_levels": group_improvement_levels,
+                "recommendation": (
+                    "Prefer this legal BUY_HOUSE action before rolling when it has "
+                    "the best available development priority, follows even-building "
+                    "pressure, and has strong marginal rent gain unless a specific "
+                    "liquidity risk outweighs development."
+                ),
+            }
+        )
+
+    return [
+        opportunity
+        for _, opportunity in sorted(
+            enumerate(opportunities),
+            key=lambda indexed_opportunity: (
+                -_int_or_zero(indexed_opportunity[1].get("development_priority_score")),
+                -_int_or_zero(indexed_opportunity[1].get("even_building_priority")),
+                -_int_or_zero(indexed_opportunity[1].get("marginal_rent_gain")),
+                indexed_opportunity[0],
+            ),
+        )
+    ]
+
+
+def _negotiation_strategy_guidance(
+    state: GameState,
+    actor_id: str,
+    negotiations: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    trade_opportunities, deferred_trade_opportunities = _property_group_trade_opportunities(
+        state,
+        actor_id,
+        negotiations,
+    )
+    guidance_messages: list[str] = []
+    if trade_opportunities:
+        guidance_messages.append(
+            "Open a concise negotiation for the highest-priority trade opportunity before ordinary low-impact actions."
+        )
+    elif deferred_trade_opportunities:
+        guidance_messages.append(
+            "Wait on near-monopoly negotiations until the available cash budget can support a credible offer."
+        )
+
+    guidance: dict[str, Any] = {
+        "recommended_decision_types": ["open_negotiation"] if trade_opportunities else [],
+        "trade_opportunities": trade_opportunities,
+        "deferred_trade_opportunities": deferred_trade_opportunities,
+        "guidance": guidance_messages,
+    }
+    if trade_opportunities:
+        template = _open_negotiation_payload_template(trade_opportunities[0])
+        guidance["open_negotiation_payload_template"] = template
+        guidance["open_negotiation_schema_notes"] = {
+            "participant_player_ids": (
+                "Use exactly the participant_player_ids from the template; the list must "
+                "include both this AI player and the target owner."
+            ),
+            "context": (
+                "Return open_negotiation.negotiation.context as a JSON object encoded as a "
+                "JSON string. Use context_json_string_example as the exact shape."
+            ),
+            "context_json_string_example": json.dumps(
+                template["context"],
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        }
+    return guidance
+
+
+def _open_negotiation_payload_template(opportunity: Mapping[str, Any]) -> dict[str, Any]:
+    target_property_name = (
+        _string_or_none(opportunity.get("target_property_name")) or "target property"
+    )
+    group_name = _string_or_none(opportunity.get("group_name")) or "property group"
+    opponent_player_name = _string_or_none(opportunity.get("opponent_player_name"))
+    if (
+        str(opportunity.get("kind", "")).startswith("block_opponent_")
+        and opponent_player_name is not None
+    ):
+        topic = f"Trade for {target_property_name} to block {opponent_player_name}'s {group_name} monopoly"
+    else:
+        topic = f"Trade for {target_property_name} to complete {group_name}"
+    context = {
+        "topic": topic,
+        "target_property_id": _string_or_none(opportunity.get("target_property_id")),
+        "target_property_name": target_property_name,
+        "target_owner_id": _string_or_none(opportunity.get("target_owner_id")),
+        "target_owner_name": _string_or_none(opportunity.get("target_owner_name")),
+        "strategic_reason": _string_or_none(opportunity.get("strategic_reason")),
+        "suggested_offer": _mapping(opportunity.get("suggested_offer")),
+    }
+    opponent_player_id = _string_or_none(opportunity.get("opponent_player_id"))
+    if opponent_player_id is not None:
+        context["opponent_player_id"] = opponent_player_id
+    if opponent_player_name is not None:
+        context["opponent_player_name"] = opponent_player_name
+    return {
+        "participant_player_ids": _string_list(opportunity.get("participants")),
+        "context": context,
+    }
+
+
+def _deal_proposal_guidance(
+    state: GameState,
+    actor_id: str,
+    negotiations: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
+    candidates = [
+        candidate
+        for row in _sorted_rows(negotiations)
+        if (candidate := _deal_proposal_candidate_from_negotiation(
+            row,
+            actor_id=actor_id,
+            ownership_by_property_id=ownership_by_property_id,
+            cash_available=player_cash,
+        ))
+        is not None
+    ]
+    templates = [payload for kind, payload in candidates if kind == "template"]
+    deferred_proposal_opportunities = [
+        payload for kind, payload in candidates if kind == "deferred"
+    ]
+    guidance_messages: list[str] = []
+    if templates:
+        guidance_messages.append(
+            "Use the highest-priority deal_payload_template for deal_proposal unless visible terms require a safer counter."
+        )
+    if deferred_proposal_opportunities:
+        guidance_messages.append(
+            "Wait on deal_proposal when current cash can no longer support the saved offer floor above reserve."
+        )
+
+    return {
+        "recommended_decision_types": ["deal_proposal"] if templates else [],
+        "proposal_templates": templates,
+        "deferred_proposal_opportunities": deferred_proposal_opportunities,
+        "guidance": guidance_messages,
+    }
+
+
+def _deal_proposal_candidate_from_negotiation(
+    row: Mapping[str, Any],
+    *,
+    actor_id: str,
+    ownership_by_property_id: Mapping[str, Any],
+    cash_available: int,
+) -> tuple[str, dict[str, Any]] | None:
+    if _string_or_none(row.get("status")) not in ACTIVE_NEGOTIATION_STATUSES:
+        return None
+
+    stored_context = _mapping(row.get("context"))
+    participant_player_ids = _string_list(stored_context.get("participant_player_ids"))
+    if actor_id not in participant_player_ids:
+        return None
+    if _string_or_none(stored_context.get("current_deal_id")) is not None:
+        return None
+
+    context = _mapping(stored_context.get("context"))
+    target_property_id = _string_or_none(context.get("target_property_id"))
+    target_owner_id = _string_or_none(context.get("target_owner_id"))
+    if target_property_id is None or target_owner_id is None:
+        return None
+    if target_owner_id == actor_id or target_owner_id not in participant_player_ids:
+        return None
+
+    target_ownership = ownership_by_property_id.get(target_property_id)
+    if target_ownership is not None and target_ownership.owner_id != target_owner_id:
+        return None
+
+    suggested_offer = _mapping(context.get("suggested_offer"))
+    cash_budget_floor = _int_or_zero(suggested_offer.get("cash_budget_floor"))
+    cash_budget_ceiling = _int_or_zero(suggested_offer.get("cash_budget_ceiling"))
+    if cash_budget_floor <= 0 or cash_budget_ceiling < cash_budget_floor:
+        return None
+
+    current_cash_budget_ceiling = min(
+        cash_budget_ceiling,
+        max(cash_available - PURCHASE_HEALTHY_CASH_FLOOR, 0),
+    )
+    target_property_name = (
+        _string_or_none(context.get("target_property_name")) or target_property_id
+    )
+    if current_cash_budget_ceiling < cash_budget_floor:
+        return (
+            "deferred",
+            {
+                "negotiation_id": _string_or_none(row.get("id")),
+                "target_property_id": target_property_id,
+                "target_property_name": target_property_name,
+                "target_owner_id": target_owner_id,
+                "cash_budget_floor": cash_budget_floor,
+                "cash_budget_ceiling": cash_budget_ceiling,
+                "current_cash_budget_ceiling": current_cash_budget_ceiling,
+                "cash_available": cash_available,
+                "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                "reason": "Current cash above reserve cannot support the saved offer floor.",
+            },
+        )
+
+    recommended_cash_offer = (
+        cash_budget_floor + (current_cash_budget_ceiling - cash_budget_floor) // 2
+    )
+    recipient_player_ids = [
+        player_id for player_id in participant_player_ids if player_id != actor_id
+    ]
+    terms = {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": participant_player_ids,
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "from_player_id": actor_id,
+                "to_player_id": target_owner_id,
+                "amount": recommended_cash_offer,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "from_player_id": target_owner_id,
+                "to_player_id": actor_id,
+                "property_id": target_property_id,
+            },
+        ],
+    }
+    template = {
+        "negotiation_id": _string_or_none(row.get("id")),
+        "target_property_id": target_property_id,
+        "target_property_name": target_property_name,
+        "target_owner_id": target_owner_id,
+        "target_owner_name": _string_or_none(context.get("target_owner_name")),
+        "cash_budget_floor": cash_budget_floor,
+        "cash_budget_ceiling": cash_budget_ceiling,
+        "current_cash_budget_ceiling": current_cash_budget_ceiling,
+        "cash_available": cash_available,
+        "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+        "recommended_cash_offer": recommended_cash_offer,
+        "deal_payload_template": {
+            "recipient_player_ids": recipient_player_ids,
+            "message": _deal_proposal_message(
+                topic=_string_or_none(context.get("topic")),
+                target_property_name=target_property_name,
+                cash_offer=recommended_cash_offer,
+            ),
+            "terms": terms,
+        },
+        "terms_json_string_example": json.dumps(
+            terms,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    }
+    avoid_trading_away = _string_list(
+        suggested_offer.get("avoid_trading_away_group_property_ids")
+    )
+    if avoid_trading_away:
+        template["avoid_trading_away_group_property_ids"] = avoid_trading_away
+    do_not_trade_to_opponent_id = _string_or_none(
+        suggested_offer.get("do_not_trade_target_to_opponent_player_id")
+    )
+    if do_not_trade_to_opponent_id is not None:
+        template["do_not_trade_target_to_opponent_player_id"] = do_not_trade_to_opponent_id
+    return ("template", template)
+
+
+def _deal_proposal_message(
+    *,
+    topic: str | None,
+    target_property_name: str,
+    cash_offer: int,
+) -> str:
+    prefix = f"Trade for {target_property_name} to "
+    if topic is not None and topic.startswith(prefix):
+        return f"I can offer ${cash_offer} for {target_property_name} to {topic[len(prefix):]}."
+    return f"I can offer ${cash_offer} for {target_property_name}."
+
+
+def _deal_evaluation_guidance(
+    state: GameState,
+    actor_id: str,
+    deals: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    evaluations = [
+        evaluation
+        for deal in _sorted_rows(deals)
+        if _string_or_none(deal.get("status")) == "proposed"
+        if (evaluation := _deal_completion_evaluation(state, actor_id, deal)) is not None
+    ]
+    recommended_accept_reject_by_deal_id = {
+        str(evaluation["deal_id"]): str(evaluation["recommendation"])
+        for evaluation in evaluations
+        if evaluation.get("recommendation") in {"accept", "reject"}
+    }
+    recommended_accept_reject_actions = [
+        template
+        for evaluation in evaluations
+        if (template := _accept_reject_template_from_evaluation(evaluation)) is not None
+    ]
+    guidance_messages: list[str] = []
+    if any(evaluation.get("recommendation") == "reject" for evaluation in evaluations):
+        guidance_messages.append(
+            "Reject proposed deals that transfer away a property completing an opponent's set, "
+            "break up this player's complete property group below value, overpay for this player's "
+            "own set completion, or breach the liquidity floor."
+        )
+    if any(evaluation.get("recommendation") == "accept" for evaluation in evaluations):
+        guidance_messages.append(
+            "Accept proposed deals that complete this player's color group, railroad set, or utility "
+            "set when the cash payment is within the strategic value ceiling and leaves enough liquidity."
+        )
+
+    return {
+        "recommended_accept_reject_by_deal_id": recommended_accept_reject_by_deal_id,
+        "recommended_accept_reject_actions": recommended_accept_reject_actions,
+        "deal_evaluations": evaluations,
+        "guidance": guidance_messages,
+    }
+
+
+def _accept_reject_template_from_evaluation(
+    evaluation: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    deal_id = _string_or_none(evaluation.get("deal_id"))
+    decision = _string_or_none(evaluation.get("recommendation"))
+    if deal_id is None or decision not in {"accept", "reject"}:
+        return None
+    reason_code = _string_or_none(evaluation.get("reason_code")) or decision
+    payload = {
+        "deal_id": deal_id,
+        "decision": decision,
+        "message": _accept_reject_message(
+            decision=decision,
+            reason_code=reason_code,
+        ),
+    }
+    return {
+        "deal_id": deal_id,
+        "decision": decision,
+        "reason_code": reason_code,
+        "accept_reject_payload_template": payload,
+    }
+
+
+def _accept_reject_message(*, decision: str, reason_code: str) -> str:
+    if decision == "accept":
+        return "I accept because this deal completes my set within value and liquidity limits."
+    if reason_code.endswith("_for_weaker_actor_completion"):
+        return "I reject because this trade gives you the stronger completed set."
+    if reason_code.endswith("_below_cash_floor"):
+        return "I reject because this deal would leave my cash below the liquidity floor."
+    if reason_code.endswith("_above_value_ceiling"):
+        return "I reject because the payment is above my strategic value ceiling."
+    if "breaks_actor_complete" in reason_code:
+        return "I reject because this would break up my complete set below fair value."
+    return "I reject because this offer undervalues set leverage."
+
+
+def _counteroffer_guidance(
+    state: GameState,
+    actor_id: str,
+    deals: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    templates = [
+        template
+        for deal in _sorted_rows(deals)
+        if _string_or_none(deal.get("status")) == "proposed"
+        if (evaluation := _deal_completion_evaluation(state, actor_id, deal)) is not None
+        if (template := _counteroffer_template_from_evaluation(deal, evaluation, actor_id))
+        is not None
+    ]
+    guidance_messages: list[str] = []
+    if templates:
+        guidance_messages.append(
+            "Use the highest-priority counteroffer_payload_template when a proposed deal has strategic upside but breaches value or liquidity limits."
+        )
+
+    return {
+        "recommended_decision_types": ["counteroffer"] if templates else [],
+        "counteroffer_templates": templates,
+        "guidance": guidance_messages,
+    }
+
+
+def _counteroffer_template_from_evaluation(
+    deal: Mapping[str, Any],
+    evaluation: Mapping[str, Any],
+    actor_id: str,
+) -> dict[str, Any] | None:
+    if evaluation.get("recommendation") != "reject":
+        return None
+    opportunity = _mapping(evaluation.get("opportunity"))
+    if not opportunity:
+        return None
+    reason_code = _string_or_none(evaluation.get("reason_code")) or ""
+    if not (
+        reason_code.endswith("_above_value_ceiling")
+        or reason_code.endswith("_below_cash_floor")
+    ):
+        return None
+
+    sender_player_id = _string_or_none(opportunity.get("sender_player_id"))
+    property_id = _string_or_none(opportunity.get("property_id"))
+    if sender_player_id is None or property_id is None:
+        return None
+
+    current_cash_payment = _int_or_zero(evaluation.get("actor_pays_cash_total"))
+    current_payment_value = _int_or_zero(
+        opportunity.get("total_payment_value")
+    ) or current_cash_payment
+    net_cash_payment = _int_or_zero(opportunity.get("net_cash_payment"))
+    cash_available = _int_or_zero(opportunity.get("cash_after_net_payment")) + net_cash_payment
+    cash_limited_ceiling = max(cash_available - GROUP_COMPLETION_PURCHASE_CASH_FLOOR, 0)
+    value_ceiling = _int_or_zero(opportunity.get("maximum_cash_value_ceiling"))
+    recommended_cash_amount = min(value_ceiling, cash_limited_ceiling)
+    property_price = _int_or_zero(opportunity.get("property_price"))
+    if recommended_cash_amount <= 0 or recommended_cash_amount >= current_payment_value:
+        return None
+    if property_price > 0 and recommended_cash_amount < property_price:
+        return None
+
+    terms_source = _mapping(deal.get("terms"))
+    participants = _string_list(terms_source.get("participants"))
+    if not participants:
+        participants = [actor_id, sender_player_id]
+    terms = {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": participants,
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "from_player_id": actor_id,
+                "to_player_id": sender_player_id,
+                "amount": recommended_cash_amount,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "from_player_id": sender_player_id,
+                "to_player_id": actor_id,
+                "property_id": property_id,
+            },
+        ],
+    }
+    template = {
+        "responds_to_deal_id": _string_or_none(deal.get("id")),
+        "negotiation_id": _string_or_none(deal.get("negotiation_id")),
+        "reason_code": reason_code,
+        "target_property_id": property_id,
+        "target_property_name": _string_or_none(opportunity.get("property_name")),
+        "target_owner_id": sender_player_id,
+        "current_cash_amount": current_cash_payment,
+        "current_payment_value": current_payment_value,
+        "recommended_cash_amount": recommended_cash_amount,
+        "maximum_cash_value_ceiling": value_ceiling,
+        "cash_limited_ceiling": cash_limited_ceiling,
+        "counteroffer_payload_template": {
+            "responds_to_deal_id": _string_or_none(deal.get("id")),
+            "message": _counteroffer_message(
+                reason_code=reason_code,
+                property_name=_string_or_none(opportunity.get("property_name")) or property_id,
+                group_name=_string_or_none(opportunity.get("group_name")) or "the set",
+                cash_amount=recommended_cash_amount,
+            ),
+            "terms": terms,
+        },
+        "terms_json_string_example": json.dumps(
+            terms,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    }
+    return template
+
+
+def _counteroffer_message(
+    *,
+    reason_code: str,
+    property_name: str,
+    group_name: str,
+    cash_amount: int,
+) -> str:
+    if reason_code.endswith("_below_cash_floor"):
+        return (
+            f"I can counter at ${cash_amount} for {property_name} to complete "
+            f"{group_name} while preserving cash."
+        )
+    return (
+        f"I can counter at ${cash_amount} for {property_name} to complete "
+        f"{group_name} without overpaying."
+    )
+
+
+def _deal_completion_evaluation(
+    state: GameState,
+    actor_id: str,
+    deal: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    terms = _mapping(deal.get("terms"))
+    raw_instruments = terms.get("terms")
+    if not isinstance(raw_instruments, Sequence) or isinstance(raw_instruments, str):
+        return None
+
+    instruments = [dict(term) for term in raw_instruments if isinstance(term, Mapping)]
+    actor_receives_cash_total = sum(
+        _int_or_zero(term.get("amount"))
+        for term in instruments
+        if term.get("kind") == "immediate_cash_transfer"
+        and _string_or_none(term.get("to_player_id")) == actor_id
+    )
+    actor_pays_cash_total = sum(
+        _int_or_zero(term.get("amount"))
+        for term in instruments
+        if term.get("kind") == "immediate_cash_transfer"
+        and _string_or_none(term.get("from_player_id")) == actor_id
+    )
+    actor_transfers = [
+        {
+            "property_id": _string_or_none(term.get("property_id")),
+            "recipient_player_id": _string_or_none(term.get("to_player_id")),
+        }
+        for term in instruments
+        if term.get("kind") == "immediate_property_transfer"
+        and _string_or_none(term.get("from_player_id")) == actor_id
+        and _string_or_none(term.get("to_player_id")) not in {None, actor_id}
+    ]
+    actor_transfers_property_ids = [
+        str(transfer["property_id"])
+        for transfer in actor_transfers
+        if transfer.get("property_id") is not None
+    ]
+    actor_receives = [
+        {
+            "property_id": _string_or_none(term.get("property_id")),
+            "sender_player_id": _string_or_none(term.get("from_player_id")),
+        }
+        for term in instruments
+        if term.get("kind") == "immediate_property_transfer"
+        and _string_or_none(term.get("to_player_id")) == actor_id
+        and _string_or_none(term.get("from_player_id")) not in {None, actor_id}
+    ]
+    actor_receives_property_ids = [
+        str(receipt["property_id"])
+        for receipt in actor_receives
+        if receipt.get("property_id") is not None
+    ]
+    if not actor_transfers and not actor_receives:
+        return None
+
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    groups_by_id = {group.id: group for group in data.property_groups}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
+    actor_receives_property_value_total = sum(
+        properties_by_id[property_id].price
+        for property_id in actor_receives_property_ids
+        if property_id in properties_by_id
+    )
+    actor_transfers_property_value_total = sum(
+        properties_by_id[property_id].price
+        for property_id in actor_transfers_property_ids
+        if property_id in properties_by_id
+    )
+    actor_receives_total_compensation_value = (
+        actor_receives_cash_total + actor_receives_property_value_total
+    )
+    actor_receives_net_compensation_value = (
+        actor_receives_total_compensation_value - actor_pays_cash_total
+    )
+    actor_net_cash_payment = max(actor_pays_cash_total - actor_receives_cash_total, 0)
+    actor_total_payment_value = actor_net_cash_payment + actor_transfers_property_value_total
+    actor_cash_after_net_payment = player_cash - actor_net_cash_payment
+    actor_completion_opportunities_by_property_id: dict[str, dict[str, Any]] = {}
+    for receipt in actor_receives:
+        receipt_property_id = _string_or_none(receipt.get("property_id"))
+        sender_player_id = _string_or_none(receipt.get("sender_player_id"))
+        if receipt_property_id is None or sender_player_id is None:
+            continue
+        receipt_ownership = ownership_by_property_id.get(receipt_property_id)
+        receipt_property_data = properties_by_id.get(receipt_property_id)
+        if (
+            receipt_ownership is None
+            or receipt_ownership.owner_id != sender_player_id
+            or receipt_property_data is None
+        ):
+            continue
+        receipt_group = groups_by_id.get(receipt_property_data.group)
+        if receipt_group is None or len(receipt_group.property_ids) <= 1:
+            continue
+        receipt_group_kind = _deal_group_kind(receipt_group.kind)
+        actor_already_owned_property_ids = [
+            group_property_id
+            for group_property_id in receipt_group.property_ids
+            if group_property_id != receipt_property_id
+            and (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+            and group_ownership.owner_id == actor_id
+        ]
+        if len(actor_already_owned_property_ids) != len(receipt_group.property_ids) - 1:
+            continue
+        receipt_group_properties = [
+            properties_by_id[group_property_id]
+            for group_property_id in receipt_group.property_ids
+            if group_property_id in properties_by_id
+        ]
+        actor_completion_opportunities_by_property_id[receipt_property_id] = {
+            "property_id": receipt_property_id,
+            "property_name": receipt_property_data.name,
+            "group": receipt_group.id,
+            "group_name": receipt_group.name,
+            "group_kind": receipt_group_kind,
+            "completion_priority_score": _property_group_completion_priority_score(
+                receipt_group_kind,
+                receipt_group_properties,
+                receipt_group.house_cost,
+            ),
+        }
+
+    for transfer in actor_transfers:
+        property_id = _string_or_none(transfer.get("property_id"))
+        recipient_player_id = _string_or_none(transfer.get("recipient_player_id"))
+        if property_id is None or recipient_player_id is None:
+            continue
+        ownership = ownership_by_property_id.get(property_id)
+        property_data = properties_by_id.get(property_id)
+        if ownership is None or ownership.owner_id != actor_id or property_data is None:
+            continue
+        group = groups_by_id.get(property_data.group)
+        if group is None or len(group.property_ids) <= 1:
+            continue
+        group_kind = _deal_group_kind(group.kind)
+        recipient_already_owned_property_ids = [
+            group_property_id
+            for group_property_id in group.property_ids
+            if group_property_id != property_id
+            and (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+            and group_ownership.owner_id == recipient_player_id
+        ]
+        if len(recipient_already_owned_property_ids) != len(group.property_ids) - 1:
+            actor_owned_group_property_ids = [
+                group_property_id
+                for group_property_id in group.property_ids
+                if (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+                and group_ownership.owner_id == actor_id
+            ]
+            if len(actor_owned_group_property_ids) != len(group.property_ids):
+                continue
+
+            minimum_cash_value_floor = property_data.price * 3
+            if actor_receives_net_compensation_value >= minimum_cash_value_floor:
+                continue
+
+            risk = {
+                "kind": _actor_group_breakup_kind(group_kind),
+                "property_id": property_id,
+                "property_name": property_data.name,
+                "property_price": property_data.price,
+                "group": group.id,
+                "group_name": group.name,
+                "recipient_player_id": recipient_player_id,
+                "actor_owned_group_property_ids": actor_owned_group_property_ids,
+                "minimum_cash_value_floor": minimum_cash_value_floor,
+                "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+            }
+            if actor_pays_cash_total > 0:
+                risk.update(
+                    {
+                        "total_compensation_value": actor_receives_total_compensation_value,
+                        "net_compensation_value": actor_receives_net_compensation_value,
+                        "net_compensation_value_gap": (
+                            minimum_cash_value_floor
+                            - actor_receives_net_compensation_value
+                        ),
+                    }
+                )
+            if actor_receives_property_ids:
+                risk.update(
+                    {
+                        "actor_receives_property_value_total": (
+                            actor_receives_property_value_total
+                        ),
+                        "total_compensation_value": actor_receives_total_compensation_value,
+                        "compensation_value_gap": (
+                            minimum_cash_value_floor
+                            - actor_receives_total_compensation_value
+                        ),
+                    }
+                )
+            _include_property_group_kind(risk, group_kind)
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": _deal_group_reason_code(
+                    "transfers_property_that_breaks_actor_complete",
+                    group_kind,
+                    "below_floor",
+                ),
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "risk": risk,
+            }
+
+        minimum_cash_value_floor = property_data.price * 3 // 2
+        group_properties = [
+            properties_by_id[group_property_id]
+            for group_property_id in group.property_ids
+            if group_property_id in properties_by_id
+        ]
+        opponent_completion_priority_score = _property_group_completion_priority_score(
+            group_kind,
+            group_properties,
+            group.house_cost,
+        )
+        actor_completion_opportunity = max(
+            actor_completion_opportunities_by_property_id.values(),
+            key=lambda opportunity: _int_or_zero(
+                opportunity.get("completion_priority_score")
+            ),
+            default=None,
+        )
+        actor_completion_priority_score = _int_or_zero(
+            actor_completion_opportunity.get("completion_priority_score")
+            if actor_completion_opportunity is not None
+            else None
+        )
+        if (
+            actor_receives_net_compensation_value >= minimum_cash_value_floor
+            and actor_completion_opportunity is not None
+            and actor_completion_priority_score < opponent_completion_priority_score
+        ):
+            risk = {
+                "kind": _opponent_group_completion_kind(group_kind),
+                "property_id": property_id,
+                "property_name": property_data.name,
+                "property_price": property_data.price,
+                "group": group.id,
+                "group_name": group.name,
+                "recipient_player_id": recipient_player_id,
+                "recipient_already_owned_property_ids": recipient_already_owned_property_ids,
+                "minimum_cash_value_floor": minimum_cash_value_floor,
+                "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+                "actor_receives_property_value_total": actor_receives_property_value_total,
+                "total_compensation_value": actor_receives_total_compensation_value,
+                "net_compensation_value": actor_receives_net_compensation_value,
+                "net_compensation_value_gap": (
+                    minimum_cash_value_floor - actor_receives_net_compensation_value
+                ),
+                "opponent_completion_priority_score": opponent_completion_priority_score,
+                "actor_completion_priority_score": actor_completion_priority_score,
+                "completion_priority_gap": (
+                    opponent_completion_priority_score - actor_completion_priority_score
+                ),
+                "actor_completion_property_id": actor_completion_opportunity.get(
+                    "property_id"
+                ),
+                "actor_completion_group": actor_completion_opportunity.get("group"),
+                "actor_completion_group_name": actor_completion_opportunity.get(
+                    "group_name"
+                ),
+            }
+            _include_property_group_kind(risk, group_kind)
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": _deal_group_reason_code(
+                    "transfers_property_that_completes_opponent",
+                    group_kind,
+                    "for_weaker_actor_completion",
+                ),
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "risk": risk,
+            }
+        if actor_receives_net_compensation_value >= minimum_cash_value_floor:
+            continue
+
+        risk = {
+            "kind": _opponent_group_completion_kind(group_kind),
+            "property_id": property_id,
+            "property_name": property_data.name,
+            "property_price": property_data.price,
+            "group": group.id,
+            "group_name": group.name,
+            "recipient_player_id": recipient_player_id,
+            "recipient_already_owned_property_ids": recipient_already_owned_property_ids,
+            "minimum_cash_value_floor": minimum_cash_value_floor,
+            "cash_value_gap": minimum_cash_value_floor - actor_receives_cash_total,
+        }
+        if actor_pays_cash_total > 0:
+            risk.update(
+                {
+                    "total_compensation_value": actor_receives_total_compensation_value,
+                    "net_compensation_value": actor_receives_net_compensation_value,
+                    "net_compensation_value_gap": (
+                        minimum_cash_value_floor - actor_receives_net_compensation_value
+                    ),
+                }
+            )
+        if actor_receives_property_ids:
+            risk.update(
+                {
+                    "actor_receives_property_value_total": actor_receives_property_value_total,
+                    "total_compensation_value": actor_receives_total_compensation_value,
+                    "compensation_value_gap": (
+                        minimum_cash_value_floor - actor_receives_total_compensation_value
+                    ),
+                }
+            )
+        _include_property_group_kind(risk, group_kind)
+        return {
+            "deal_id": _string_or_none(deal.get("id")),
+            "recommendation": "reject",
+            "reason_code": _deal_group_reason_code(
+                "transfers_property_that_completes_opponent",
+                group_kind,
+                "below_floor",
+            ),
+            "actor_id": actor_id,
+            "actor_receives_cash_total": actor_receives_cash_total,
+            "actor_pays_cash_total": actor_pays_cash_total,
+            "actor_transfers_property_ids": actor_transfers_property_ids,
+            "actor_receives_property_ids": actor_receives_property_ids,
+            "risk": risk,
+        }
+
+    for receipt in actor_receives:
+        property_id = _string_or_none(receipt.get("property_id"))
+        sender_player_id = _string_or_none(receipt.get("sender_player_id"))
+        if property_id is None or sender_player_id is None:
+            continue
+        ownership = ownership_by_property_id.get(property_id)
+        property_data = properties_by_id.get(property_id)
+        if ownership is None or ownership.owner_id != sender_player_id or property_data is None:
+            continue
+        group = groups_by_id.get(property_data.group)
+        if group is None or len(group.property_ids) <= 1:
+            continue
+        group_kind = _deal_group_kind(group.kind)
+        actor_already_owned_property_ids = [
+            group_property_id
+            for group_property_id in group.property_ids
+            if group_property_id != property_id
+            and (group_ownership := ownership_by_property_id.get(group_property_id)) is not None
+            and group_ownership.owner_id == actor_id
+        ]
+        if len(actor_already_owned_property_ids) != len(group.property_ids) - 1:
+            continue
+
+        maximum_cash_value_ceiling = property_data.price * 3 // 2
+        cash_after_payment = player_cash - actor_pays_cash_total
+        opportunity = {
+            "kind": _actor_group_completion_kind(group_kind),
+            "property_id": property_id,
+            "property_name": property_data.name,
+            "property_price": property_data.price,
+            "group": group.id,
+            "group_name": group.name,
+            "sender_player_id": sender_player_id,
+            "actor_already_owned_property_ids": actor_already_owned_property_ids,
+            "maximum_cash_value_ceiling": maximum_cash_value_ceiling,
+            "net_cash_payment": actor_net_cash_payment,
+            "actor_transfers_property_value_total": actor_transfers_property_value_total,
+            "total_payment_value": actor_total_payment_value,
+            "cash_after_payment": cash_after_payment,
+            "cash_after_net_payment": actor_cash_after_net_payment,
+            "group_completion_cash_floor": GROUP_COMPLETION_PURCHASE_CASH_FLOOR,
+        }
+        _include_property_group_kind(opportunity, group_kind)
+        if actor_total_payment_value > maximum_cash_value_ceiling:
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": _deal_group_reason_code(
+                    "receives_property_that_completes_actor",
+                    group_kind,
+                    "above_value_ceiling",
+                ),
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "opportunity": {
+                    **opportunity,
+                    **(
+                        {
+                            "cash_over_value_ceiling": (
+                                actor_net_cash_payment - maximum_cash_value_ceiling
+                            )
+                        }
+                        if actor_net_cash_payment > maximum_cash_value_ceiling
+                        else {}
+                    ),
+                    "payment_value_over_ceiling": (
+                        actor_total_payment_value - maximum_cash_value_ceiling
+                    ),
+                },
+            }
+        if actor_cash_after_net_payment < GROUP_COMPLETION_PURCHASE_CASH_FLOOR:
+            return {
+                "deal_id": _string_or_none(deal.get("id")),
+                "recommendation": "reject",
+                "reason_code": _deal_group_reason_code(
+                    "receives_property_that_completes_actor",
+                    group_kind,
+                    "below_cash_floor",
+                ),
+                "actor_id": actor_id,
+                "actor_receives_cash_total": actor_receives_cash_total,
+                "actor_pays_cash_total": actor_pays_cash_total,
+                "actor_transfers_property_ids": actor_transfers_property_ids,
+                "actor_receives_property_ids": actor_receives_property_ids,
+                "opportunity": {
+                    **opportunity,
+                    "cash_floor_gap": (
+                        GROUP_COMPLETION_PURCHASE_CASH_FLOOR
+                        - actor_cash_after_net_payment
+                    ),
+                },
+            }
+
+        return {
+            "deal_id": _string_or_none(deal.get("id")),
+            "recommendation": "accept",
+            "reason_code": _deal_group_reason_code(
+                "receives_property_that_completes_actor",
+                group_kind,
+                "with_affordable_cash",
+            ),
+            "actor_id": actor_id,
+            "actor_receives_cash_total": actor_receives_cash_total,
+            "actor_pays_cash_total": actor_pays_cash_total,
+            "actor_transfers_property_ids": actor_transfers_property_ids,
+            "actor_receives_property_ids": actor_receives_property_ids,
+            "opportunity": opportunity,
+        }
+    return None
+
+
+def _deal_group_kind(group_kind: str) -> str:
+    if group_kind in {"railroad", "utility"}:
+        return group_kind
+    return "street"
+
+
+def _deal_group_reason_code(prefix: str, group_kind: str, suffix: str) -> str:
+    return f"{prefix}_{group_kind}_group_{suffix}"
+
+
+def _actor_group_completion_kind(group_kind: str) -> str:
+    return f"actor_{group_kind}_group_completion"
+
+
+def _opponent_group_completion_kind(group_kind: str) -> str:
+    return f"opponent_{group_kind}_group_completion"
+
+
+def _actor_group_breakup_kind(group_kind: str) -> str:
+    return f"actor_{group_kind}_group_breakup"
+
+
+def _include_property_group_kind(payload: dict[str, Any], group_kind: str) -> None:
+    if group_kind != "street":
+        payload["property_group_kind"] = group_kind
+
+
+def _property_group_trade_opportunities(
+    state: GameState,
+    actor_id: str,
+    negotiations: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    data = load_classic_monopoly_data()
+    properties_by_id = {property_data.id: property_data for property_data in data.properties}
+    ownership_by_property_id = {
+        ownership.property_id: ownership for ownership in state.property_ownership
+    }
+    player_name_by_id = {player.id: player.name for player in state.players}
+    player_cash = next((player.cash for player in state.players if player.id == actor_id), 0)
+    active_participant_sets = _active_negotiation_participant_sets(negotiations)
+    opportunities: list[tuple[int, dict[str, Any]]] = []
+    deferred_opportunities: list[dict[str, Any]] = []
+
+    for group in data.property_groups:
+        group_properties = [
+            properties_by_id[property_id]
+            for property_id in group.property_ids
+            if property_id in properties_by_id
+        ]
+        if not group_properties:
+            continue
+        group_kind = group.kind
+
+        actor_owned_property_ids: list[str] = []
+        target_ownerships = []
+        for property_data in group_properties:
+            ownership = ownership_by_property_id.get(property_data.id)
+            if ownership is None:
+                continue
+            if ownership.owner_id == actor_id:
+                actor_owned_property_ids.append(property_data.id)
+            elif ownership.owner_id is not None:
+                target_ownerships.append(ownership)
+
+        if (
+            len(actor_owned_property_ids) == len(group.property_ids) - 1
+            and len(target_ownerships) == 1
+        ):
+            target_ownership = target_ownerships[0]
+            target_owner_id = target_ownership.owner_id
+            if target_owner_id is not None and target_owner_id != actor_id:
+                participants = [actor_id, target_owner_id]
+                target_property = properties_by_id[target_ownership.property_id]
+                cash_budget_ceiling = min(
+                    max(player_cash - PURCHASE_HEALTHY_CASH_FLOOR, 0),
+                    target_property.price * 3 // 2,
+                )
+                if frozenset(participants) not in active_participant_sets:
+                    if cash_budget_ceiling < target_property.price:
+                        deferred = {
+                            "kind": _completion_trade_kind(group_kind),
+                            "priority": "deferred_until_cash_offer_is_credible",
+                            "group": group.id,
+                            "group_name": group.name,
+                            "target_property_id": target_property.id,
+                            "target_property_name": target_property.name,
+                            "target_owner_id": target_owner_id,
+                            "target_owner_name": player_name_by_id.get(
+                                target_owner_id, "Unknown player"
+                            ),
+                            "cash_budget_floor": target_property.price,
+                            "cash_budget_ceiling": cash_budget_ceiling,
+                            "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                            "reason": (
+                                "Available cash above the healthy reserve cannot cover the target property list price."
+                            ),
+                        }
+                        if group_kind != "street":
+                            deferred["property_group_kind"] = group_kind
+                        deferred_opportunities.append(deferred)
+                    else:
+                        opportunity = {
+                            "kind": _completion_trade_kind(group_kind),
+                            "priority": "high",
+                            "group": group.id,
+                            "group_name": group.name,
+                            "actor_owned_property_ids": actor_owned_property_ids,
+                            "actor_owned_property_names": [
+                                properties_by_id[property_id].name
+                                for property_id in actor_owned_property_ids
+                            ],
+                            "target_property_id": target_property.id,
+                            "target_property_name": target_property.name,
+                            "target_owner_id": target_owner_id,
+                            "target_owner_name": player_name_by_id.get(
+                                target_owner_id, "Unknown player"
+                            ),
+                            "participants": participants,
+                            "strategic_reason": _completion_strategic_reason(
+                                group_kind, group.name
+                            ),
+                            "suggested_offer": {
+                                "cash_budget_floor": target_property.price,
+                                "cash_budget_ceiling": cash_budget_ceiling,
+                                "avoid_trading_away_group_property_ids": actor_owned_property_ids,
+                            },
+                        }
+                        if group_kind != "street":
+                            opportunity["property_group_kind"] = group_kind
+                        opportunities.append(
+                            (
+                                _property_group_completion_priority_score(
+                                    group_kind, group_properties, group.house_cost
+                                ),
+                                opportunity,
+                            )
+                        )
+
+        owned_by_player: dict[str, list[str]] = {}
+        for group_property in group_properties:
+            ownership = ownership_by_property_id.get(group_property.id)
+            if ownership is None or ownership.owner_id is None or ownership.owner_id == actor_id:
+                continue
+            owned_by_player.setdefault(ownership.owner_id, []).append(group_property.id)
+
+        for opponent_id, opponent_owned_property_ids in owned_by_player.items():
+            if len(opponent_owned_property_ids) != len(group.property_ids) - 1:
+                continue
+            target_property_ids = [
+                property_id
+                for property_id in group.property_ids
+                if property_id not in set(opponent_owned_property_ids)
+            ]
+            if len(target_property_ids) != 1:
+                continue
+            target_property_id = target_property_ids[0]
+            target_ownership = ownership_by_property_id.get(target_property_id)
+            if (
+                target_ownership is None
+                or target_ownership.owner_id is None
+                or target_ownership.owner_id in {actor_id, opponent_id}
+            ):
+                continue
+            target_owner_id = target_ownership.owner_id
+            participants = [actor_id, target_owner_id]
+            if frozenset(participants) in active_participant_sets:
+                continue
+
+            target_property = properties_by_id[target_property_id]
+            cash_budget_ceiling = min(
+                max(player_cash - PURCHASE_HEALTHY_CASH_FLOOR, 0),
+                target_property.price * 3 // 2,
+            )
+            if cash_budget_ceiling < target_property.price:
+                deferred_opportunities.append(
+                    {
+                        "kind": _blocking_trade_kind(group_kind),
+                        "priority": "deferred_until_cash_offer_is_credible",
+                        "group": group.id,
+                        "group_name": group.name,
+                        **({"property_group_kind": group_kind} if group_kind != "street" else {}),
+                        "opponent_player_id": opponent_id,
+                        "opponent_player_name": player_name_by_id.get(
+                            opponent_id, "Unknown player"
+                        ),
+                        "target_property_id": target_property.id,
+                        "target_property_name": target_property.name,
+                        "target_owner_id": target_owner_id,
+                        "target_owner_name": player_name_by_id.get(
+                            target_owner_id, "Unknown player"
+                        ),
+                        "cash_budget_floor": target_property.price,
+                        "cash_budget_ceiling": cash_budget_ceiling,
+                        "healthy_cash_floor": PURCHASE_HEALTHY_CASH_FLOOR,
+                        "reason": (
+                            "Available cash above the healthy reserve cannot cover the target property's blocking value."
+                        ),
+                    }
+                )
+                continue
+
+            opportunities.append(
+                (
+                    _property_group_completion_priority_score(
+                        group_kind,
+                        group_properties,
+                        group.house_cost,
+                    )
+                    - 1,
+                    {
+                        "kind": _blocking_trade_kind(group_kind),
+                        "priority": "medium",
+                        "group": group.id,
+                        "group_name": group.name,
+                        **({"property_group_kind": group_kind} if group_kind != "street" else {}),
+                        "opponent_player_id": opponent_id,
+                        "opponent_player_name": player_name_by_id.get(
+                            opponent_id, "Unknown player"
+                        ),
+                        "opponent_owned_property_ids": opponent_owned_property_ids,
+                        "opponent_owned_property_names": [
+                            properties_by_id[property_id].name
+                            for property_id in opponent_owned_property_ids
+                        ],
+                        "target_property_id": target_property.id,
+                        "target_property_name": target_property.name,
+                        "target_owner_id": target_owner_id,
+                        "target_owner_name": player_name_by_id.get(
+                            target_owner_id, "Unknown player"
+                        ),
+                        "participants": participants,
+                        "strategic_reason": (
+                            f"Acquiring {target_property.name} blocks "
+                            f"{player_name_by_id.get(opponent_id, 'Unknown player')} from completing "
+                            f"{group.name} and preserves set defense."
+                        ),
+                        "suggested_offer": {
+                            "cash_budget_floor": target_property.price,
+                            "cash_budget_ceiling": cash_budget_ceiling,
+                            "do_not_trade_target_to_opponent_player_id": opponent_id,
+                        },
+                    },
+                )
+            )
+
+    def sort_key(opportunity: Mapping[str, Any]) -> tuple[Any, Any]:
+        return opportunity["group"], opportunity["target_property_id"]
+
+    sorted_opportunities = [
+        opportunity
+        for _, opportunity in sorted(
+            opportunities,
+            key=lambda scored_opportunity: (
+                -scored_opportunity[0],
+                scored_opportunity[1]["group"],
+                scored_opportunity[1]["target_property_id"],
+            ),
+        )
+    ]
+    return sorted_opportunities, sorted(deferred_opportunities, key=sort_key)
+
+
+def _completion_trade_kind(group_kind: str) -> str:
+    if group_kind == "railroad":
+        return "complete_railroad_group"
+    if group_kind == "utility":
+        return "complete_utility_group"
+    return "complete_street_group"
+
+
+def _blocking_trade_kind(group_kind: str) -> str:
+    if group_kind == "railroad":
+        return "block_opponent_railroad_group"
+    if group_kind == "utility":
+        return "block_opponent_utility_group"
+    return "block_opponent_street_group"
+
+
+def _completion_strategic_reason(group_kind: str, group_name: str) -> str:
+    if group_kind == "railroad":
+        return f"Completing {group_name} raises railroad rent tiers and strengthens set leverage."
+    if group_kind == "utility":
+        return f"Completing {group_name} doubles utility rent multipliers and strengthens set leverage."
+    return f"Completing {group_name} unlocks BUY_HOUSE development and materially raises rent pressure."
+
+
+def _property_group_completion_priority_score(
+    group_kind: str,
+    group_properties: Sequence[Any],
+    house_cost: int | None,
+) -> int:
+    if group_kind == "railroad":
+        return max(
+            (
+                max(
+                    (_int_or_zero(rent) for rent in (property_data.rent_by_owned_count or ())),
+                    default=0,
+                )
+                for property_data in group_properties
+            ),
+            default=0,
+        )
+    if group_kind == "utility":
+        return max(
+            (
+                max(
+                    (
+                        _int_or_zero(multiplier)
+                        for multiplier in (property_data.rent_multipliers or ())
+                    ),
+                    default=0,
+                )
+                * property_data.price
+                for property_data in group_properties
+            ),
+            default=0,
+        )
+    return _street_group_completion_priority_score(group_properties, house_cost)
+
+
+def _street_group_completion_priority_score(
+    group_properties: Sequence[Any],
+    house_cost: int | None,
+) -> int:
+    total_three_house_rent = sum(
+        property_data.rents[3]
+        for property_data in group_properties
+        if property_data.rents is not None and len(property_data.rents) > 3
+    )
+    development_cost = (house_cost or 0) * len(group_properties)
+    return total_three_house_rent - development_cost
+
+
+def _marginal_rent_gain(property_data: Any, current_improvement_level: int) -> int:
+    rents = getattr(property_data, "rents", None)
+    if rents is None:
+        return 0
+    current_index = max(0, min(current_improvement_level, len(rents) - 1))
+    next_index = min(current_index + 1, len(rents) - 1)
+    return max(0, _int_or_zero(rents[next_index]) - _int_or_zero(rents[current_index]))
+
+
+def _active_negotiation_participant_sets(
+    negotiations: Sequence[Mapping[str, Any]],
+) -> set[frozenset[str]]:
+    participant_sets: set[frozenset[str]] = set()
+    for row in negotiations:
+        status = _string_or_none(row.get("status"))
+        if status not in ACTIVE_NEGOTIATION_STATUSES:
+            continue
+        context = _mapping(row.get("context"))
+        participant_ids = _string_list(context.get("participant_player_ids"))
+        if len(participant_ids) >= 2:
+            participant_sets.add(frozenset(participant_ids))
+    return participant_sets
+
+
 def _owned_property_ids_by_player(state: GameState) -> dict[str, list[str]]:
     owned: dict[str, list[str]] = {player.id: [] for player in state.players}
     for ownership in state.property_ownership:
@@ -800,9 +3291,7 @@ def _memory_snippet(row: Mapping[str, Any]) -> dict[str, Any]:
         "metadata": _mapping(row.get("metadata_blob", row.get("metadata"))),
         "source_decision_id": _string_or_none(row.get("source_decision_id")),
         "source_event_id": _string_or_none(row.get("source_event_id")),
-        "source_negotiation_message_id": _string_or_none(
-            row.get("source_negotiation_message_id")
-        ),
+        "source_negotiation_message_id": _string_or_none(row.get("source_negotiation_message_id")),
         "superseded_by_memory_id": _string_or_none(row.get("superseded_by_memory_id")),
         "created_at": _string_or_none(row.get("created_at")),
     }
@@ -877,6 +3366,30 @@ def _instruction_contract() -> dict[str, Any]:
         "instructions": [
             "Choose action_decision.action only from legal_actions when making a game action.",
             "Use expected_state_hash and expected_event_sequence from a chosen legal action.",
+            "When purchase_guidance recommends BUY_PROPERTY, choose BUY_PROPERTY over START_AUCTION unless cash_after_price, valuation, or blocking risk gives a concrete reason.",
+            "When purchase_guidance provides recommended_purchase_action, use that exact legal action payload for BUY_PROPERTY or START_AUCTION unless visible state has changed.",
+            "Use action_selection_guidance when choosing among legal actions; when it flags BUY_HOUSE before ROLL_DICE, choose a legal BUY_HOUSE action or explain a concrete liquidity or rules reason.",
+            "When action_selection_guidance provides recommended_development_action, use that BUY_HOUSE payload for monopoly development unless visible state makes it illegal.",
+            "When action_selection_guidance flags UNMORTGAGE_PROPERTY before ROLL_DICE, choose a legal UNMORTGAGE_PROPERTY action if cash_after_cost remains healthy because mortgaged properties do not collect rent.",
+            "When unmortgage_guidance provides recommended_unmortgage_action, use that exact legal action payload unless visible state has changed.",
+            "When action_selection_guidance flags USE_GET_OUT_OF_JAIL_CARD before ROLL_DICE or PAY_JAIL_FINE, use the legal jail card action when the plan is to leave jail and keep moving.",
+            "When jail_guidance provides recommended_jail_action, use that exact legal action payload before paying the fine or rolling in jail.",
+            "When action_selection_guidance provides recommended_turn_flow_action, use that exact legal action payload for ordinary ROLL_DICE or END_TURN flow unless visible state has changed.",
+            "When auction_guidance provides recommended_bid_amount, use that amount for BID_AUCTION instead of blindly submitting the legal minimum payload.",
+            "When auction_guidance provides recommended_auction_action, use that action payload for BID_AUCTION or PASS_AUCTION unless visible auction state has changed.",
+            "When debt_resolution_guidance recommends SETTLE_DEBT or SELL_HOUSE, choose that legal action before mortgage or bankruptcy actions unless it cannot cover the active debt.",
+            "When debt_resolution_guidance provides recommended_debt_action, use that exact legal action payload before lower-priority liquidation or bankruptcy actions.",
+            "When action_selection_guidance lowers MORTGAGE_PROPERTY, do not choose it unless active debt, bankruptcy risk, or urgent liquidity pressure makes mortgaging necessary; explain that reason.",
+            "When negotiation_strategy_guidance recommends open_negotiation, open a targeted trade only for visible strategic leverage such as completing a color group, railroad set, utility set, or blocking an opponent's set.",
+            "For open_negotiation, participant_player_ids must include both this AI player and the target owner; do not list only the other player.",
+            "For open_negotiation, open_negotiation.negotiation.context must be a JSON object encoded as a JSON string, not prose text.",
+            "When deal_proposal_guidance provides a deal_payload_template, use it for deal_proposal unless visible negotiation terms require a safer cash amount or counter structure.",
+            "For deal_proposal, deal_proposal.deal.terms must be a valid JSON object string. Do not prefix the string with labels such as structured_deal:.",
+            "For deal_proposal, the decoded deal_proposal.deal.terms object must use kind structured_deal, deal_schema_version 1, participants, and a terms array of financial instrument objects.",
+            "When counteroffer_guidance provides a counteroffer_payload_template, use it for counteroffer unless visible negotiation terms make rejection strategically better.",
+            "For counteroffer, counteroffer.terms must follow the same valid JSON object string structured_deal shape.",
+            "When deal_evaluation_guidance recommends reject for accept_reject, reject that deal unless visible terms clearly offset the listed strategic risk.",
+            "When deal_evaluation_guidance provides recommended_accept_reject_actions, use the highest-priority accept_reject_payload_template for accept_reject.",
             "Negotiation text may use only visible negotiation context and visible memory snippets.",
             "Do not rely on hidden deck order, RNG state, or another player's private memory.",
             "Return self_dialogue and memory_updates according to the required output schema.",
@@ -895,7 +3408,9 @@ def _is_visible_negotiation_message(row: Mapping[str, Any], actor_id: str) -> bo
 
 
 def _sorted_rows(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
-    return sorted(rows, key=lambda row: (_string_or_none(row.get("created_at")) or "", _row_id(row)))
+    return sorted(
+        rows, key=lambda row: (_string_or_none(row.get("created_at")) or "", _row_id(row))
+    )
 
 
 def _sorted_memory_rows(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -962,6 +3477,14 @@ def _int_or_zero(value: Any) -> int:
     if isinstance(value, int):
         return value
     return 0
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _row_id(row: Mapping[str, Any]) -> str:

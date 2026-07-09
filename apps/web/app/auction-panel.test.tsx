@@ -177,7 +177,7 @@ describe("AuctionPanel", () => {
     expect(auction).toHaveTextContent("Mediterranean Avenue");
     expect(auction).toHaveTextContent("Current high bid");
     expect(auction).toHaveTextContent("Remaining bidders");
-    expect(auction).toHaveTextContent("Auction result");
+    expect(auction).not.toHaveTextContent("Auction result");
 
     fireEvent.click(within(auction).getByRole("button", { name: "Start auction" }));
 
@@ -246,6 +246,52 @@ describe("AuctionPanel", () => {
         payload: expect.objectContaining({ amount: 26 }),
       }),
     );
+  });
+
+  it("lets a bidder type a custom legal bid amount", () => {
+    const { onSubmit } = renderPanel({
+      snapshot: stateFixture({
+        property_id: "property_mediterranean_avenue",
+        high_bidder_id: adaId,
+        high_bid_amount: 25,
+        passed_player_ids: [],
+      }),
+      legalActions: [legalAction(graceId, "BID_AUCTION", { amount: 26 })],
+    });
+
+    const graceControls = screen.getByRole("group", { name: "Grace auction controls" });
+    fireEvent.change(within(graceControls).getByRole("spinbutton", { name: "Grace bid amount" }), {
+      target: { value: "80" },
+    });
+    fireEvent.click(within(graceControls).getByRole("button", { name: "Bid" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "BID_AUCTION",
+        payload: expect.objectContaining({ amount: 80 }),
+      }),
+    );
+  });
+
+  it("hides auction result until an auction result event exists", () => {
+    renderPanel({
+      events: [
+        {
+          id: "event-owner",
+          game_id: gameId,
+          sequence: 1,
+          actor_player_id: adaId,
+          event_type: "PROPERTY_OWNER_SET",
+          payload: { property_id: "property_mediterranean_avenue", owner_id: adaId },
+          state_hash: "state-1",
+          created_at: "2026-07-04T00:01:00.000Z",
+        },
+      ],
+    });
+
+    const auction = screen.getByRole("region", { name: "Auction" });
+    expect(within(auction).queryByRole("region", { name: "Auction result" })).not.toBeInTheDocument();
+    expect(auction).not.toHaveTextContent("Winner Ada");
   });
 
   it("shows the latest auction result event with property name, winner, and paid bid", () => {

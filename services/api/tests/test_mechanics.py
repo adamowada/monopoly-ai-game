@@ -322,6 +322,72 @@ def test_pay_tax_for_space_charges_static_taxes_and_rejects_non_tax_spaces() -> 
         pay_tax_for_space(state, "player-1", "space_go", "tax")
 
 
+def test_bank_tax_and_card_fees_create_debt_when_cash_is_short() -> None:
+    tax_state = pay_tax_for_space(
+        _set_cash(_initial_state(), "player-1", 25),
+        "player-1",
+        "space_income_tax",
+        "short-tax",
+    )
+
+    assert _player(tax_state, "player-1").cash == 25
+    assert tax_state.active_payment is not None
+    assert tax_state.active_payment.debtor_id == "player-1"
+    assert tax_state.active_payment.creditor_id is None
+    assert tax_state.active_payment.amount_owed == 200
+    assert tax_state.active_payment.reason == "tax:space_income_tax"
+    assert not tax_state.active_payment.negotiation_allowed
+
+    card_state = apply_card_effect(
+        _set_cash(_initial_state(), "player-1", 25),
+        "player-1",
+        "card_community_hospital_fee",
+        "short-card-fee",
+    )
+
+    assert _player(card_state, "player-1").cash == 25
+    assert card_state.active_payment is not None
+    assert card_state.active_payment.debtor_id == "player-1"
+    assert card_state.active_payment.creditor_id is None
+    assert card_state.active_payment.amount_owed == 100
+    assert card_state.active_payment.reason == "card_bank:card_community_hospital_fee"
+    assert not card_state.active_payment.negotiation_allowed
+
+
+def test_card_player_transfers_create_debt_without_overdrawing_cash() -> None:
+    pay_each_state = apply_card_effect(
+        _set_cash(_initial_state(), "player-1", 25),
+        "player-1",
+        "card_chance_pay_each_player",
+        "short-pay-each",
+    )
+
+    assert _player(pay_each_state, "player-1").cash == 25
+    assert _player(pay_each_state, "player-2").cash == 1500
+    assert pay_each_state.active_payment is not None
+    assert pay_each_state.active_payment.debtor_id == "player-1"
+    assert pay_each_state.active_payment.creditor_id == "player-2"
+    assert pay_each_state.active_payment.amount_owed == 50
+    assert pay_each_state.active_payment.reason == "card_player:card_chance_pay_each_player"
+    assert pay_each_state.active_payment.negotiation_allowed
+
+    collect_state = apply_card_effect(
+        _set_cash(_initial_state(), "player-2", 5),
+        "player-1",
+        "card_community_collect_from_each_player",
+        "short-collect",
+    )
+
+    assert _player(collect_state, "player-1").cash == 1500
+    assert _player(collect_state, "player-2").cash == 5
+    assert collect_state.active_payment is not None
+    assert collect_state.active_payment.debtor_id == "player-2"
+    assert collect_state.active_payment.creditor_id == "player-1"
+    assert collect_state.active_payment.amount_owed == 10
+    assert collect_state.active_payment.reason == "card_player:card_community_collect_from_each_player"
+    assert collect_state.active_payment.negotiation_allowed
+
+
 def test_card_effects_advance_nearest_relative_jail_and_bank_payments() -> None:
     state = _set_position(_initial_state(), "player-1", 39)
     state = apply_card_effect(state, "player-1", "card_chance_advance_to_illinois_avenue", "card")
