@@ -837,6 +837,91 @@ describe("mock API AI strategy", () => {
     );
   });
 
+  it("mortgages a standalone property before weakening a completed color group", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-mortgage-preserve-completed-monopoly",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          player_cash: [
+            { seat_order: 0, cash: 0 },
+            { seat_order: 1, cash: 1500 },
+          ],
+          pending_debt: {
+            amount: 75,
+            creditor_seat_order: null,
+            debtor_seat_order: 0,
+            reason: "debug debt",
+          },
+          property_owners: [
+            { property_id: "property_electric_company", seat_order: 0 },
+            { property_id: "property_park_place", seat_order: 0 },
+            { property_id: "property_boardwalk", seat_order: 0 },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+
+    const legalActions = await getJson<LegalActionsPayload>(
+      baseUrl,
+      `/games/${game.id}/legal-actions?actor_player_id=${encodeURIComponent(ada.id)}`,
+    );
+    expect(legalActions.legal_actions.find((action) => action.type === "MORTGAGE_PROPERTY")).toEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({ property_id: "property_electric_company" }),
+      }),
+    );
+
+    const liquidationStep = await stepAi(baseUrl, game.id, ada.id);
+
+    expect(liquidationStep.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "PROPERTY_MORTGAGE_SET",
+          payload: expect.objectContaining({ mortgaged: true, property_id: "property_electric_company" }),
+        }),
+      ]),
+    );
+    expect(liquidationStep.accepted_events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "PROPERTY_MORTGAGE_SET",
+          payload: expect.objectContaining({ property_id: "property_boardwalk" }),
+        }),
+      ]),
+    );
+
+    const stateAfterMortgage = await getJson<{
+      state: {
+        property_ownership: Array<{ mortgaged?: boolean; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(
+      stateAfterMortgage.state.property_ownership.find(
+        (ownership) => ownership.property_id === "property_electric_company",
+      ),
+    ).toEqual(expect.objectContaining({ mortgaged: true }));
+    expect(
+      stateAfterMortgage.state.property_ownership.find((ownership) => ownership.property_id === "property_boardwalk"),
+    ).toEqual(expect.objectContaining({ mortgaged: false }));
+    expect(
+      stateAfterMortgage.state.property_ownership.find((ownership) => ownership.property_id === "property_park_place"),
+    ).toEqual(expect.objectContaining({ mortgaged: false }));
+  });
+
   it("sells developed property improvements to settle debt before forced bankruptcy", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {

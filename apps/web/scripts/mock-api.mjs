@@ -1861,6 +1861,32 @@ function propertyGroupHasImprovements(game, property) {
   });
 }
 
+function mortgageStrategicHarm(game, actor, property) {
+  const group = propertyGroupData.find((candidate) => candidate.id === property?.group);
+  if (!group || !Array.isArray(group.property_ids)) {
+    return 0;
+  }
+  const groupSize = group.property_ids.length;
+  const otherOwnedCount = propertyGroupOwnershipCount(game, group, actor.id, property.id);
+  const ownedCount = otherOwnedCount + 1;
+  if (group.kind === "street") {
+    if (groupSize > 1 && ownedCount === groupSize) {
+      return 300;
+    }
+    if (groupSize > 1 && ownedCount === groupSize - 1) {
+      return 180;
+    }
+    return otherOwnedCount > 0 ? 90 : 0;
+  }
+  if (group.kind === "railroad") {
+    return otherOwnedCount * 25;
+  }
+  if (group.kind === "utility") {
+    return otherOwnedCount * 40;
+  }
+  return 0;
+}
+
 function genericMortgageLegalActionsFor(game, actor, existingMortgagePropertyIds = new Set()) {
   if (!actor) {
     return [];
@@ -1890,10 +1916,11 @@ function genericMortgageLegalActionsFor(game, actor, existingMortgagePropertyIds
             proceeds: property.mortgage_value,
           }),
           proceeds: property.mortgage_value,
+          strategicHarm: mortgageStrategicHarm(game, actor, property),
         },
       ];
     })
-    .sort((left, right) => right.proceeds - left.proceeds)
+    .sort((left, right) => left.strategicHarm - right.strategicHarm || left.proceeds - right.proceeds)
     .map((candidate) => candidate.action);
 }
 
