@@ -21,13 +21,22 @@ type SetupPlayer = {
 };
 
 type DebugPropertyImprovementValue = "" | "1" | "2" | "3" | "4" | "hotel";
+type DebugCurrentPhaseValue = "START_TURN" | "PRE_ROLL_MANAGEMENT" | "PURCHASE_OR_AUCTION" | "END_TURN";
 
 const playerColors = ["#0f766e", "#2563eb", "#7c3aed", "#dc2626", "#ca8a04"];
 const hexColorPattern = /^#[0-9a-fA-F]{6}$/;
 const defaultStartingCash = "1500";
 const defaultStartingPosition = "0";
+const defaultDebugCurrentPhase: DebugCurrentPhaseValue = "START_TURN";
 const maxDebugStartingCash = 100_000;
 const debugPropertyImprovementValues = new Set(["", "1", "2", "3", "4", "hotel"]);
+const debugCurrentPhaseValues = new Set(["START_TURN", "PRE_ROLL_MANAGEMENT", "PURCHASE_OR_AUCTION", "END_TURN"]);
+const debugCurrentPhaseOptions: Array<{ value: DebugCurrentPhaseValue; label: string }> = [
+  { value: "START_TURN", label: "Start turn" },
+  { value: "PRE_ROLL_MANAGEMENT", label: "Pre-roll management" },
+  { value: "PURCHASE_OR_AUCTION", label: "Purchase or auction" },
+  { value: "END_TURN", label: "End turn" },
+];
 const debugPropertyImprovementOptions: Array<{ value: DebugPropertyImprovementValue; label: string }> = [
   { value: "", label: "No buildings" },
   { value: "1", label: "1 house" },
@@ -165,6 +174,7 @@ function validateSetup(
   debugEnabled: boolean,
   debugCash: Record<string, string>,
   debugCurrentPlayerSeatOrder: string,
+  debugCurrentPhase: string,
   debugPlayerPositions: Record<string, string>,
   debugPropertyOwners: Record<string, string>,
   debugPropertyImprovements: Record<string, string>,
@@ -221,6 +231,9 @@ function validateSetup(
     if (!validSeatValues.has(debugCurrentPlayerSeatOrder)) {
       messages.push("Debug current player must reference a configured seat");
     }
+    if (!debugCurrentPhaseValues.has(debugCurrentPhase)) {
+      messages.push("Debug turn phase must use a supported setup phase");
+    }
     for (const ownerValue of Object.values(debugPropertyOwners)) {
       if (ownerValue !== "" && !validSeatValues.has(ownerValue)) {
         messages.push("Debug property owners must reference a configured seat");
@@ -273,6 +286,7 @@ export function GameSetupPanel() {
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [debugCash, setDebugCash] = useState<Record<string, string>>({});
   const [debugCurrentPlayerSeatOrder, setDebugCurrentPlayerSeatOrder] = useState("0");
+  const [debugCurrentPhase, setDebugCurrentPhase] = useState<DebugCurrentPhaseValue>(defaultDebugCurrentPhase);
   const [debugPlayerPositions, setDebugPlayerPositions] = useState<Record<string, string>>({});
   const [debugPropertyOwners, setDebugPropertyOwners] = useState<Record<string, string>>({});
   const [debugPropertyImprovements, setDebugPropertyImprovements] = useState<Record<string, string>>({});
@@ -495,6 +509,7 @@ export function GameSetupPanel() {
         ...(debugCurrentPlayerSeatOrder !== "0"
           ? { current_player_seat_order: Number.parseInt(debugCurrentPlayerSeatOrder, 10) }
           : {}),
+        ...(debugCurrentPhase !== defaultDebugCurrentPhase ? { current_phase: debugCurrentPhase } : {}),
         ...(playerPositions.length > 0 ? { player_positions: playerPositions } : {}),
         property_owners: Object.entries(debugPropertyOwners)
           .filter(([, seatOrder]) => seatOrder !== "" && validSeatValues.has(seatOrder))
@@ -517,6 +532,7 @@ export function GameSetupPanel() {
       debugEnabled,
       debugCash,
       debugCurrentPlayerSeatOrder,
+      debugCurrentPhase,
       debugPlayerPositions,
       debugPropertyOwners,
       debugPropertyImprovements,
@@ -764,6 +780,22 @@ export function GameSetupPanel() {
                       {players.map((player, seatOrder) => (
                         <option key={player.id} value={seatOrder}>
                           {player.name.trim() || `Player ${seatOrder + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                    Turn phase
+                    <select
+                      aria-label="Turn phase"
+                      onChange={(event) => setDebugCurrentPhase(event.target.value as DebugCurrentPhaseValue)}
+                      value={debugCurrentPhase}
+                      className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                    >
+                      {debugCurrentPhaseOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
                         </option>
                       ))}
                     </select>

@@ -1034,6 +1034,63 @@ describe("mock API AI strategy", () => {
     );
   });
 
+  it("applies a debug turn phase so targeted purchase scenarios start immediately", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-purchase-phase",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          current_player_seat_order: 1,
+          current_phase: "PURCHASE_OR_AUCTION",
+          player_positions: [{ seat_order: 1, position: 5 }],
+        },
+      },
+    });
+    const grace = game.players[1];
+
+    const state = await getJson<{
+      state: {
+        turn: { current_player_id: string | null; current_player_index: number; phase: string };
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(state.state.turn).toEqual(
+      expect.objectContaining({
+        current_player_id: grace.id,
+        current_player_index: 1,
+        phase: "PURCHASE_OR_AUCTION",
+      }),
+    );
+
+    const legalActions = await getJson<LegalActionsPayload>(
+      baseUrl,
+      `/games/${game.id}/legal-actions?actor_player_id=${encodeURIComponent(grace.id)}`,
+    );
+    expect(legalActions.legal_actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "BUY_PROPERTY",
+          payload: expect.objectContaining({ property_id: "property_reading_railroad" }),
+        }),
+        expect.objectContaining({
+          type: "START_AUCTION",
+          payload: expect.objectContaining({ property_id: "property_reading_railroad" }),
+        }),
+      ]),
+    );
+  });
+
   it("unmortgages a generic debug-allocated property before rolling when cash allows", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {

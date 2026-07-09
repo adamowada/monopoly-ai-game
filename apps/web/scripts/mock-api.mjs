@@ -14,6 +14,7 @@ const propertyGroupData = classicData.property_groups;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
+const debugCurrentPhaseOptions = new Set(["START_TURN", "PRE_ROLL_MANAGEMENT", "PURCHASE_OR_AUCTION", "END_TURN"]);
 const targetedTradeCashFloor = 300;
 const developmentCashReserve = 300;
 const auctionCashReserve = 300;
@@ -407,6 +408,11 @@ function configureDebugAllocations(game) {
 
   if (Number.isInteger(allocations.current_player_seat_order) && game.players[allocations.current_player_seat_order]) {
     game.current_player_index = allocations.current_player_seat_order;
+    game.updated_at = nowIso();
+  }
+
+  if (typeof allocations.current_phase === "string" && debugCurrentPhaseOptions.has(allocations.current_phase)) {
+    game.current_phase = allocations.current_phase;
     game.updated_at = nowIso();
   }
 
