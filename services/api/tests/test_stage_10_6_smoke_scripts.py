@@ -98,6 +98,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "auction_pass_above_valuation" in source
     assert "auction_pass_to_preserve_cash_reserve" in source
     assert "auction_bid_to_complete_color_group" in source
+    assert "auction_bid_to_complete_railroad_group" in source
     assert "auction_bid_to_complete_utility_group" in source
     assert "auction_bid_to_block_opponent_color_group" in source
     assert "auction_bid_to_block_opponent_utility_group" in source
@@ -436,6 +437,42 @@ def test_live_codex_strategy_smoke_auction_blocks_opponent_group_completion() ->
                 "property_states_avenue",
             ],
         }
+    ]
+
+
+def test_live_codex_strategy_smoke_auction_completes_railroad_group() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["auction_bid_to_complete_railroad_group"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["action_selection_guidance"]["auction_guidance"]
+    assert guidance["property_id"] == "property_short_line_railroad"
+    assert guidance["property_group"] == "railroad"
+    assert guidance["valuation_basis"] == "property_group_completion_premium"
+    assert guidance["completes_property_group"] is True
+    assert guidance["strategic_valuation_ceiling"] == 300
+    assert guidance["valuation_ceiling"] == 300
+    assert guidance["recommended_bid_amount"] == 201
+    assert guidance["recommended_auction_action"] == {
+        "type": "BID_AUCTION",
+        "payload": {
+            "property_id": "property_short_line_railroad",
+            "amount": 201,
+        },
+        "reason_code": "bid_deliberate_amount_at_or_below_valuation",
+    }
+    assert guidance["same_group_owned_property_ids"] == [
+        "property_reading_railroad",
+        "property_pennsylvania_railroad",
+        "property_b_and_o_railroad",
     ]
 
 
