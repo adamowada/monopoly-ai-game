@@ -4041,6 +4041,14 @@ def _utility_near_set_state(game_id: UUID) -> GameState:
     return _state_with_debug_values(state, players=players, ownership=ownership)
 
 
+def _cash_starved_utility_near_set_state(game_id: UUID) -> GameState:
+    state = _utility_near_set_state(game_id)
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 425
+    ownership = [item.model_dump(mode="python") for item in state.property_ownership]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
 def _dark_blue_near_monopoly_state(game_id: UUID) -> GameState:
     state = _base_state(game_id, seed="live-strategy-dark-blue-near-monopoly")
     players = [player.model_dump(mode="python") for player in state.players]

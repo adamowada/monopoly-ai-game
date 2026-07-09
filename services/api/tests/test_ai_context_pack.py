@@ -614,6 +614,35 @@ def test_context_pack_surfaces_near_utility_set_trade_opportunities() -> None:
     assert guidance["trade_opportunities"][0]["target_property_id"] == "property_water_works"
 
 
+def test_context_pack_defers_near_utility_set_trade_when_cash_cannot_support_offer() -> None:
+    state = _state_with_utility_near_set(ai_cash=425)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "complete_utility_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "utility",
+            "group_name": "Utilities",
+            "property_group_kind": "utility",
+            "target_property_id": "property_water_works",
+            "target_property_name": "Water Works",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 125,
+            "healthy_cash_floor": 300,
+            "reason": "Available cash above the healthy reserve cannot cover the target property list price.",
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
 def test_context_pack_prioritizes_stronger_near_monopoly_trade_opportunity() -> None:
     state = _state_with_multiple_near_monopolies()
     pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
