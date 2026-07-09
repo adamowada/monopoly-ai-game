@@ -100,6 +100,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "auction_bid_to_complete_color_group" in source
     assert "auction_bid_to_complete_utility_group" in source
     assert "auction_bid_to_block_opponent_color_group" in source
+    assert "auction_bid_to_block_opponent_utility_group" in source
     assert "dark_blue_monopoly_development" in source
     assert "orange_monopoly_development" in source
     assert "multiple_monopolies_prioritizes_orange_development" in source
@@ -468,6 +469,43 @@ def test_live_codex_strategy_smoke_auction_completes_utility_group() -> None:
         "reason_code": "bid_deliberate_amount_at_or_below_valuation",
     }
     assert guidance["same_group_owned_property_ids"] == ["property_electric_company"]
+
+
+def test_live_codex_strategy_smoke_auction_blocks_opponent_utility_group() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["auction_bid_to_block_opponent_utility_group"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["action_selection_guidance"]["auction_guidance"]
+    assert guidance["property_id"] == "property_water_works"
+    assert guidance["property_group"] == "utility"
+    assert guidance["valuation_basis"] == "block_opponent_group_completion_premium"
+    assert guidance["completes_property_group"] is False
+    assert guidance["strategic_valuation_ceiling"] == 225
+    assert guidance["valuation_ceiling"] == 225
+    assert guidance["recommended_bid_amount"] == 151
+    assert guidance["recommended_auction_action"] == {
+        "type": "BID_AUCTION",
+        "payload": {
+            "property_id": "property_water_works",
+            "amount": 151,
+        },
+        "reason_code": "bid_deliberate_amount_at_or_below_valuation",
+    }
+    assert guidance["opponent_group_completion_threats"] == [
+        {
+            "opponent_player_id": str(module.OTHER_PLAYER_ID),
+            "opponent_owned_property_ids": ["property_electric_company"],
+        }
+    ]
 
 
 def test_live_codex_strategy_smoke_purchase_blocks_opponent_group_completion() -> None:

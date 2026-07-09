@@ -229,6 +229,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_auction_bid_to_block_opponent_color_group,
         ),
         StrategySmokeCase(
+            name="auction_bid_to_block_opponent_utility_group",
+            game_id=UUID("00000000-0000-0000-0000-00000000b234"),
+            decision_type="action_decision",
+            state_factory=_auction_block_opponent_utility_group_state,
+            verifier=_verify_auction_bid_to_block_opponent_utility_group,
+        ),
+        StrategySmokeCase(
             name="orange_monopoly_development",
             game_id=UUID("00000000-0000-0000-0000-00000000b201"),
             decision_type="action_decision",
@@ -625,6 +632,19 @@ def _verify_auction_bid_to_block_opponent_color_group(parsed: dict[str, Any]) ->
     assert action.get("type") == "BID_AUCTION", f"expected BID_AUCTION, got {action.get('type')}"
     assert payload.get("property_id") == "property_virginia_avenue"
     assert 161 <= amount <= 240, f"expected a blocking premium bid within valuation, got {amount}"
+
+
+def _verify_auction_bid_to_block_opponent_utility_group(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+    amount = int(payload.get("amount", 0))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BID_AUCTION", f"expected BID_AUCTION, got {action.get('type')}"
+    assert payload.get("property_id") == "property_water_works"
+    assert 151 <= amount <= 225, (
+        f"expected a utility blocking premium bid within valuation, got {amount}"
+    )
 
 
 def _verify_orange_monopoly_development(parsed: dict[str, Any]) -> None:
@@ -1414,6 +1434,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "property_virginia_avenue would complete Pink for Ada if she wins it, so "
                     "auction_guidance valuation_basis is block_opponent_group_completion_premium "
                     "and the ceiling is $240. BID_AUCTION within $161 to $240 instead of passing."
+                ),
+            },
+        )
+    if case.name == "auction_bid_to_block_opponent_utility_group":
+        return (
+            {
+                "id": "live-strategy-bid-auction-to-block-opponent-utility-group",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Ada owns property_electric_company. "
+                    "property_water_works would complete Utilities for Ada if she wins it, "
+                    "so auction_guidance valuation_basis is block_opponent_group_completion_premium "
+                    "and the ceiling is $225. BID_AUCTION within $151 to $225 instead of passing."
                 ),
             },
         )
@@ -2307,6 +2340,35 @@ def _auction_block_opponent_color_group_state(game_id: UUID) -> GameState:
                 "property_id": "property_virginia_avenue",
                 "high_bidder_id": str(OTHER_PLAYER_ID),
                 "high_bid_amount": 160,
+                "passed_player_ids": [],
+            },
+        }
+    )
+
+
+def _auction_block_opponent_utility_group_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-auction-block-opponent-utility-group")
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(OTHER_PLAYER_ID),
+        }
+        if item.property_id == "property_electric_company"
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "property_ownership": ownership,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+            "active_auction": {
+                "property_id": "property_water_works",
+                "high_bidder_id": str(OTHER_PLAYER_ID),
+                "high_bid_amount": 150,
                 "passed_player_ids": [],
             },
         }
