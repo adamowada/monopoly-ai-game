@@ -369,6 +369,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_railroad_good_deal_acceptance,
         ),
         StrategySmokeCase(
+            name="utility_good_deal_acceptance",
+            game_id=UUID("00000000-0000-0000-0000-00000000b23b"),
+            decision_type="accept_reject",
+            state_factory=_utility_near_set_state,
+            verifier=_verify_utility_good_deal_acceptance,
+        ),
+        StrategySmokeCase(
             name="orange_bad_deal_rejection",
             game_id=UUID("00000000-0000-0000-0000-00000000b204"),
             decision_type="accept_reject",
@@ -977,6 +984,17 @@ def _verify_railroad_good_deal_acceptance(parsed: dict[str, Any]) -> None:
     )
 
 
+def _verify_utility_good_deal_acceptance(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(FAIR_UTILITY_DEAL_ID)
+    assert accept_reject.get("decision") == "accept", (
+        f"expected accept, got {accept_reject.get('decision')}"
+    )
+
+
 def _verify_orange_overpriced_deal_rejection(parsed: dict[str, Any]) -> None:
     accept_reject = _dict(parsed.get("accept_reject"))
 
@@ -1135,6 +1153,20 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
                     "completion price while preserving liquidity."
                 ),
             }
+        if case.name == "utility_good_deal_acceptance":
+            return {
+                "mode": "live_strategy_smoke",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "deal_id": str(FAIR_UTILITY_DEAL_ID),
+                "requested_decision": (
+                    "Respond to the current offer. Ada offers Water Works for $187, "
+                    "which completes Grace's utility set."
+                ),
+                "strategic_position": (
+                    "Grace owns Electric Company and can afford this fair completion "
+                    "price while preserving liquidity."
+                ),
+            }
         return {
             "mode": "live_strategy_smoke",
             "negotiation_id": str(NEGOTIATION_ID),
@@ -1201,6 +1233,8 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         current_deal_id = str(GOOD_DEAL_ID)
     elif case.name == "railroad_good_deal_acceptance":
         current_deal_id = str(FAIR_RAILROAD_DEAL_ID)
+    elif case.name == "utility_good_deal_acceptance":
+        current_deal_id = str(FAIR_UTILITY_DEAL_ID)
     elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         current_deal_id = str(OVERPRICED_DEAL_ID)
     elif case.name in {"orange_cash_draining_deal_rejection", "orange_cash_draining_deal_counteroffer"}:
@@ -1236,7 +1270,7 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
                 "created_at": "2026-07-08T00:00:00Z",
             },
         )
-    if case.name == "utility_near_set_deal_proposal":
+    if case.name in {"utility_near_set_deal_proposal", "utility_good_deal_acceptance"}:
         return (
             {
                 "id": str(NEGOTIATION_ID),
@@ -1363,6 +1397,19 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "created_at": "2026-07-08T00:00:02Z",
             },
         )
+    if case.name == "utility_good_deal_acceptance":
+        return (
+            {
+                "id": "live-strategy-fair-utility-offer-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "recipient_player_id": str(AI_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I can sell Water Works for $187 so you complete Utilities.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
     if case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         return (
             {
@@ -1472,6 +1519,10 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
     elif case.name == "railroad_good_deal_acceptance":
         deal_id = FAIR_RAILROAD_DEAL_ID
         terms = _fair_railroad_deal_terms()
+        proposer_id = OTHER_PLAYER_ID
+    elif case.name == "utility_good_deal_acceptance":
+        deal_id = FAIR_UTILITY_DEAL_ID
+        terms = _fair_utility_deal_terms()
         proposer_id = OTHER_PLAYER_ID
     elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         deal_id = OVERPRICED_DEAL_ID
@@ -1968,6 +2019,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     ),
                 },
             )
+        if case.name == "utility_good_deal_acceptance":
+            return (
+                {
+                    "id": "live-strategy-accept-fair-utility-completer",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Ada offers Water Works to Grace "
+                        "for $187. Grace owns Electric Company, so this deal completes "
+                        "Grace's utility set within the $225 strategic value ceiling and "
+                        "preserves liquidity. Accept the deal."
+                    ),
+                },
+            )
         if case.name == "orange_overpriced_deal_rejection":
             return (
                 {
@@ -2084,6 +2148,7 @@ OVERPRICED_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b304")
 CASH_DRAINING_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b305")
 BREAKUP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b306")
 FAIR_RAILROAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b307")
+FAIR_UTILITY_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b308")
 
 
 def _bad_deal_terms() -> dict[str, Any]:
@@ -2156,6 +2221,31 @@ def _fair_railroad_deal_terms(*, amount: int = 250) -> dict[str, Any]:
                 "from_player_id": str(OTHER_PLAYER_ID),
                 "to_player_id": str(AI_PLAYER_ID),
                 "property_id": "property_short_line_railroad",
+            },
+        ],
+    }
+
+
+def _fair_utility_deal_terms(*, amount: int = 187) -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-fair-utility-completer",
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-fair-utility-cash",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "amount": amount,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-fair-water-works-transfer",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_water_works",
             },
         ],
     }
