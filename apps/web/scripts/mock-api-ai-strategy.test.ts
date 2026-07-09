@@ -1330,4 +1330,95 @@ describe("mock API AI strategy", () => {
     expect(stateAfterRejection.state.players.find((player) => player.id === ada.id)?.cash).toBe(1500);
     expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
   });
+
+  it("rejects an underpriced offer that would complete the buyer monopoly", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-underpriced-seller-protection",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_st_james_place", seat_order: 0 },
+            { property_id: "property_new_york_avenue", seat_order: 0 },
+            { property_id: "property_tennessee_avenue", seat_order: 2 },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "complete_street_group",
+      group: "orange",
+      group_name: "Orange",
+      property_group_kind: "street",
+      actor_owned_property_ids: ["property_st_james_place", "property_new_york_avenue"],
+      actor_owned_property_names: ["St. James Place", "New York Avenue"],
+      target_property_id: "property_tennessee_avenue",
+      target_property_name: "Tennessee Avenue",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Completing Orange unlocks development and materially raises rent pressure.",
+    });
+    const underpriced = await createDeal(baseUrl, game.id, {
+      negotiation_id: opened.negotiation?.id,
+      proposer_player_id: ada.id,
+      participant_player_ids: [ada.id, lin.id],
+      parent_deal_id: null,
+      terms: [
+        {
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 120,
+        },
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_tennessee_avenue",
+        },
+      ],
+    });
+
+    const rejected = await acceptRejectAi(baseUrl, game.id, lin.id, opened.negotiation?.id ?? "", underpriced.deal.id);
+
+    expect(rejected.status).toBe("done");
+    expect(rejected.outcome).toEqual(
+      expect.objectContaining({
+        decision: "reject",
+        reason: expect.stringContaining("below strategic floor"),
+      }),
+    );
+    expect(rejected.deal).toEqual(expect.objectContaining({ id: underpriced.deal.id, status: "rejected" }));
+
+    const stateAfterRejection = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ owner_id: string | null; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterRejection.state.property_ownership).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner_id: lin.id, property_id: "property_tennessee_avenue" }),
+      ]),
+    );
+    expect(stateAfterRejection.state.players.find((player) => player.id === ada.id)?.cash).toBe(1500);
+    expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
+  });
 });

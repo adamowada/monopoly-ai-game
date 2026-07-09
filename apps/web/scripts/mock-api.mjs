@@ -2696,6 +2696,10 @@ function propertyCompletesPlayerGroup(game, playerId, property) {
     .every((propertyId) => propertyOwnership(game, propertyId)?.owner_id === playerId);
 }
 
+function monopolyCompletionOfferFloor(game, buyerPlayerId, property) {
+  return targetedTradeOfferAmount(game, buyerPlayerId, property, `complete_${property.kind}_group`);
+}
+
 function aiDealRejectionReason(game, deal, responderPlayerId) {
   for (const term of deal.terms) {
     if (
@@ -2711,9 +2715,28 @@ function aiDealRejectionReason(game, deal, responderPlayerId) {
       continue;
     }
     const requestedCash = dealCashTransferAmount(deal, responderPlayerId, senderPlayerId);
-    const acceptableCash = targetedTradeOfferAmount(game, responderPlayerId, property, `complete_${property.kind}_group`);
+    const acceptableCash = monopolyCompletionOfferFloor(game, responderPlayerId, property);
     if (requestedCash > 0 && (acceptableCash < property.price || requestedCash > acceptableCash)) {
       return `cash ask $${requestedCash} exceeds strategic ceiling $${acceptableCash} for ${property.name}`;
+    }
+  }
+  for (const term of deal.terms) {
+    if (
+      !isObject(term) ||
+      (term.kind !== "property_transfer" && term.kind !== "immediate_property_transfer") ||
+      term.from_player_id !== responderPlayerId
+    ) {
+      continue;
+    }
+    const buyerPlayerId = typeof term.to_player_id === "string" ? term.to_player_id : null;
+    const property = propertyById(term.property_id);
+    if (!buyerPlayerId || !property || !propertyCompletesPlayerGroup(game, buyerPlayerId, property)) {
+      continue;
+    }
+    const offeredCash = dealCashTransferAmount(deal, buyerPlayerId, responderPlayerId);
+    const strategicFloor = monopolyCompletionOfferFloor(game, buyerPlayerId, property);
+    if (strategicFloor < property.price || offeredCash < strategicFloor) {
+      return `cash offer $${offeredCash} below strategic floor $${strategicFloor} for ${property.name}`;
     }
   }
   return null;
