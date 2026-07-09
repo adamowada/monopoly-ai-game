@@ -1112,6 +1112,45 @@ def test_live_codex_strategy_smoke_cash_limited_deal_proposal_clamps_offer() -> 
     ]
 
 
+def test_live_codex_strategy_smoke_cash_starved_deal_proposal_defers_offer() -> None:
+    module = _load_live_strategy_smoke_module()
+
+    state = module._cash_starved_orange_near_monopoly_state(  # noqa: SLF001
+        module.UUID("00000000-0000-0000-0000-00000000b246")
+    )
+    case = next(
+        strategy_case
+        for strategy_case in module._strategy_cases()
+        if strategy_case.name == "orange_near_monopoly_deal_proposal"
+    )
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(module.AI_PLAYER_ID),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["proposal_templates"] == []
+    assert guidance["deferred_proposal_opportunities"] == [
+        {
+            "negotiation_id": str(module.NEGOTIATION_ID),
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(module.OTHER_PLAYER_ID),
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 270,
+            "current_cash_budget_ceiling": 150,
+            "cash_available": 450,
+            "healthy_cash_floor": 300,
+            "reason": "Current cash above reserve cannot support the saved offer floor.",
+        }
+    ]
+    assert "Wait on deal_proposal" in guidance["guidance"][0]
+
+
 def test_live_codex_strategy_smoke_dark_blue_deal_proposal_uses_context_pack_template() -> None:
     module = _load_live_strategy_smoke_module()
     cases = {case.name: case for case in module._strategy_cases()}

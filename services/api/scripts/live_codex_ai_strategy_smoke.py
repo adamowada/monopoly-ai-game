@@ -3924,6 +3924,14 @@ def _cash_limited_orange_near_monopoly_state(game_id: UUID) -> GameState:
     return _state_with_debug_values(state, players=players, ownership=ownership)
 
 
+def _cash_starved_orange_near_monopoly_state(game_id: UUID) -> GameState:
+    state = _orange_near_monopoly_state(game_id)
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 450
+    ownership = [item.model_dump(mode="python") for item in state.property_ownership]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
 def _cash_return_orange_near_monopoly_state(game_id: UUID) -> GameState:
     state = _base_state(game_id, seed="live-strategy-cash-return-orange-near-monopoly")
     players = [player.model_dump(mode="python") for player in state.players]
