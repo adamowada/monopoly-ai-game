@@ -15,6 +15,7 @@ const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
 const targetedTradeCashFloor = 300;
+const developmentCashReserve = 300;
 const playerIconOptions = new Set(["🚗", "🎩", "🚂", "🚢", "💎", "🔑"]);
 const supportedDealTermKinds = new Set([
   "cash_transfer",
@@ -1659,7 +1660,7 @@ function genericDevelopmentLegalActionsFor(game, actor, existingBuildPropertyIds
           return false;
         }
         const cost = property.house_cost ?? group.house_cost ?? 0;
-        if ((actor.state.cash ?? 0) < cost || cost <= 0) {
+        if ((actor.state.cash ?? 0) - cost < developmentCashReserve || cost <= 0) {
           return false;
         }
         return ownership.houses < 4 ? game.bank_inventory.houses > 0 : game.bank_inventory.hotels > 0;
@@ -1709,7 +1710,7 @@ function propertyManagementLegalActionsFor(game) {
     !mediterranean.mortgaged &&
     mediterranean.houses === 0 &&
     !mediterranean.hotel &&
-    actorCash >= 50
+    actorCash - 50 >= developmentCashReserve
   ) {
     actions.push(legalAction(game, "BUY_HOUSE", { property_id: "property_mediterranean_avenue", cost: 50 }));
   }
