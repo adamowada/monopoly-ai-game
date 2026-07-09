@@ -2815,8 +2815,23 @@ function sellerGroupRetentionOfferFloor(game, sellerPlayerId, buyerPlayerId, pro
   if (sellerOtherOwnedCount <= 0) {
     return 0;
   }
+  const groupSize = Array.isArray(group?.property_ids) ? group.property_ids.length : 0;
+  const price = Number.isInteger(property.price) ? property.price : 0;
   const blockValue = targetedTradeOfferAmount(game, buyerPlayerId, property, `block_opponent_${property.kind}_group`);
-  return Math.max(property.price, blockValue);
+  let floor = Math.max(price, blockValue);
+  if (groupSize > 1 && sellerOtherOwnedCount >= groupSize - 1) {
+    floor = Math.max(floor, Math.round(price * 3));
+  }
+  if (
+    group?.kind === "street" &&
+    group.property_ids.some((propertyId) => {
+      const ownership = propertyOwnership(game, propertyId);
+      return ownership?.owner_id === sellerPlayerId && developmentLevel(ownership) > 0;
+    })
+  ) {
+    floor = Math.max(floor, Math.round(price * 4));
+  }
+  return floor;
 }
 
 function aiDealRejectionReason(game, deal, responderPlayerId) {
