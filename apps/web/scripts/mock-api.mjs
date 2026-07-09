@@ -405,6 +405,11 @@ function configureDebugAllocations(game) {
     }
   }
 
+  if (Number.isInteger(allocations.current_player_seat_order) && game.players[allocations.current_player_seat_order]) {
+    game.current_player_index = allocations.current_player_seat_order;
+    game.updated_at = nowIso();
+  }
+
   if (Array.isArray(allocations.property_owners)) {
     for (const entry of allocations.property_owners) {
       if (!isObject(entry) || typeof entry.property_id !== "string") {

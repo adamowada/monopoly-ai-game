@@ -995,6 +995,45 @@ describe("mock API AI strategy", () => {
     expect(state.state.players.find((player) => player.id === game.players[1].id)?.position).toBe(39);
   });
 
+  it("applies a debug current player to seeded turn state", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-current-player",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          current_player_seat_order: 2,
+        },
+      },
+    });
+
+    const state = await getJson<{
+      state: {
+        turn: { current_player_id: string | null; current_player_index: number };
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+
+    expect(state.state.turn).toEqual(
+      expect.objectContaining({
+        current_player_id: game.players[2].id,
+        current_player_index: 2,
+      }),
+    );
+  });
+
   it("unmortgages a generic debug-allocated property before rolling when cash allows", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {

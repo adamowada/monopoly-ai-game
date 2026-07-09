@@ -164,6 +164,7 @@ function validateSetup(
   proposalLimit: string,
   debugEnabled: boolean,
   debugCash: Record<string, string>,
+  debugCurrentPlayerSeatOrder: string,
   debugPlayerPositions: Record<string, string>,
   debugPropertyOwners: Record<string, string>,
   debugPropertyImprovements: Record<string, string>,
@@ -217,6 +218,9 @@ function validateSetup(
       }
     }
     const validSeatValues = new Set(players.map((_, index) => String(index)));
+    if (!validSeatValues.has(debugCurrentPlayerSeatOrder)) {
+      messages.push("Debug current player must reference a configured seat");
+    }
     for (const ownerValue of Object.values(debugPropertyOwners)) {
       if (ownerValue !== "" && !validSeatValues.has(ownerValue)) {
         messages.push("Debug property owners must reference a configured seat");
@@ -268,6 +272,7 @@ export function GameSetupPanel() {
   const [proposalLimit, setProposalLimit] = useState("4");
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [debugCash, setDebugCash] = useState<Record<string, string>>({});
+  const [debugCurrentPlayerSeatOrder, setDebugCurrentPlayerSeatOrder] = useState("0");
   const [debugPlayerPositions, setDebugPlayerPositions] = useState<Record<string, string>>({});
   const [debugPropertyOwners, setDebugPropertyOwners] = useState<Record<string, string>>({});
   const [debugPropertyImprovements, setDebugPropertyImprovements] = useState<Record<string, string>>({});
@@ -314,6 +319,19 @@ export function GameSetupPanel() {
       return;
     }
     setPlayers((current) => current.filter((_, playerIndex) => playerIndex !== index));
+    setDebugCurrentPlayerSeatOrder((current) => {
+      const selectedSeatOrder = Number.parseInt(current, 10);
+      if (!Number.isInteger(selectedSeatOrder)) {
+        return "0";
+      }
+      if (selectedSeatOrder === index) {
+        return "0";
+      }
+      if (selectedSeatOrder > index) {
+        return String(selectedSeatOrder - 1);
+      }
+      return selectedSeatOrder >= players.length - 1 ? "0" : current;
+    });
   }
 
   function debugStartingCash(player: SetupPlayer): string {
@@ -474,6 +492,9 @@ export function GameSetupPanel() {
           seat_order: seatOrder,
           cash: parseNonNegativeInteger(debugStartingCash(player)) ?? Number(defaultStartingCash),
         })),
+        ...(debugCurrentPlayerSeatOrder !== "0"
+          ? { current_player_seat_order: Number.parseInt(debugCurrentPlayerSeatOrder, 10) }
+          : {}),
         ...(playerPositions.length > 0 ? { player_positions: playerPositions } : {}),
         property_owners: Object.entries(debugPropertyOwners)
           .filter(([, seatOrder]) => seatOrder !== "" && validSeatValues.has(seatOrder))
@@ -495,6 +516,7 @@ export function GameSetupPanel() {
       proposalLimit,
       debugEnabled,
       debugCash,
+      debugCurrentPlayerSeatOrder,
       debugPlayerPositions,
       debugPropertyOwners,
       debugPropertyImprovements,
@@ -731,6 +753,22 @@ export function GameSetupPanel() {
 
               {debugEnabled ? (
                 <div className="grid gap-4">
+                  <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                    Current player
+                    <select
+                      aria-label="Current player"
+                      onChange={(event) => setDebugCurrentPlayerSeatOrder(event.target.value)}
+                      value={debugCurrentPlayerSeatOrder}
+                      className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                    >
+                      {players.map((player, seatOrder) => (
+                        <option key={player.id} value={seatOrder}>
+                          {player.name.trim() || `Player ${seatOrder + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
                   <div className="grid gap-2">
                     <div className="text-xs font-black uppercase text-[#6f604c]">Starting cash</div>
                     {players.map((player, index) => (
