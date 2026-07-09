@@ -1735,6 +1735,9 @@ function auctionLegalActionsFor(game, actor) {
   if (!auction || actor.status !== "active" || auction.passed_player_ids.includes(actor.id)) {
     return [];
   }
+  if (auction.high_bidder_id === actor.id) {
+    return [];
+  }
   const minimumBid = auctionMinimumBid(game);
   const actions = [];
   if ((actor.state.cash ?? 0) >= minimumBid) {
@@ -3825,6 +3828,12 @@ function acceptBidAuction(game, action) {
       payload: rejectAction(game, action, "illegal_action", "bidder has already passed this auction", "actor_id"),
     };
   }
+  if (auction.high_bidder_id === actor.id) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "current high bidder cannot bid against themselves", "actor_id"),
+    };
+  }
 
   game.active_auction = {
     ...auction,
@@ -3854,6 +3863,12 @@ function acceptPassAuction(game, action) {
     return {
       statusCode: 422,
       payload: rejectAction(game, action, "illegal_action", "bidder has already passed this auction", "actor_id"),
+    };
+  }
+  if (auction.high_bidder_id === actor.id) {
+    return {
+      statusCode: 422,
+      payload: rejectAction(game, action, "illegal_action", "current high bidder cannot pass while leading", "actor_id"),
     };
   }
 

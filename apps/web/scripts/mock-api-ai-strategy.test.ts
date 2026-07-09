@@ -442,6 +442,73 @@ describe("mock API AI strategy", () => {
     );
   });
 
+  it("does not ask the current auction high bidder to bid or pass against themselves", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-auction-high-bidder-turn-skip",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Linus", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          current_phase: "PURCHASE_OR_AUCTION",
+          player_positions: [{ seat_order: 0, position: 1 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const grace = game.players[1];
+    const linus = game.players[2];
+
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: ada.id,
+      type: "START_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue" },
+    });
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: grace.id,
+      type: "BID_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue", amount: 60 },
+    });
+
+    const graceLegalActions = await getJson<LegalActionsPayload>(
+      baseUrl,
+      `/games/${game.id}/legal-actions?actor_player_id=${encodeURIComponent(grace.id)}`,
+    );
+    const linusLegalActions = await getJson<LegalActionsPayload>(
+      baseUrl,
+      `/games/${game.id}/legal-actions?actor_player_id=${encodeURIComponent(linus.id)}`,
+    );
+
+    expect(graceLegalActions.legal_actions).toEqual([]);
+    expect(linusLegalActions.legal_actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "BID_AUCTION",
+          payload: expect.objectContaining({
+            amount: 61,
+            property_id: "property_mediterranean_avenue",
+          }),
+        }),
+        expect.objectContaining({
+          type: "PASS_AUCTION",
+          payload: expect.objectContaining({ property_id: "property_mediterranean_avenue" }),
+        }),
+      ]),
+    );
+  });
+
   it("mortgages assets to settle debt before forced bankruptcy", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {
