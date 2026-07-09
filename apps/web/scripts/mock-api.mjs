@@ -2815,6 +2815,24 @@ function acceptPropertyMortgage(game, actorPlayerId, propertyId, mortgaged) {
   );
 }
 
+function acceptPlayerCashDelta(game, actorPlayerId, amount) {
+  const player = playerById(game, actorPlayerId);
+  if (!player || !Number.isInteger(amount) || amount === 0) {
+    return null;
+  }
+  player.state = {
+    ...player.state,
+    cash: (player.state.cash ?? 0) + amount,
+  };
+  player.updated_at = nowIso();
+  return createAcceptedEvent(game, "PLAYER_CASH_DELTA", { player_id: actorPlayerId, amount }, actorPlayerId);
+}
+
+function managementPayloadAmount(action, key, fallback = 0) {
+  const payload = isObject(action.payload) ? action.payload : {};
+  return Number.isInteger(payload[key]) ? payload[key] : fallback;
+}
+
 function acceptBuyHouse(game, action) {
   const propertyId = action.payload.property_id;
   const ownership = propertyOwnership(game, propertyId);
@@ -2822,7 +2840,13 @@ function acceptBuyHouse(game, action) {
     return createManagementAcceptedResponse(game, []);
   }
   const actorPlayerId = action.actor_id;
+  const property = propertyById(propertyId);
+  const cost = managementPayloadAmount(action, "cost", property?.house_cost ?? 0);
   const events = [];
+  const cashEvent = acceptPlayerCashDelta(game, actorPlayerId, -cost);
+  if (cashEvent) {
+    events.push(cashEvent);
+  }
   if (ownership.houses < 4) {
     events.push(acceptBankInventory(game, actorPlayerId, game.bank_inventory.houses - 1, game.bank_inventory.hotels));
     events.push(acceptPropertyImprovements(game, actorPlayerId, propertyId, ownership.houses + 1, false));
@@ -2840,7 +2864,13 @@ function acceptSellHouse(game, action) {
     return createManagementAcceptedResponse(game, []);
   }
   const actorPlayerId = action.actor_id;
+  const property = propertyById(propertyId);
+  const proceeds = managementPayloadAmount(action, "proceeds", Math.floor((property?.house_cost ?? 0) / 2));
   const events = [];
+  const cashEvent = acceptPlayerCashDelta(game, actorPlayerId, proceeds);
+  if (cashEvent) {
+    events.push(cashEvent);
+  }
   if (ownership.hotel) {
     events.push(acceptBankInventory(game, actorPlayerId, game.bank_inventory.houses - 4, game.bank_inventory.hotels + 1));
     events.push(acceptPropertyImprovements(game, actorPlayerId, propertyId, 4, false));
@@ -2859,13 +2889,24 @@ function acceptManagementAction(game, action) {
     return acceptSellHouse(game, action);
   }
   if (action.type === "MORTGAGE_PROPERTY") {
+    const propertyId = action.payload.property_id;
+    const property = propertyById(propertyId);
+    const proceeds = managementPayloadAmount(action, "proceeds", property?.mortgage_value ?? 0);
+    const cashEvent = acceptPlayerCashDelta(game, action.actor_id, proceeds);
     return createManagementAcceptedResponse(game, [
-      acceptPropertyMortgage(game, action.actor_id, action.payload.property_id, true),
+      ...(cashEvent ? [cashEvent] : []),
+      acceptPropertyMortgage(game, action.actor_id, propertyId, true),
     ]);
   }
   if (action.type === "UNMORTGAGE_PROPERTY") {
+    const propertyId = action.payload.property_id;
+    const property = propertyById(propertyId);
+    const fallbackCost = property?.mortgage_value ? property.mortgage_value + Math.ceil(property.mortgage_value / 10) : 0;
+    const cost = managementPayloadAmount(action, "cost", fallbackCost);
+    const cashEvent = acceptPlayerCashDelta(game, action.actor_id, -cost);
     return createManagementAcceptedResponse(game, [
-      acceptPropertyMortgage(game, action.actor_id, action.payload.property_id, false),
+      ...(cashEvent ? [cashEvent] : []),
+      acceptPropertyMortgage(game, action.actor_id, propertyId, false),
     ]);
   }
   return null;

@@ -140,7 +140,7 @@ afterEach(async () => {
 });
 
 describe("mock API AI strategy", () => {
-  it("develops a complete color group before rolling a later AI turn", async () => {
+  it("develops a complete color group before rolling a later AI turn and pays for the build", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl);
     const ada = game.players[0];
@@ -168,6 +168,13 @@ describe("mock API AI strategy", () => {
     expect(developmentStep.accepted_events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          event_type: "PLAYER_CASH_DELTA",
+          payload: expect.objectContaining({
+            player_id: ada.id,
+            amount: -50,
+          }),
+        }),
+        expect.objectContaining({
           event_type: "PROPERTY_IMPROVEMENTS_SET",
           payload: expect.objectContaining({
             property_id: "property_mediterranean_avenue",
@@ -178,5 +185,10 @@ describe("mock API AI strategy", () => {
       ]),
     );
     expect(developmentStep.accepted_events.map((event) => event.event_type)).not.toContain("DICE_ROLLED");
+
+    const stateAfterDevelopment = await getJson<{
+      state: { players: Array<{ cash: number; id: string }> };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterDevelopment.state.players.find((player) => player.id === ada.id)?.cash).toBe(1392);
   });
 });
