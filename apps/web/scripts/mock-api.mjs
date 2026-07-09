@@ -16,6 +16,7 @@ const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
 const targetedTradeCashFloor = 300;
 const developmentCashReserve = 300;
+const auctionCashReserve = 300;
 const playerIconOptions = new Set(["🚗", "🎩", "🚂", "🚢", "💎", "🔑"]);
 const supportedDealTermKinds = new Set([
   "cash_transfer",
@@ -3010,16 +3011,62 @@ function applyMockAiNegotiationStep(game, payload, decision) {
   });
 }
 
+function propertyGroupOwnershipCount(game, group, playerId, excludedPropertyId = null) {
+  if (!group || !Array.isArray(group.property_ids)) {
+    return 0;
+  }
+  return group.property_ids.filter((propertyId) => {
+    if (propertyId === excludedPropertyId) {
+      return false;
+    }
+    return propertyOwnership(game, propertyId)?.owner_id === playerId;
+  }).length;
+}
+
+function auctionBidCeiling(game, playerId, propertyId) {
+  const bidder = playerById(game, playerId);
+  const property = propertyById(propertyId);
+  if (!bidder || !property || !Number.isInteger(property.price)) {
+    return 0;
+  }
+  const cash = bidder.state.cash ?? 0;
+  const cashLimitedCeiling = Math.max(0, cash - auctionCashReserve);
+  const group = propertyGroupData.find((candidate) => candidate.id === property.group);
+  const ownedCount = propertyGroupOwnershipCount(game, group, playerId, property.id);
+  const groupSize = Array.isArray(group?.property_ids) ? group.property_ids.length : 0;
+  let strategicCeiling = property.price;
+
+  if (group?.kind === "street") {
+    if (groupSize > 1 && ownedCount === groupSize - 1) {
+      strategicCeiling = Math.round(property.price * 2);
+    } else if (ownedCount > 0) {
+      strategicCeiling = Math.round(property.price * 1.25);
+    }
+  } else if (group?.kind === "railroad") {
+    strategicCeiling = Math.round(property.price * (1 + Math.min(ownedCount, 3) * 0.25));
+  } else if (group?.kind === "utility") {
+    strategicCeiling = Math.round(property.price * (ownedCount > 0 ? 1.35 : 1));
+  }
+
+  return Math.min(strategicCeiling, cashLimitedCeiling);
+}
+
 function chooseMockAuctionAiAction(game, playerId) {
   const legalActions = legalActionsFor(game, playerId);
-  if (isStage105Seed(game.seed) && game.active_auction?.high_bidder_id) {
-    return legalActions.find((action) => action.type === "PASS_AUCTION") ?? null;
+  const passAction = legalActions.find((action) => action.type === "PASS_AUCTION") ?? null;
+  const bidAction = legalActions.find((action) => action.type === "BID_AUCTION") ?? null;
+  if (!bidAction) {
+    return passAction;
   }
-  return (
-    legalActions.find((action) => action.type === "BID_AUCTION") ??
-    legalActions.find((action) => action.type === "PASS_AUCTION") ??
-    null
-  );
+  if (isStage105Seed(game.seed) && game.active_auction?.high_bidder_id) {
+    return passAction;
+  }
+  const propertyId = typeof bidAction.payload?.property_id === "string" ? bidAction.payload.property_id : null;
+  const bidAmount = Number.isInteger(bidAction.payload?.amount) ? bidAction.payload.amount : auctionMinimumBid(game);
+  if (!propertyId || bidAmount > auctionBidCeiling(game, playerId, propertyId)) {
+    return passAction;
+  }
+  return bidAction;
 }
 
 function applyMockAiAuctionStep(game, payload, decision) {

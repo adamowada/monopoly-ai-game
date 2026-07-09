@@ -33,6 +33,16 @@ type AiStepPayload = {
   status: string;
 };
 
+type ActionAcceptedPayload = {
+  accepted_events: Array<{
+    event_type: string;
+    payload: Record<string, unknown>;
+  }>;
+  event_sequence: number;
+  state_hash: string;
+  status: string;
+};
+
 type LegalActionsPayload = {
   legal_actions: Array<{
     type: string;
@@ -162,6 +172,29 @@ function stepAi(baseUrl: string, gameId: string, playerId: string): Promise<AiSt
     mandatory: true,
     mode: "auto",
   });
+}
+
+async function submitGameAction(
+  baseUrl: string,
+  gameId: string,
+  action: { actor_id: string; payload: Record<string, unknown>; type: string },
+): Promise<ActionAcceptedPayload> {
+  const state = await getJson<{ event_sequence: number; state_hash: string }>(baseUrl, `/games/${gameId}/state`);
+  const response = await fetch(`${baseUrl}/games/${gameId}/actions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "Idempotency-Key": `${action.type}-${state.event_sequence}-${Math.random().toString(36).slice(2)}`,
+    },
+    body: JSON.stringify({
+      ...action,
+      expected_event_sequence: state.event_sequence,
+      expected_state_hash: state.state_hash,
+    }),
+  });
+  const body = (await response.json()) as ActionAcceptedPayload;
+  expect(response.ok, JSON.stringify(body)).toBe(true);
+  return body;
 }
 
 async function playAiTurnsUntilTerminal(baseUrl: string, gameId: string, stepLimit: number): Promise<{
@@ -312,6 +345,89 @@ describe("mock API AI strategy", () => {
         event_type: "GAME_ENDED",
         payload: expect.objectContaining({ winner_player_id: game.players[0].id }),
       }),
+    );
+  });
+
+  it("bids above face value for a monopoly auction but passes beyond strategic value", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-5-auction-ai-value",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Linus", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [{ property_id: "property_baltic_avenue", seat_order: 1 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const grace = game.players[1];
+    const linus = game.players[2];
+
+    await submitGameAction(baseUrl, game.id, { actor_id: ada.id, type: "ROLL_DICE", payload: {} });
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: ada.id,
+      type: "START_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue" },
+    });
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: linus.id,
+      type: "BID_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue", amount: 75 },
+    });
+
+    const strategicBid = await stepAi(baseUrl, game.id, grace.id);
+    expect(strategicBid.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "ACTIVE_AUCTION_SET",
+          payload: expect.objectContaining({
+            high_bid_amount: 76,
+            high_bidder_id: grace.id,
+            property_id: "property_mediterranean_avenue",
+          }),
+        }),
+      ]),
+    );
+
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: linus.id,
+      type: "BID_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue", amount: 135 },
+    });
+
+    const pricedOutStep = await stepAi(baseUrl, game.id, grace.id);
+    expect(pricedOutStep.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "ACTIVE_AUCTION_SET",
+          payload: expect.objectContaining({
+            high_bid_amount: 135,
+            high_bidder_id: linus.id,
+            passed_player_ids: expect.arrayContaining([grace.id]),
+            property_id: "property_mediterranean_avenue",
+          }),
+        }),
+      ]),
+    );
+    expect(pricedOutStep.accepted_events).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "AUCTION_RESULT",
+        }),
+      ]),
     );
   });
 
