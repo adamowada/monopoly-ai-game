@@ -132,6 +132,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_boardwalk_swap_deal_counteroffer" in source
     assert "orange_cash_draining_deal_rejection" in source
     assert "orange_cash_draining_deal_counteroffer" in source
+    assert "orange_mutual_completion_deal_rejection" in source
     assert "orange_monopoly_breakup_deal_rejection" in source
     assert "FOURTH_PLAYER_ID" in source
     assert 'PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai")' in source
@@ -1573,6 +1574,45 @@ def test_live_codex_strategy_smoke_monopoly_breakup_deal_has_rejection_guidance(
     assert guidance["deal_evaluations"][0]["risk"]["kind"] == "actor_street_group_breakup"
     assert guidance["deal_evaluations"][0]["risk"]["minimum_cash_value_floor"] == 540
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 240
+
+
+def test_live_codex_strategy_smoke_mutual_completion_deal_rejects_stronger_opponent_set() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_mutual_completion_deal_rejection"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        negotiation_messages=module._negotiation_messages(case),
+        deals=module._deals(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+    assert guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.MUTUAL_COMPLETION_DEAL_ID): "reject"
+    }
+    action = guidance["recommended_accept_reject_actions"][0]
+    assert action["accept_reject_payload_template"] == {
+        "deal_id": str(module.MUTUAL_COMPLETION_DEAL_ID),
+        "decision": "reject",
+        "message": "I reject because this trade gives you the stronger completed set.",
+    }
+    evaluation = guidance["deal_evaluations"][0]
+    assert evaluation["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_for_weaker_actor_completion"
+    )
+    risk = evaluation["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["group"] == "orange"
+    assert risk["actor_completion_group"] == "light_blue"
+    assert risk["opponent_completion_priority_score"] == 1400
+    assert risk["actor_completion_priority_score"] == 690
+    assert risk["completion_priority_gap"] == 710
 
 
 def test_several_turn_scripted_smoke_rejects_actions_without_player_rotation(
