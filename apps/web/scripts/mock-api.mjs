@@ -10,6 +10,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const classicData = JSON.parse(readFileSync(resolve(scriptDir, "../../../content/rules/classic_monopoly.json"), "utf8"));
 const boardData = classicData.board;
 const propertyData = classicData.properties;
+const propertyGroupData = classicData.property_groups;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
@@ -2265,6 +2266,54 @@ function targetedAiDealTerms(game, negotiation) {
   ];
 }
 
+function dealCashTransferAmount(deal, fromPlayerId, toPlayerId) {
+  return deal.terms.reduce((total, term) => {
+    if (
+      isObject(term) &&
+      (term.kind === "cash_transfer" || term.kind === "immediate_cash_transfer") &&
+      term.from_player_id === fromPlayerId &&
+      term.to_player_id === toPlayerId &&
+      Number.isInteger(term.amount)
+    ) {
+      return total + term.amount;
+    }
+    return total;
+  }, 0);
+}
+
+function propertyCompletesPlayerGroup(game, playerId, property) {
+  const group = propertyGroupData.find((candidate) => candidate.id === property.group);
+  if (!group || !Array.isArray(group.property_ids) || group.property_ids.length <= 1) {
+    return false;
+  }
+  return group.property_ids
+    .filter((propertyId) => propertyId !== property.id)
+    .every((propertyId) => propertyOwnership(game, propertyId)?.owner_id === playerId);
+}
+
+function aiDealRejectionReason(game, deal, responderPlayerId) {
+  for (const term of deal.terms) {
+    if (
+      !isObject(term) ||
+      (term.kind !== "property_transfer" && term.kind !== "immediate_property_transfer") ||
+      term.to_player_id !== responderPlayerId
+    ) {
+      continue;
+    }
+    const senderPlayerId = typeof term.from_player_id === "string" ? term.from_player_id : null;
+    const property = propertyById(term.property_id);
+    if (!senderPlayerId || !property || !propertyCompletesPlayerGroup(game, responderPlayerId, property)) {
+      continue;
+    }
+    const requestedCash = dealCashTransferAmount(deal, responderPlayerId, senderPlayerId);
+    const acceptableCash = targetedTradeOfferAmount(game, responderPlayerId, property, `complete_${property.kind}_group`);
+    if (requestedCash > 0 && (acceptableCash < property.price || requestedCash > acceptableCash)) {
+      return `cash ask $${requestedCash} exceeds strategic ceiling $${acceptableCash} for ${property.name}`;
+    }
+  }
+  return null;
+}
+
 function sampleAiDealTerms(game, negotiation, proposerPlayerId) {
   const targetedTerms = targetedAiDealTerms(game, negotiation);
   if (targetedTerms) {
@@ -2502,6 +2551,26 @@ function applyMockAiNegotiationStep(game, payload, decision) {
         outcome: { kind: "accept_reject", status: "rejected" },
         reasonCode: "deal_not_found",
         validationErrors: errors,
+      });
+    }
+    const rejectionReason = aiDealRejectionReason(game, deal, payload.player_id);
+    if (rejectionReason) {
+      const rejectedDeal = rejectDealRecord(game, deal);
+      decision.status = "accepted";
+      return aiStepPayload({
+        game,
+        payload,
+        decision,
+        status: "done",
+        outcome: {
+          kind: "accept_reject",
+          status: "done",
+          deal_id: rejectedDeal.id,
+          decision: "reject",
+          reason: rejectionReason,
+        },
+        negotiation: negotiationById(game, negotiation.id),
+        deal: rejectedDeal,
       });
     }
     const acceptedDeal = acceptDealRecord(game, deal);
