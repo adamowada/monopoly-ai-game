@@ -691,6 +691,40 @@ def test_context_pack_surfaces_blocking_opponent_near_monopoly_trade_opportunity
     ]
 
 
+def test_context_pack_defers_blocking_opponent_near_monopoly_when_cash_cannot_support_offer() -> None:
+    state = _state_with_opponent_orange_near_monopoly()
+    ai_player = state.players[0].model_copy(update={"cash": 350})
+    state = state.model_copy(update={"players": (ai_player, *state.players[1:])})
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "block_opponent_street_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "orange",
+            "group_name": "Orange",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 50,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
 def test_context_pack_recommends_rejecting_lowball_deal_that_completes_opponent_monopoly() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(

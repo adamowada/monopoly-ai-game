@@ -858,6 +858,48 @@ def test_live_codex_strategy_smoke_blocks_opponent_utility_set() -> None:
     assert guidance["trade_opportunities"][0]["property_group_kind"] == "utility"
 
 
+def test_live_codex_strategy_smoke_cash_starved_blocking_negotiation_defers() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["block_opponent_orange_near_monopoly_negotiation"]
+    state = module._cash_starved_opponent_orange_near_monopoly_state(  # noqa: SLF001
+        case.game_id
+    )
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["negotiation_strategy_guidance"]
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "block_opponent_street_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "orange",
+            "group_name": "Orange",
+            "opponent_player_id": str(module.OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "target_property_id": "property_tennessee_avenue",
+            "target_property_name": "Tennessee Avenue",
+            "target_owner_id": str(module.THIRD_PLAYER_ID),
+            "target_owner_name": "Linus",
+            "cash_budget_floor": 180,
+            "cash_budget_ceiling": 50,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
 def test_live_codex_strategy_smoke_negotiates_for_railroad_set_completion() -> None:
     module = _load_live_strategy_smoke_module()
     cases = {case.name: case for case in module._strategy_cases()}
