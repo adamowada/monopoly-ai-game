@@ -13,6 +13,7 @@ const propertyData = classicData.properties;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
+const targetedTradeCashFloor = 300;
 const playerIconOptions = new Set(["🚗", "🎩", "🚂", "🚢", "💎", "🔑"]);
 const supportedDealTermKinds = new Set([
   "cash_transfer",
@@ -439,8 +440,13 @@ function createNegotiationRecord(game, payload) {
     participant_player_ids: [...payload.participant_player_ids],
     topic: payload.topic,
     context: payload.context ?? "",
+    ...(payload.strategy ? { strategy: payload.strategy } : {}),
     status: "opened",
     round_number: 1,
+    pending_deal_id: null,
+    current_deal_id: null,
+    acceptances: {},
+    invalidated_acceptances: {},
     created_at: createdAt,
     updated_at: createdAt,
   };
@@ -1166,6 +1172,9 @@ function createDealRecord(game, payload) {
   if (negotiation) {
     negotiation.status = payload.parent_deal_id ? "countered" : "active";
     negotiation.round_number = Math.max(negotiation.round_number, deal.version);
+    negotiation.current_deal_id = deal.id;
+    negotiation.pending_deal_id = null;
+    negotiation.acceptances = {};
     negotiation.updated_at = createdAt;
   }
   game.updated_at = createdAt;
@@ -1202,6 +1211,11 @@ function acceptDealRecord(game, deal) {
   const negotiation = negotiationById(game, deal.negotiation_id);
   if (negotiation) {
     negotiation.status = "accepted";
+    negotiation.current_deal_id = deal.id;
+    negotiation.acceptances = {
+      ...(negotiation.acceptances ?? {}),
+      [deal.id]: [...new Set(deal.participant_player_ids)],
+    };
     negotiation.updated_at = acceptedAt;
   }
   game.updated_at = acceptedAt;
@@ -1219,6 +1233,76 @@ function acceptDealRecord(game, deal) {
     broadcastSse(game, dealEvent);
   }
   return deal;
+}
+
+function dealTransferTermAmount(term) {
+  return Number.isInteger(term?.amount) ? term.amount : 0;
+}
+
+function executeAcceptedNegotiation(game, negotiation) {
+  const deal = dealById(game, negotiation?.current_deal_id);
+  if (!negotiation || !deal || deal.status !== "accepted") {
+    return {
+      statusCode: 409,
+      payload: negotiationValidationError(
+        "missing_accepted_deal",
+        "execute requires an accepted current deal",
+        "current_deal_id",
+      ),
+    };
+  }
+
+  const acceptedEvents = [];
+  for (const term of deal.terms) {
+    if (!isObject(term)) {
+      continue;
+    }
+    if (term.kind === "cash_transfer" || term.kind === "immediate_cash_transfer") {
+      const fromPlayerId = typeof term.from_player_id === "string" ? term.from_player_id : null;
+      const toPlayerId = typeof term.to_player_id === "string" ? term.to_player_id : null;
+      const amount = dealTransferTermAmount(term);
+      if (!fromPlayerId || !toPlayerId || amount <= 0) {
+        continue;
+      }
+      const debitEvent = acceptPlayerCashDelta(game, fromPlayerId, -amount);
+      const creditEvent = acceptPlayerCashDelta(game, toPlayerId, amount);
+      acceptedEvents.push(...[debitEvent, creditEvent].filter(Boolean));
+      continue;
+    }
+    if (term.kind === "property_transfer" || term.kind === "immediate_property_transfer") {
+      const propertyId = typeof term.property_id === "string" ? term.property_id : null;
+      const toPlayerId = typeof term.to_player_id === "string" ? term.to_player_id : null;
+      if (!propertyId || !toPlayerId || !propertyById(propertyId)) {
+        continue;
+      }
+      setPropertyOwnership(game, propertyId, { owner_id: toPlayerId, mortgaged: false });
+      acceptedEvents.push(
+        createAcceptedEvent(
+          game,
+          "PROPERTY_OWNER_SET",
+          { property_id: propertyId, owner_id: toPlayerId },
+          deal.proposer_player_id,
+        ),
+      );
+    }
+  }
+
+  const executedAt = nowIso();
+  negotiation.status = "executed";
+  negotiation.updated_at = executedAt;
+  game.updated_at = executedAt;
+  acceptedEvents.push(
+    createAcceptedEvent(
+      game,
+      "NEGOTIATION_EXECUTED",
+      { negotiation_id: negotiation.id, deal_id: deal.id },
+      deal.proposer_player_id,
+    ),
+  );
+  return {
+    statusCode: 200,
+    payload: { status: "ok", negotiation, accepted_events: acceptedEvents },
+  };
 }
 
 function firstCashTransferTerm(deal) {
@@ -2086,7 +2170,74 @@ function aiStepPayload({
   };
 }
 
+function targetedTradeOfferAmount(game, buyerPlayerId, property, kind) {
+  const buyer = playerById(game, buyerPlayerId);
+  const cash = buyer?.state.cash ?? 0;
+  const maxAffordable = Math.max(0, cash - targetedTradeCashFloor);
+  if (maxAffordable < property.price) {
+    return 0;
+  }
+  const premiumRate = typeof kind === "string" && kind.startsWith("block_opponent_") ? 0.1 : 0.2;
+  const premium = Math.max(40, Math.ceil((property.price * premiumRate) / 10) * 10);
+  const valueCeiling = Math.floor(property.price * 1.5);
+  return Math.min(valueCeiling, maxAffordable, property.price + premium);
+}
+
+function targetedAiDealTerms(game, negotiation) {
+  const strategy = isObject(negotiation?.strategy) ? negotiation.strategy : null;
+  const opportunity = isObject(strategy?.trade_opportunity) ? strategy.trade_opportunity : null;
+  if (!opportunity) {
+    return null;
+  }
+
+  const buyerPlayerId = typeof opportunity.actor_player_id === "string" ? opportunity.actor_player_id : null;
+  const sellerPlayerId = typeof opportunity.target_owner_id === "string" ? opportunity.target_owner_id : null;
+  const targetPropertyId = typeof opportunity.target_property_id === "string" ? opportunity.target_property_id : null;
+  const property = propertyById(targetPropertyId);
+  if (!buyerPlayerId || !sellerPlayerId || !property || buyerPlayerId === sellerPlayerId) {
+    return null;
+  }
+  if (
+    !negotiation.participant_player_ids.includes(buyerPlayerId) ||
+    !negotiation.participant_player_ids.includes(sellerPlayerId)
+  ) {
+    return null;
+  }
+  const ownership = propertyOwnership(game, property.id);
+  if (ownership?.owner_id !== sellerPlayerId) {
+    return null;
+  }
+
+  const amount = targetedTradeOfferAmount(game, buyerPlayerId, property, opportunity.kind);
+  if (amount < property.price) {
+    return null;
+  }
+  const buyerName = playerById(game, buyerPlayerId)?.name ?? "AI buyer";
+  const sellerName = playerById(game, sellerPlayerId)?.name ?? "AI seller";
+  return [
+    {
+      kind: "immediate_cash_transfer",
+      from_player_id: buyerPlayerId,
+      to_player_id: sellerPlayerId,
+      amount,
+      summary: `${buyerName} pays $${amount} for ${property.name}`,
+    },
+    {
+      kind: "immediate_property_transfer",
+      from_player_id: sellerPlayerId,
+      to_player_id: buyerPlayerId,
+      property_id: property.id,
+      summary: `${sellerName} transfers ${property.name} to ${buyerName}`,
+    },
+  ];
+}
+
 function sampleAiDealTerms(game, negotiation, proposerPlayerId) {
+  const targetedTerms = targetedAiDealTerms(game, negotiation);
+  if (targetedTerms) {
+    return targetedTerms;
+  }
+
   const participants = negotiation.participant_player_ids;
   const recipient = participants.find((playerId) => playerId !== proposerPlayerId) ?? participants[0];
   return [
@@ -2118,8 +2269,10 @@ function tradeOpportunityContext(payload) {
   const targetOwnerId = typeof tradeOpportunity.target_owner_id === "string" ? tradeOpportunity.target_owner_id : null;
   const targetPropertyName =
     typeof tradeOpportunity.target_property_name === "string" ? tradeOpportunity.target_property_name : null;
+  const targetPropertyId =
+    typeof tradeOpportunity.target_property_id === "string" ? tradeOpportunity.target_property_id : null;
   const groupName = typeof tradeOpportunity.group_name === "string" ? tradeOpportunity.group_name : null;
-  if (!targetOwnerId || !targetPropertyName || !groupName) {
+  if (!targetOwnerId || !targetPropertyName || !targetPropertyId || !groupName) {
     return null;
   }
   const kind = typeof tradeOpportunity.kind === "string" ? tradeOpportunity.kind : "";
@@ -2130,6 +2283,14 @@ function tradeOpportunityContext(payload) {
     participant_player_ids: [payload.player_id, targetOwnerId],
     topic: `Trade for ${targetPropertyName} to ${actionVerb} ${groupName}`,
     context: strategicReason || `Targeted AI trade for ${targetPropertyName}.`,
+    trade_opportunity: {
+      actor_player_id: payload.player_id,
+      kind,
+      group_name: groupName,
+      target_owner_id: targetOwnerId,
+      target_property_id: targetPropertyId,
+      target_property_name: targetPropertyName,
+    },
   };
 }
 
@@ -2165,6 +2326,7 @@ function applyMockAiNegotiationStep(game, payload, decision) {
       participant_player_ids: tradeContext?.participant_player_ids ?? [payload.player_id, recipient.id],
       topic: tradeContext?.topic ?? "AI opened negotiation",
       context: tradeContext?.context ?? "Mock AI open_negotiation decision.",
+      ...(tradeContext?.trade_opportunity ? { strategy: { trade_opportunity: tradeContext.trade_opportunity } } : {}),
     });
     decision.status = "accepted";
     decision.negotiation_id = negotiation.id;
@@ -3428,6 +3590,25 @@ const server = createServer(async (request, response) => {
       return;
     }
     json(response, 200, { status: "ok", deal: rejectDealRecord(game, result.deal) });
+    return;
+  }
+
+  const executeNegotiationMatch = url.pathname.match(/^\/games\/([^/]+)\/negotiations\/([^/]+)\/execute$/);
+  if (request.method === "POST" && executeNegotiationMatch) {
+    const gameId = decodeURIComponent(executeNegotiationMatch[1]);
+    const negotiationId = decodeURIComponent(executeNegotiationMatch[2]);
+    const game = games.get(gameId);
+    if (!game) {
+      json(response, 404, { error: "game not found" });
+      return;
+    }
+    const negotiation = negotiationById(game, negotiationId);
+    if (!negotiation) {
+      json(response, 404, { error: "negotiation not found" });
+      return;
+    }
+    const result = executeAcceptedNegotiation(game, negotiation);
+    json(response, result.statusCode, result.payload);
     return;
   }
 

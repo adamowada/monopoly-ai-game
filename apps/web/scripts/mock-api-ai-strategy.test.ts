@@ -15,8 +15,14 @@ type AiStepPayload = {
     event_type: string;
     payload: Record<string, unknown>;
   }>;
+  deal?: {
+    id?: string;
+    status?: string;
+    terms?: Array<Record<string, unknown>>;
+  } | null;
   negotiation?: {
     context?: string;
+    id?: string;
     participant_player_ids?: string[];
     topic?: string;
   } | null;
@@ -168,6 +174,38 @@ function openNegotiationAi(
       mode: "auto_negotiation",
       selected_deal_id: null,
       trade_opportunity: tradeOpportunity,
+    },
+  });
+}
+
+function proposeDealAi(baseUrl: string, gameId: string, playerId: string, negotiationId: string): Promise<AiStepPayload> {
+  return postJson<AiStepPayload>(baseUrl, `/games/${gameId}/ai/step`, {
+    player_id: playerId,
+    decision_type: "deal_proposal",
+    negotiation_id: negotiationId,
+    mandatory: false,
+    request_context: {
+      mode: "auto_negotiation",
+      selected_deal_id: null,
+    },
+  });
+}
+
+function acceptRejectAi(
+  baseUrl: string,
+  gameId: string,
+  playerId: string,
+  negotiationId: string,
+  selectedDealId: string,
+): Promise<AiStepPayload> {
+  return postJson<AiStepPayload>(baseUrl, `/games/${gameId}/ai/step`, {
+    player_id: playerId,
+    decision_type: "accept_reject",
+    negotiation_id: negotiationId,
+    mandatory: false,
+    request_context: {
+      mode: "auto_negotiation",
+      selected_deal_id: selectedDealId,
     },
   });
 }
@@ -355,5 +393,119 @@ describe("mock API AI strategy", () => {
         topic: "Trade for Tennessee Avenue to complete Orange",
       }),
     );
+  });
+
+  it("proposes a targeted cash-for-property deal from a mock AI debug negotiation", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-near-monopoly-deal-proposal",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_st_james_place", seat_order: 0 },
+            { property_id: "property_new_york_avenue", seat_order: 0 },
+            { property_id: "property_tennessee_avenue", seat_order: 2 },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "complete_street_group",
+      group: "orange",
+      group_name: "Orange",
+      property_group_kind: "street",
+      actor_owned_property_ids: ["property_st_james_place", "property_new_york_avenue"],
+      actor_owned_property_names: ["St. James Place", "New York Avenue"],
+      target_property_id: "property_tennessee_avenue",
+      target_property_name: "Tennessee Avenue",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Completing Orange unlocks development and materially raises rent pressure.",
+    });
+
+    const proposed = await proposeDealAi(baseUrl, game.id, ada.id, opened.negotiation?.id ?? "");
+
+    expect(proposed.status).toBe("done");
+    expect(proposed.deal?.terms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 220,
+        }),
+        expect.objectContaining({
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_tennessee_avenue",
+        }),
+      ]),
+    );
+    expect(proposed.deal?.terms).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "rent_share",
+          property_id: "property_reading_railroad",
+        }),
+      ]),
+    );
+
+    const negotiationsAfterProposal = await getJson<{
+      negotiations: Array<{ current_deal_id?: string | null; id: string; status: string }>;
+    }>(baseUrl, `/games/${game.id}/negotiations`);
+    expect(negotiationsAfterProposal.negotiations.find((negotiation) => negotiation.id === opened.negotiation?.id)).toEqual(
+      expect.objectContaining({
+        current_deal_id: proposed.deal?.id,
+        status: "active",
+      }),
+    );
+
+    const accepted = await acceptRejectAi(baseUrl, game.id, lin.id, opened.negotiation?.id ?? "", proposed.deal?.id ?? "");
+    expect(accepted.deal).toEqual(expect.objectContaining({ id: proposed.deal?.id, status: "accepted" }));
+
+    const executed = await postJson<{ negotiation: { status: string }; status: string }>(
+      baseUrl,
+      `/games/${game.id}/negotiations/${opened.negotiation?.id ?? ""}/execute`,
+      {},
+    );
+    expect(executed).toEqual(
+      expect.objectContaining({
+        status: "ok",
+        negotiation: expect.objectContaining({ status: "executed" }),
+      }),
+    );
+
+    const stateAfterExecution = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ owner_id: string | null; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterExecution.state.property_ownership).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner_id: ada.id, property_id: "property_tennessee_avenue" }),
+      ]),
+    );
+    expect(stateAfterExecution.state.players.find((player) => player.id === ada.id)?.cash).toBe(1280);
+    expect(stateAfterExecution.state.players.find((player) => player.id === lin.id)?.cash).toBe(1720);
   });
 });
