@@ -470,6 +470,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_mutual_completion_deal_rejection,
         ),
         StrategySmokeCase(
+            name="orange_cash_round_trip_deal_rejection",
+            game_id=UUID("00000000-0000-0000-0000-00000000b244"),
+            decision_type="accept_reject",
+            state_factory=_light_blue_near_set_and_opponent_orange_near_set_state,
+            verifier=_verify_orange_cash_round_trip_deal_rejection,
+        ),
+        StrategySmokeCase(
             name="orange_monopoly_breakup_deal_rejection",
             game_id=UUID("00000000-0000-0000-0000-00000000b223"),
             decision_type="accept_reject",
@@ -1097,6 +1104,17 @@ def _verify_orange_overpriced_deal_rejection(parsed: dict[str, Any]) -> None:
     )
 
 
+def _verify_orange_cash_round_trip_deal_rejection(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(CASH_ROUND_TRIP_DEAL_ID)
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
+
+
 def _verify_orange_overpriced_deal_counteroffer(parsed: dict[str, Any]) -> None:
     counteroffer = _dict(parsed.get("counteroffer"))
     terms = _dict(counteroffer.get("terms"))
@@ -1426,6 +1444,21 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
                     "than Light Blue."
                 ),
             }
+        if case.name == "orange_cash_round_trip_deal_rejection":
+            return {
+                "mode": "live_strategy_smoke",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "deal_id": str(CASH_ROUND_TRIP_DEAL_ID),
+                "requested_decision": (
+                    "Respond to the current offer. Ada offers Grace $320 for "
+                    "Tennessee Avenue but asks Grace to return $200 cash in the "
+                    "same deal, so Ada's net payment is only $120."
+                ),
+                "strategic_position": (
+                    "Grace should reject because Tennessee Avenue completes Ada's "
+                    "Orange set and the net compensation is below the strategic floor."
+                ),
+            }
         if case.name == "orange_monopoly_breakup_property_swap_rejection":
             return {
                 "mode": "live_strategy_smoke",
@@ -1555,6 +1588,8 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         current_deal_id = str(CASH_DRAINING_DEAL_ID)
     elif case.name == "orange_mutual_completion_deal_rejection":
         current_deal_id = str(MUTUAL_COMPLETION_DEAL_ID)
+    elif case.name == "orange_cash_round_trip_deal_rejection":
+        current_deal_id = str(CASH_ROUND_TRIP_DEAL_ID)
     elif case.name == "orange_monopoly_breakup_deal_rejection":
         current_deal_id = str(BREAKUP_DEAL_ID)
     elif case.name == "orange_monopoly_breakup_property_swap_rejection":
@@ -1861,6 +1896,22 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "created_at": "2026-07-08T00:00:02Z",
             },
         )
+    if case.name == "orange_cash_round_trip_deal_rejection":
+        return (
+            {
+                "id": "live-strategy-cash-round-trip-offer-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "recipient_player_id": str(AI_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": (
+                    "I can pay $320 for Tennessee Avenue if you return $200 cash "
+                    "in the same deal."
+                ),
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
     if case.name == "orange_monopoly_breakup_deal_rejection":
         return (
             {
@@ -1997,6 +2048,10 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
     elif case.name == "orange_mutual_completion_deal_rejection":
         deal_id = MUTUAL_COMPLETION_DEAL_ID
         terms = _mutual_light_blue_for_orange_completion_terms()
+        proposer_id = OTHER_PLAYER_ID
+    elif case.name == "orange_cash_round_trip_deal_rejection":
+        deal_id = CASH_ROUND_TRIP_DEAL_ID
+        terms = _cash_round_trip_tennessee_completion_terms()
         proposer_id = OTHER_PLAYER_ID
     elif case.name == "orange_monopoly_breakup_deal_rejection":
         deal_id = BREAKUP_DEAL_ID
@@ -2623,6 +2678,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     ),
                 },
             )
+        if case.name == "orange_cash_round_trip_deal_rejection":
+            return (
+                {
+                    "id": "live-strategy-reject-low-net-cash-orange-enabler",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Ada offers $320 for "
+                        "property_tennessee_avenue, but Grace also sends $200 back, "
+                        "so Grace's net compensation is only $120. Tennessee Avenue "
+                        "completes Ada's Orange set, and the net compensation is below "
+                        "the $270 strategic floor. Reject the deal."
+                    ),
+                },
+            )
         if case.name == "orange_monopoly_breakup_deal_rejection":
             return (
                 {
@@ -2737,6 +2806,7 @@ BOARDWALK_SWAP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30d")
 MUTUAL_COMPLETION_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30e")
 BREAKUP_PROPERTY_SWAP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30f")
 CASH_RETURN_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b310")
+CASH_ROUND_TRIP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b311")
 
 
 def _bad_deal_terms() -> dict[str, Any]:
@@ -2815,6 +2885,38 @@ def _cash_return_tennessee_completion_terms() -> dict[str, Any]:
                 "instrument_id": "live-strategy-cash-return-tennessee-transfer",
                 "from_player_id": str(OTHER_PLAYER_ID),
                 "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_tennessee_avenue",
+            },
+        ],
+    }
+
+
+def _cash_round_trip_tennessee_completion_terms() -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-cash-round-trip-tennessee-completion",
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-cash-round-trip-gross-cash",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "amount": 320,
+            },
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-cash-round-trip-returned-cash",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "amount": 200,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-cash-round-trip-tennessee-transfer",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
                 "property_id": "property_tennessee_avenue",
             },
         ],

@@ -134,6 +134,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_cash_draining_deal_rejection" in source
     assert "orange_cash_draining_deal_counteroffer" in source
     assert "orange_mutual_completion_deal_rejection" in source
+    assert "orange_cash_round_trip_deal_rejection" in source
     assert "orange_monopoly_breakup_deal_rejection" in source
     assert "orange_monopoly_breakup_property_swap_rejection" in source
     assert "FOURTH_PLAYER_ID" in source
@@ -1349,6 +1350,46 @@ def test_live_codex_strategy_smoke_fair_utility_deal_has_acceptance_guidance() -
     assert opportunity["property_id"] == "property_water_works"
     assert opportunity["maximum_cash_value_ceiling"] == 225
     assert opportunity["cash_after_payment"] == 1313
+
+
+def test_live_codex_strategy_smoke_cash_round_trip_deal_rejects_low_net_price() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_cash_round_trip_deal_rejection"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        negotiation_messages=module._negotiation_messages(case),
+        deals=module._deals(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+    assert guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.CASH_ROUND_TRIP_DEAL_ID): "reject"
+    }
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"] == {
+        "deal_id": str(module.CASH_ROUND_TRIP_DEAL_ID),
+        "decision": "reject",
+        "message": "I reject because this offer undervalues set leverage.",
+    }
+    evaluation = guidance["deal_evaluations"][0]
+    assert evaluation["recommendation"] == "reject"
+    assert evaluation["reason_code"] == (
+        "transfers_property_that_completes_opponent_street_group_below_floor"
+    )
+    assert evaluation["actor_receives_cash_total"] == 320
+    assert evaluation["actor_pays_cash_total"] == 200
+    risk = evaluation["risk"]
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["minimum_cash_value_floor"] == 270
+    assert risk["total_compensation_value"] == 320
+    assert risk["net_compensation_value"] == 120
+    assert risk["net_compensation_value_gap"] == 150
 
 
 def test_live_codex_strategy_smoke_bad_completion_deals_have_rejection_guidance() -> None:
