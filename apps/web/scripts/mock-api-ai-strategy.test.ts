@@ -405,7 +405,7 @@ describe("mock API AI strategy", () => {
         expect.objectContaining({
           event_type: "ACTIVE_AUCTION_SET",
           payload: expect.objectContaining({
-            high_bid_amount: 76,
+            high_bid_amount: 120,
             high_bidder_id: grace.id,
             property_id: "property_mediterranean_avenue",
           }),
@@ -507,6 +507,65 @@ describe("mock API AI strategy", () => {
         }),
       ]),
     );
+  });
+
+  it("keeps Stage 10.5 AIs competing in auctions when the bid is strategically worthwhile", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-competitive-auction",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Linus", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          current_phase: "PURCHASE_OR_AUCTION",
+          player_positions: [{ seat_order: 0, position: 1 }],
+          property_owners: [{ property_id: "property_baltic_avenue", seat_order: 1 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const grace = game.players[1];
+    const linus = game.players[2];
+
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: ada.id,
+      type: "START_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue" },
+    });
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: linus.id,
+      type: "BID_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue", amount: 75 },
+    });
+
+    const strategicBid = await stepAi(baseUrl, game.id, grace.id);
+
+    expect(strategicBid.status).toBe("accepted");
+    expect(strategicBid.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "ACTIVE_AUCTION_SET",
+          payload: expect.objectContaining({
+            high_bid_amount: 120,
+            high_bidder_id: grace.id,
+            property_id: "property_mediterranean_avenue",
+          }),
+        }),
+      ]),
+    );
+    expect(strategicBid.accepted_events.map((event) => event.event_type)).not.toContain("AUCTION_RESULT");
   });
 
   it("mortgages assets to settle debt before forced bankruptcy", async () => {

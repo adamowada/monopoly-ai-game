@@ -3315,15 +3315,19 @@ function chooseMockAuctionAiAction(game, playerId) {
   if (!bidAction) {
     return passAction;
   }
-  if (isStage105Seed(game.seed) && game.active_auction?.high_bidder_id) {
-    return passAction;
-  }
   const propertyId = typeof bidAction.payload?.property_id === "string" ? bidAction.payload.property_id : null;
-  const bidAmount = Number.isInteger(bidAction.payload?.amount) ? bidAction.payload.amount : auctionMinimumBid(game);
-  if (!propertyId || bidAmount > auctionBidCeiling(game, playerId, propertyId)) {
+  const minimumBid = Number.isInteger(bidAction.payload?.amount) ? bidAction.payload.amount : auctionMinimumBid(game);
+  const ceiling = propertyId ? auctionBidCeiling(game, playerId, propertyId) : 0;
+  if (!propertyId || minimumBid > ceiling) {
     return passAction;
   }
-  return bidAction;
+  return {
+    ...bidAction,
+    payload: {
+      ...bidAction.payload,
+      amount: ceiling,
+    },
+  };
 }
 
 function chooseMockPurchaseOrAuctionAction(game, playerId, legalActions) {
