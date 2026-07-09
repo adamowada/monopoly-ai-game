@@ -388,6 +388,23 @@ function configureDebugAllocations(game) {
     }
   }
 
+  if (Array.isArray(allocations.player_positions)) {
+    for (const entry of allocations.player_positions) {
+      if (!isObject(entry) || !Number.isInteger(entry.seat_order) || !validateBoardPosition(entry.position)) {
+        continue;
+      }
+      const player = game.players[entry.seat_order];
+      if (!player) {
+        continue;
+      }
+      player.state = {
+        ...player.state,
+        position: entry.position,
+      };
+      player.updated_at = nowIso();
+    }
+  }
+
   if (Array.isArray(allocations.property_owners)) {
     for (const entry of allocations.property_owners) {
       if (!isObject(entry) || typeof entry.property_id !== "string") {

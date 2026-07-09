@@ -25,6 +25,7 @@ type DebugPropertyImprovementValue = "" | "1" | "2" | "3" | "4" | "hotel";
 const playerColors = ["#0f766e", "#2563eb", "#7c3aed", "#dc2626", "#ca8a04"];
 const hexColorPattern = /^#[0-9a-fA-F]{6}$/;
 const defaultStartingCash = "1500";
+const defaultStartingPosition = "0";
 const maxDebugStartingCash = 100_000;
 const debugPropertyImprovementValues = new Set(["", "1", "2", "3", "4", "hotel"]);
 const debugPropertyImprovementOptions: Array<{ value: DebugPropertyImprovementValue; label: string }> = [
@@ -48,6 +49,10 @@ const debugPropertySetOptions = PROPERTY_GROUPS.map((group) => ({
   name: group.name,
   propertyIds: group.property_ids.filter((propertyId) => Boolean(PROPERTIES_BY_ID[propertyId])),
 })).filter((group) => group.propertyIds.length > 0);
+const debugBoardPositionOptions = BOARD_SPACES.map((space) => ({
+  label: `${space.position} - ${space.name}`,
+  value: String(space.position),
+}));
 
 export const AI_PLAYER_NAMES = [
   "Emma",
@@ -118,6 +123,11 @@ function parseNonNegativeInteger(value: string): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+function parseBoardPosition(value: string): number | null {
+  const parsed = parseNonNegativeInteger(value);
+  return parsed !== null && parsed < BOARD_SPACES.length ? parsed : null;
+}
+
 function normalizeColor(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -154,6 +164,7 @@ function validateSetup(
   proposalLimit: string,
   debugEnabled: boolean,
   debugCash: Record<string, string>,
+  debugPlayerPositions: Record<string, string>,
   debugPropertyOwners: Record<string, string>,
   debugPropertyImprovements: Record<string, string>,
   debugPropertyMortgages: Record<string, boolean>,
@@ -200,6 +211,9 @@ function validateSetup(
       const cash = parseNonNegativeInteger(debugCash[player.id] ?? defaultStartingCash);
       if (cash === null || cash > maxDebugStartingCash) {
         messages.push(`${player.name.trim() || "Player"} starting cash must be between 0 and ${maxDebugStartingCash}`);
+      }
+      if (parseBoardPosition(debugPlayerPositions[player.id] ?? defaultStartingPosition) === null) {
+        messages.push(`${player.name.trim() || "Player"} starting square must be on the board`);
       }
     }
     const validSeatValues = new Set(players.map((_, index) => String(index)));
@@ -254,6 +268,7 @@ export function GameSetupPanel() {
   const [proposalLimit, setProposalLimit] = useState("4");
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [debugCash, setDebugCash] = useState<Record<string, string>>({});
+  const [debugPlayerPositions, setDebugPlayerPositions] = useState<Record<string, string>>({});
   const [debugPropertyOwners, setDebugPropertyOwners] = useState<Record<string, string>>({});
   const [debugPropertyImprovements, setDebugPropertyImprovements] = useState<Record<string, string>>({});
   const [debugPropertyMortgages, setDebugPropertyMortgages] = useState<Record<string, boolean>>({});
@@ -307,6 +322,22 @@ export function GameSetupPanel() {
 
   function setDebugStartingCash(playerId: string, cash: string) {
     setDebugCash((current) => ({ ...current, [playerId]: cash }));
+  }
+
+  function debugStartingPosition(player: SetupPlayer): string {
+    return debugPlayerPositions[player.id] ?? defaultStartingPosition;
+  }
+
+  function setDebugStartingPosition(playerId: string, position: string) {
+    setDebugPlayerPositions((current) => {
+      const next = { ...current };
+      if (position === defaultStartingPosition) {
+        delete next[playerId];
+      } else {
+        next[playerId] = position;
+      }
+      return next;
+    });
   }
 
   function setDebugPropertyOwner(propertyId: string, seatOrder: string) {
@@ -400,6 +431,14 @@ export function GameSetupPanel() {
       return {};
     }
     const validSeatValues = new Set(players.map((_, index) => String(index)));
+    const playerPositions = players
+      .map((player, seatOrder) => ({
+        position: parseBoardPosition(debugStartingPosition(player)),
+        seat_order: seatOrder,
+      }))
+      .filter((entry): entry is { position: number; seat_order: number } => {
+        return entry.position !== null && entry.position !== Number(defaultStartingPosition);
+      });
     const propertyImprovements = Object.entries(debugPropertyImprovements)
       .filter(([propertyId, improvement]) => {
         const property = debugPropertyById(propertyId);
@@ -435,6 +474,7 @@ export function GameSetupPanel() {
           seat_order: seatOrder,
           cash: parseNonNegativeInteger(debugStartingCash(player)) ?? Number(defaultStartingCash),
         })),
+        ...(playerPositions.length > 0 ? { player_positions: playerPositions } : {}),
         property_owners: Object.entries(debugPropertyOwners)
           .filter(([, seatOrder]) => seatOrder !== "" && validSeatValues.has(seatOrder))
           .map(([propertyId, seatOrder]) => ({
@@ -455,6 +495,7 @@ export function GameSetupPanel() {
       proposalLimit,
       debugEnabled,
       debugCash,
+      debugPlayerPositions,
       debugPropertyOwners,
       debugPropertyImprovements,
       debugPropertyMortgages,
@@ -704,6 +745,27 @@ export function GameSetupPanel() {
                           value={debugStartingCash(player)}
                           className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
                         />
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-2">
+                    <div className="text-xs font-black uppercase text-[#6f604c]">Starting square</div>
+                    {players.map((player, index) => (
+                      <label key={player.id} className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                        {player.name.trim() || `Player ${index + 1}`}
+                        <select
+                          aria-label={`Player ${index + 1} starting square`}
+                          onChange={(event) => setDebugStartingPosition(player.id, event.target.value)}
+                          value={debugStartingPosition(player)}
+                          className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                        >
+                          {debugBoardPositionOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                     ))}
                   </div>

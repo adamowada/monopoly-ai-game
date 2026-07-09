@@ -318,6 +318,36 @@ describe("GameSetupPanel", () => {
     });
   });
 
+  it("sends optional debug starting board positions for scenario setup", async () => {
+    createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
+    render(<GameSetupPanel />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), {
+      target: { value: "Ada" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 2 name" }), {
+      target: { value: "Grace" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enable debug setup" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Player 2 starting square" }), {
+      target: { value: "5" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create game" }));
+
+    await waitFor(() => {
+      expect(createGameMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            debug_allocations: expect.objectContaining({
+              player_positions: [{ seat_order: 1, position: 5 }],
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
   it("can allocate an entire debug property set for faster AI scenario setup", async () => {
     createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
     render(<GameSetupPanel />);
