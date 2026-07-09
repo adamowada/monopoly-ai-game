@@ -499,6 +499,10 @@ function isStage105MixedRoundSeed(seed) {
   return typeof seed === "string" && seed.startsWith("stage-10-5-five-player-mixed-round");
 }
 
+function isStage105FourAiFullGameSeed(seed) {
+  return typeof seed === "string" && seed.startsWith("stage-10-5-four-ai-full-game");
+}
+
 function isStage105ContractSeed(seed) {
   return typeof seed === "string" && seed.startsWith("stage-10-5-contract-enforcement");
 }
@@ -582,6 +586,24 @@ function configureStage105Seed(game) {
       hotel: false,
       hotels: 0,
     });
+  }
+
+  if (isStage105FourAiFullGameSeed(game.seed)) {
+    const winner = game.players[0]?.id ?? null;
+    setPropertyOwnership(game, "property_mediterranean_avenue", {
+      owner_id: winner,
+      mortgaged: false,
+      houses: 0,
+      hotel: false,
+      hotels: 0,
+    });
+    for (const player of game.players.slice(1)) {
+      player.state = {
+        ...player.state,
+        cash: 1,
+      };
+      player.updated_at = nowIso();
+    }
   }
 }
 
@@ -1459,6 +1481,23 @@ function activePlayer(game) {
   return game.players[index] ?? game.players[0] ?? null;
 }
 
+function activePlayers(game) {
+  return game.players.filter((player) => player.status === "active");
+}
+
+function nextActivePlayerIndex(game, fromIndex) {
+  if (activePlayers(game).length === 0) {
+    return -1;
+  }
+  for (let offset = 1; offset <= game.players.length; offset += 1) {
+    const index = (fromIndex + offset) % game.players.length;
+    if (game.players[index]?.status === "active") {
+      return index;
+    }
+  }
+  return -1;
+}
+
 function playerById(game, playerId) {
   return game.players.find((player) => player.id === playerId) ?? null;
 }
@@ -1477,7 +1516,7 @@ function legalAction(game, type, payload = {}, actorPlayerId = activePlayer(game
 
 function legalActionsFor(game, actorPlayerId) {
   const actor = playerById(game, actorPlayerId);
-  if (!actor) {
+  if (!actor || actor.status !== "active" || game.status === "ended") {
     return [];
   }
   if (game.active_auction) {
@@ -1493,6 +1532,22 @@ function legalActionsFor(game, actorPlayerId) {
   if (game.current_phase === "PAYMENT_RESOLUTION") {
     const debt = game.pending_debt;
     if (debt?.debtor_player_id === actor.id) {
+      if ((actor.state.cash ?? 0) < debt.amount) {
+        return [
+          legalAction(
+            game,
+            "DECLARE_BANKRUPTCY",
+            {
+              debt_id: debt.id,
+              creditor_player_id: debt.creditor_player_id,
+              amount: debt.amount,
+              reason: debt.reason,
+              forced: true,
+            },
+            actor.id,
+          ),
+        ];
+      }
       return [
         legalAction(
           game,
@@ -1666,6 +1721,9 @@ function broadcastSse(game, event) {
 function stage105RollDestination(game, actor) {
   if (isStage105IncomeTaxSeed(game.seed)) {
     return 4;
+  }
+  if (isStage105FourAiFullGameSeed(game.seed)) {
+    return 1;
   }
   if (isStage105TwoHumanRoundSeed(game.seed)) {
     return 1;
@@ -1969,15 +2027,119 @@ function acceptSettleDebt(game, action) {
   return createAcceptedResponse(game, acceptedEvents);
 }
 
+function acceptDeclareBankruptcy(game, action) {
+  const debt = game.pending_debt;
+  const actor = playerById(game, action.actor_id);
+  if (!debt || !actor || debt.debtor_player_id !== actor.id) {
+    return rejectAction(game, action, "illegal_action", "bankruptcy requires an unpaid debt for this actor", "type");
+  }
+  if (actor.status !== "active") {
+    return rejectAction(game, action, "illegal_action", "bankruptcy actor is already inactive", "actor_id");
+  }
+
+  const previousIndex = game.current_player_index ?? actor.seat_order ?? 0;
+  const creditorId = debt.creditor_player_id ?? null;
+  const creditor = creditorId ? playerById(game, creditorId) : null;
+  actor.status = "bankrupt";
+  actor.state = {
+    ...actor.state,
+    cash: 0,
+    is_bankrupt: true,
+  };
+  actor.updated_at = nowIso();
+
+  const acceptedEvents = [
+    createAcceptedEvent(game, "ACTIVE_PAYMENT_SET", { active: false }, actor.id),
+    createAcceptedEvent(
+      game,
+      "BANKRUPTCY_DECLARED",
+      {
+        player_id: actor.id,
+        creditor_player_id: creditor?.id ?? null,
+        debt_id: debt.id,
+        amount: debt.amount,
+        reason: debt.reason,
+        forced: true,
+      },
+      actor.id,
+    ),
+  ];
+
+  for (const ownership of game.property_ownership) {
+    if (ownership.owner_id !== actor.id) {
+      continue;
+    }
+    setPropertyOwnership(game, ownership.property_id, {
+      owner_id: creditor?.id ?? null,
+      mortgaged: false,
+      houses: 0,
+      hotel: false,
+      hotels: 0,
+    });
+    acceptedEvents.push(
+      createAcceptedEvent(
+        game,
+        "PROPERTY_OWNER_SET",
+        { property_id: ownership.property_id, owner_id: creditor?.id ?? null },
+        actor.id,
+      ),
+    );
+  }
+
+  game.pending_debt = null;
+  const remainingPlayers = activePlayers(game);
+  if (remainingPlayers.length <= 1) {
+    const winner = remainingPlayers[0] ?? creditor ?? null;
+    game.status = "ended";
+    game.current_phase = "GAME_OVER";
+    game.current_player_index = winner ? game.players.findIndex((player) => player.id === winner.id) : 0;
+    acceptedEvents.push(
+      createAcceptedEvent(
+        game,
+        "GAME_ENDED",
+        {
+          winner_player_id: winner?.id ?? null,
+          bankrupt_player_ids: game.players.filter((player) => player.status === "bankrupt").map((player) => player.id),
+        },
+        actor.id,
+      ),
+    );
+    return createAcceptedResponse(game, acceptedEvents);
+  }
+
+  const nextIndex = nextActivePlayerIndex(game, previousIndex);
+  game.current_player_index = nextIndex >= 0 ? nextIndex : 0;
+  if (nextIndex >= 0 && nextIndex <= previousIndex) {
+    game.round_number = (game.round_number ?? 1) + 1;
+  }
+  game.current_phase = "START_TURN";
+  acceptedEvents.push(
+    createAcceptedEvent(
+      game,
+      "TURN_ENDED",
+      {
+        ended_player_id: actor.id,
+        next_player_id: activePlayer(game)?.id ?? null,
+        round_number: game.round_number ?? 1,
+      },
+      actor.id,
+    ),
+  );
+  return createAcceptedResponse(game, acceptedEvents);
+}
+
 function acceptEndTurn(game, action) {
   const actor = activePlayer(game);
   if (!actor || actor.id !== action.actor_id || game.current_phase !== "END_TURN") {
     return rejectAction(game, action, "illegal_action", "end turn is only legal for the active player at END_TURN", "type");
   }
   const previousIndex = game.current_player_index ?? 0;
-  const nextIndex = (previousIndex + 1) % game.players.length;
+  const nextIndex = nextActivePlayerIndex(game, previousIndex);
+  if (nextIndex < 0) {
+    return rejectAction(game, action, "illegal_action", "there is no active player to receive the next turn", "type");
+  }
   game.current_player_index = nextIndex;
-  if (nextIndex === 0) {
+  if (nextIndex <= previousIndex) {
     game.round_number = (game.round_number ?? 1) + 1;
   }
   game.current_phase = "START_TURN";
@@ -2700,7 +2862,7 @@ function chooseMockTurnAiAction(game, playerId) {
   const debt = game.pending_debt;
   const hasActiveDebt = game.current_phase === "PAYMENT_RESOLUTION" && debt?.debtor_player_id === playerId;
   const priority = hasActiveDebt
-    ? ["SETTLE_DEBT", "SELL_HOUSE", "MORTGAGE_PROPERTY", "END_TURN", "ROLL_DICE"]
+    ? ["SETTLE_DEBT", "DECLARE_BANKRUPTCY", "SELL_HOUSE", "MORTGAGE_PROPERTY", "END_TURN", "ROLL_DICE"]
     : ["BUY_HOUSE", "UNMORTGAGE_PROPERTY", "BUY_PROPERTY", "END_TURN", "ROLL_DICE"];
   for (const type of priority) {
     const action = legalActions.find((candidate) => candidate.type === type);
@@ -2723,6 +2885,9 @@ function acceptMockAiTurnAction(game, action) {
   }
   if (action.type === "END_TURN") {
     return acceptEndTurn(game, action);
+  }
+  if (action.type === "DECLARE_BANKRUPTCY") {
+    return acceptDeclareBankruptcy(game, action);
   }
   const managementResponse = acceptManagementAction(game, action);
   if (managementResponse) {

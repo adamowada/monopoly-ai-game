@@ -6,8 +6,10 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 type MockGame = {
+  current_phase?: string;
   id: string;
-  players: Array<{ id: string; name: string }>;
+  players: Array<{ id: string; name: string; state?: { cash?: number }; status?: string }>;
+  status?: string;
 };
 
 type AiStepPayload = {
@@ -162,6 +164,29 @@ function stepAi(baseUrl: string, gameId: string, playerId: string): Promise<AiSt
   });
 }
 
+async function playAiTurnsUntilTerminal(baseUrl: string, gameId: string, stepLimit: number): Promise<{
+  game: MockGame;
+  steps: AiStepPayload[];
+}> {
+  const steps: AiStepPayload[] = [];
+  for (let index = 0; index < stepLimit; index += 1) {
+    const game = await getJson<MockGame>(baseUrl, `/games/${gameId}`);
+    if (game.status === "ended") {
+      return { game, steps };
+    }
+    const state = await getJson<{ state: { turn: { current_player_id: string | null } } }>(
+      baseUrl,
+      `/games/${gameId}/state`,
+    );
+    const activePlayerId = state.state.turn.current_player_id;
+    if (!activePlayerId) {
+      throw new Error("mock full-game loop had no active player");
+    }
+    steps.push(await stepAi(baseUrl, gameId, activePlayerId));
+  }
+  return { game: await getJson<MockGame>(baseUrl, `/games/${gameId}`), steps };
+}
+
 function openNegotiationAi(
   baseUrl: string,
   gameId: string,
@@ -248,6 +273,48 @@ afterEach(async () => {
 });
 
 describe("mock API AI strategy", () => {
+  it("lets a four-AI mock game reach a winner through forced bankruptcies", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-four-ai-full-game-forced-bankruptcy",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+        { name: "Katherine", kind: "ai" },
+      ],
+    });
+
+    const played = await playAiTurnsUntilTerminal(baseUrl, game.id, 20);
+
+    expect(played.steps.map((step) => step.status)).not.toContain("rejected");
+    expect(played.game).toEqual(
+      expect.objectContaining({
+        status: "ended",
+        current_phase: "GAME_OVER",
+      }),
+    );
+    expect(played.game.players[0]).toEqual(
+      expect.objectContaining({
+        id: game.players[0].id,
+        status: "active",
+      }),
+    );
+    expect(played.game.players.slice(1).map((player) => player.status)).toEqual(["bankrupt", "bankrupt", "bankrupt"]);
+
+    const events = await getJson<{ events: Array<{ event_type: string; payload: Record<string, unknown> }> }>(
+      baseUrl,
+      `/games/${game.id}/events`,
+    );
+    expect(events.events.filter((event) => event.event_type === "BANKRUPTCY_DECLARED")).toHaveLength(3);
+    expect(events.events.at(-1)).toEqual(
+      expect.objectContaining({
+        event_type: "GAME_ENDED",
+        payload: expect.objectContaining({ winner_player_id: game.players[0].id }),
+      }),
+    );
+  });
+
   it("develops a complete color group before rolling a later AI turn and pays for the build", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl);
