@@ -287,6 +287,37 @@ describe("GameSetupPanel", () => {
     });
   });
 
+  it("sends optional debug property mortgage state for scenario setup", async () => {
+    createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
+    render(<GameSetupPanel />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), {
+      target: { value: "Ada" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 2 name" }), {
+      target: { value: "Grace" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enable debug setup" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Reading Railroad owner" }), {
+      target: { value: "0" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Reading Railroad mortgaged" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Create game" }));
+
+    await waitFor(() => {
+      expect(createGameMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            debug_allocations: expect.objectContaining({
+              property_mortgages: [{ property_id: "property_reading_railroad", mortgaged: true }],
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
   it("can allocate an entire debug property set for faster AI scenario setup", async () => {
     createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
     render(<GameSetupPanel />);

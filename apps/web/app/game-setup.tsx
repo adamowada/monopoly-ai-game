@@ -156,6 +156,7 @@ function validateSetup(
   debugCash: Record<string, string>,
   debugPropertyOwners: Record<string, string>,
   debugPropertyImprovements: Record<string, string>,
+  debugPropertyMortgages: Record<string, boolean>,
 ): string[] {
   const messages: string[] = [];
   const names = players.map((player) => player.name.trim());
@@ -222,6 +223,24 @@ function validateSetup(
         break;
       }
     }
+    for (const [propertyId, mortgaged] of Object.entries(debugPropertyMortgages)) {
+      if (!mortgaged) {
+        continue;
+      }
+      const property = debugPropertyById(propertyId);
+      if (!property) {
+        messages.push("Debug property mortgages must reference board properties");
+        break;
+      }
+      if (!validSeatValues.has(debugPropertyOwners[propertyId] ?? "")) {
+        messages.push("Debug property mortgages require a configured owner");
+        break;
+      }
+      if (property.kind === "street" && (debugPropertyImprovements[propertyId] ?? "") !== "") {
+        messages.push("Debug mortgaged properties cannot start with buildings");
+        break;
+      }
+    }
   }
 
   return messages;
@@ -237,6 +256,7 @@ export function GameSetupPanel() {
   const [debugCash, setDebugCash] = useState<Record<string, string>>({});
   const [debugPropertyOwners, setDebugPropertyOwners] = useState<Record<string, string>>({});
   const [debugPropertyImprovements, setDebugPropertyImprovements] = useState<Record<string, string>>({});
+  const [debugPropertyMortgages, setDebugPropertyMortgages] = useState<Record<string, boolean>>({});
   const [messages, setMessages] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -297,6 +317,11 @@ export function GameSetupPanel() {
         delete next[propertyId];
         return next;
       });
+      setDebugPropertyMortgages((current) => {
+        const next = { ...current };
+        delete next[propertyId];
+        return next;
+      });
     }
   }
 
@@ -306,6 +331,36 @@ export function GameSetupPanel() {
 
   function setDebugPropertyImprovement(propertyId: string, improvement: string) {
     setDebugPropertyImprovements((current) => ({ ...current, [propertyId]: improvement }));
+    if (improvement !== "") {
+      setDebugPropertyMortgages((current) => {
+        const next = { ...current };
+        delete next[propertyId];
+        return next;
+      });
+    }
+  }
+
+  function debugPropertyMortgaged(propertyId: string): boolean {
+    return debugPropertyMortgages[propertyId] === true;
+  }
+
+  function setDebugPropertyMortgage(propertyId: string, mortgaged: boolean) {
+    if (mortgaged) {
+      setDebugPropertyImprovements((current) => {
+        const next = { ...current };
+        delete next[propertyId];
+        return next;
+      });
+    }
+    setDebugPropertyMortgages((current) => {
+      const next = { ...current };
+      if (mortgaged) {
+        next[propertyId] = true;
+      } else {
+        delete next[propertyId];
+      }
+      return next;
+    });
   }
 
   function debugPropertySetOwnerValue(propertyIds: readonly string[]): string {
@@ -324,6 +379,13 @@ export function GameSetupPanel() {
     });
     if (seatOrder === "") {
       setDebugPropertyImprovements((current) => {
+        const next = { ...current };
+        for (const propertyId of propertyIds) {
+          delete next[propertyId];
+        }
+        return next;
+      });
+      setDebugPropertyMortgages((current) => {
         const next = { ...current };
         for (const propertyId of propertyIds) {
           delete next[propertyId];
@@ -353,6 +415,20 @@ export function GameSetupPanel() {
         houses: improvement === "hotel" ? 0 : Number.parseInt(improvement, 10),
         hotel: improvement === "hotel",
       }));
+    const propertyMortgages = Object.entries(debugPropertyMortgages)
+      .filter(([propertyId, mortgaged]) => {
+        const property = debugPropertyById(propertyId);
+        return (
+          mortgaged &&
+          Boolean(property) &&
+          validSeatValues.has(debugPropertyOwners[propertyId] ?? "") &&
+          !(property?.kind === "street" && (debugPropertyImprovements[propertyId] ?? "") !== "")
+        );
+      })
+      .map(([propertyId]) => ({
+        property_id: propertyId,
+        mortgaged: true,
+      }));
     return {
       debug_allocations: {
         player_cash: players.map((player, seatOrder) => ({
@@ -366,6 +442,7 @@ export function GameSetupPanel() {
             seat_order: Number.parseInt(seatOrder, 10),
           })),
         ...(propertyImprovements.length > 0 ? { property_improvements: propertyImprovements } : {}),
+        ...(propertyMortgages.length > 0 ? { property_mortgages: propertyMortgages } : {}),
       },
     };
   }
@@ -380,6 +457,7 @@ export function GameSetupPanel() {
       debugCash,
       debugPropertyOwners,
       debugPropertyImprovements,
+      debugPropertyMortgages,
     );
     if (validationMessages.length > 0) {
       setMessages(validationMessages);
@@ -667,6 +745,9 @@ export function GameSetupPanel() {
                     <div className="grid max-h-80 gap-2 overflow-y-auto pr-1">
                       {debugPropertyOptions.map((property) => {
                         const ownerValue = debugPropertyOwners[property.id] ?? "";
+                        const improvementValue = debugPropertyImprovement(property.id);
+                        const mortgageDisabled =
+                          ownerValue === "" || (property.kind === "street" && improvementValue !== "");
                         return (
                           <div key={property.id} className="grid gap-2 rounded border border-[#b99768]/50 bg-white/55 p-2">
                             <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
@@ -692,7 +773,7 @@ export function GameSetupPanel() {
                                   aria-label={`${property.name} improvements`}
                                   disabled={ownerValue === ""}
                                   onChange={(event) => setDebugPropertyImprovement(property.id, event.target.value)}
-                                  value={debugPropertyImprovement(property.id)}
+                                  value={improvementValue}
                                   className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20 disabled:bg-[#e8dfcd] disabled:text-[#6f604c]"
                                 >
                                   {debugPropertyImprovementOptions.map((option) => (
@@ -703,6 +784,17 @@ export function GameSetupPanel() {
                                 </select>
                               </label>
                             ) : null}
+                            <label className="inline-flex items-center gap-2 text-sm font-bold text-[#2f2418]">
+                              <input
+                                aria-label={`${property.name} mortgaged`}
+                                checked={debugPropertyMortgaged(property.id)}
+                                disabled={mortgageDisabled}
+                                onChange={(event) => setDebugPropertyMortgage(property.id, event.target.checked)}
+                                type="checkbox"
+                                className="size-4 rounded border-[#b99768] text-teal-700 focus:ring-teal-700 disabled:opacity-50"
+                              />
+                              Mortgaged
+                            </label>
                           </div>
                         );
                       })}

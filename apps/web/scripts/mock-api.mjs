@@ -437,6 +437,23 @@ function configureDebugAllocations(game) {
     }
     refreshBankInventoryFromOwnership(game);
   }
+
+  if (Array.isArray(allocations.property_mortgages)) {
+    for (const entry of allocations.property_mortgages) {
+      if (!isObject(entry) || typeof entry.property_id !== "string" || typeof entry.mortgaged !== "boolean") {
+        continue;
+      }
+      const property = propertyById(entry.property_id);
+      const ownership = propertyOwnership(game, entry.property_id);
+      if (!property || !ownership?.owner_id) {
+        continue;
+      }
+      if (entry.mortgaged && ((ownership.houses ?? 0) > 0 || ownership.hotel || ownership.hotels > 0)) {
+        continue;
+      }
+      setPropertyOwnership(game, entry.property_id, { mortgaged: entry.mortgaged });
+    }
+  }
 }
 
 function configurePropertyManagementSeed(game) {
@@ -1786,6 +1803,61 @@ function genericMortgageLegalActionsFor(game, actor, existingMortgagePropertyIds
     .map((candidate) => candidate.action);
 }
 
+function unmortgageCost(property) {
+  return property?.mortgage_value ? property.mortgage_value + Math.ceil(property.mortgage_value / 10) : 0;
+}
+
+function propertyGroupOwnedCount(game, actor, property) {
+  const group = propertyGroupData.find((candidate) => candidate.id === property?.group);
+  if (!group || !Array.isArray(group.property_ids)) {
+    return 0;
+  }
+  return group.property_ids.filter((propertyId) => propertyOwnership(game, propertyId)?.owner_id === actor.id).length;
+}
+
+function genericUnmortgageLegalActionsFor(game, actor, existingUnmortgagePropertyIds = new Set()) {
+  if (!actor) {
+    return [];
+  }
+  const actorCash = actor.state.cash ?? 0;
+  return game.property_ownership
+    .flatMap((ownership) => {
+      if (
+        ownership.owner_id !== actor.id ||
+        !ownership.mortgaged ||
+        (ownership.houses ?? 0) > 0 ||
+        ownership.hotel ||
+        ownership.hotels > 0 ||
+        existingUnmortgagePropertyIds.has(ownership.property_id)
+      ) {
+        return [];
+      }
+      const property = propertyById(ownership.property_id);
+      const cost = unmortgageCost(property);
+      if (!property || cost <= 0 || actorCash - cost < developmentCashReserve) {
+        return [];
+      }
+      return [
+        {
+          action: legalAction(game, "UNMORTGAGE_PROPERTY", {
+            property_id: property.id,
+            cost,
+          }),
+          cost,
+          groupOwnedCount: propertyGroupOwnedCount(game, actor, property),
+          price: property.price ?? 0,
+        },
+      ];
+    })
+    .sort(
+      (left, right) =>
+        right.groupOwnedCount - left.groupOwnedCount ||
+        right.price - left.price ||
+        left.cost - right.cost,
+    )
+    .map((candidate) => candidate.action);
+}
+
 function developmentLevel(ownership) {
   if (!ownership) {
     return 0;
@@ -1881,6 +1953,12 @@ function propertyManagementLegalActionsFor(game) {
   if (parkPlace?.owner_id === actor?.id && parkPlace.mortgaged && actorCash >= 220) {
     actions.push(legalAction(game, "UNMORTGAGE_PROPERTY", { property_id: "property_park_place", cost: 220 }));
   }
+  const existingUnmortgagePropertyIds = new Set(
+    actions
+      .filter((action) => action.type === "UNMORTGAGE_PROPERTY" && typeof action.payload?.property_id === "string")
+      .map((action) => action.payload.property_id),
+  );
+  actions.push(...genericUnmortgageLegalActionsFor(game, actor, existingUnmortgagePropertyIds));
   const existingSellPropertyIds = new Set(
     actions
       .filter((action) => action.type === "SELL_HOUSE" && typeof action.payload?.property_id === "string")
