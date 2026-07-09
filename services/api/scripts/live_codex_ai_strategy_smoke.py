@@ -469,6 +469,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             state_factory=_orange_monopoly_state,
             verifier=_verify_orange_monopoly_breakup_deal_rejection,
         ),
+        StrategySmokeCase(
+            name="orange_monopoly_breakup_property_swap_rejection",
+            game_id=UUID("00000000-0000-0000-0000-00000000b242"),
+            decision_type="accept_reject",
+            state_factory=_orange_monopoly_and_opponent_baltic_state,
+            verifier=_verify_orange_monopoly_breakup_property_swap_rejection,
+        ),
     )
 
 
@@ -1251,6 +1258,17 @@ def _verify_orange_monopoly_breakup_deal_rejection(parsed: dict[str, Any]) -> No
     )
 
 
+def _verify_orange_monopoly_breakup_property_swap_rejection(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(BREAKUP_PROPERTY_SWAP_DEAL_ID)
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
+
+
 def _case_summary(case: StrategySmokeCase, parsed: dict[str, Any]) -> dict[str, Any]:
     if case.decision_type == "action_decision":
         action = _dict(parsed.get("action"))
@@ -1375,6 +1393,20 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
                     "than Light Blue."
                 ),
             }
+        if case.name == "orange_monopoly_breakup_property_swap_rejection":
+            return {
+                "mode": "live_strategy_smoke",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "deal_id": str(BREAKUP_PROPERTY_SWAP_DEAL_ID),
+                "requested_decision": (
+                    "Respond to the current offer. Ada offers Baltic Avenue for "
+                    "Tennessee Avenue from Grace's complete Orange monopoly."
+                ),
+                "strategic_position": (
+                    "Grace should reject because Baltic Avenue is far below the value "
+                    "of breaking a complete Orange set."
+                ),
+            }
         return {
             "mode": "live_strategy_smoke",
             "negotiation_id": str(NEGOTIATION_ID),
@@ -1490,6 +1522,8 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         current_deal_id = str(MUTUAL_COMPLETION_DEAL_ID)
     elif case.name == "orange_monopoly_breakup_deal_rejection":
         current_deal_id = str(BREAKUP_DEAL_ID)
+    elif case.name == "orange_monopoly_breakup_property_swap_rejection":
+        current_deal_id = str(BREAKUP_PROPERTY_SWAP_DEAL_ID)
     if case.name == "dark_blue_near_monopoly_deal_proposal":
         return (
             {
@@ -1789,6 +1823,19 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "created_at": "2026-07-08T00:00:02Z",
             },
         )
+    if case.name == "orange_monopoly_breakup_property_swap_rejection":
+        return (
+            {
+                "id": "live-strategy-monopoly-breakup-swap-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(OTHER_PLAYER_ID),
+                "recipient_player_id": str(AI_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I can trade Baltic Avenue for Tennessee Avenue from your Orange monopoly.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
     if case.decision_type != "deal_proposal":
         return ()
     if case.name == "dark_blue_near_monopoly_deal_proposal":
@@ -1899,6 +1946,10 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
     elif case.name == "orange_monopoly_breakup_deal_rejection":
         deal_id = BREAKUP_DEAL_ID
         terms = _monopoly_breakup_terms(amount=300)
+        proposer_id = OTHER_PLAYER_ID
+    elif case.name == "orange_monopoly_breakup_property_swap_rejection":
+        deal_id = BREAKUP_PROPERTY_SWAP_DEAL_ID
+        terms = _monopoly_breakup_property_swap_terms()
         proposer_id = OTHER_PLAYER_ID
     return (
         {
@@ -2517,6 +2568,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     ),
                 },
             )
+        if case.name == "orange_monopoly_breakup_property_swap_rejection":
+            return (
+                {
+                    "id": "live-strategy-reject-monopoly-breakup-property-swap",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Grace owns the full Orange monopoly. "
+                        "Ada offers property_baltic_avenue for property_tennessee_avenue, "
+                        "but Baltic Avenue is worth only $60 and accepting breaks Grace's "
+                        "complete Orange group below the $540 breakup cash value floor. "
+                        "Reject the deal."
+                    ),
+                },
+            )
         return (
             {
                 "id": "live-strategy-reject-lowball-monopoly-enabler",
@@ -2602,6 +2667,7 @@ OVERPRICED_RAILROAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30b")
 OVERPRICED_UTILITY_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30c")
 BOARDWALK_SWAP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30d")
 MUTUAL_COMPLETION_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30e")
+BREAKUP_PROPERTY_SWAP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30f")
 
 
 def _bad_deal_terms() -> dict[str, Any]:
@@ -2831,6 +2897,31 @@ def _monopoly_breakup_terms(*, amount: int) -> dict[str, Any]:
                 "from_player_id": str(AI_PLAYER_ID),
                 "to_player_id": str(OTHER_PLAYER_ID),
                 "property_id": "property_tennessee_avenue",
+            },
+        ],
+    }
+
+
+def _monopoly_breakup_property_swap_terms() -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-orange-breakup-baltic-swap",
+        "terms": [
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-breakup-tennessee-swap-transfer",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "property_id": "property_tennessee_avenue",
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-breakup-baltic-transfer",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_baltic_avenue",
             },
         ],
     }
@@ -3433,6 +3524,31 @@ def _orange_monopoly_state(game_id: UUID) -> GameState:
             "hotel": False,
         }
         if item.property_id in ORANGE_PROPERTY_IDS
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _orange_monopoly_and_opponent_baltic_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-orange-monopoly-opponent-baltic")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 3000
+    owner_by_property_id = {
+        "property_st_james_place": str(AI_PLAYER_ID),
+        "property_tennessee_avenue": str(AI_PLAYER_ID),
+        "property_new_york_avenue": str(AI_PLAYER_ID),
+        "property_baltic_avenue": str(OTHER_PLAYER_ID),
+    }
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": owner_by_property_id[item.property_id],
+            "mortgaged": False,
+            "houses": 0,
+            "hotel": False,
+        }
+        if item.property_id in owner_by_property_id
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]

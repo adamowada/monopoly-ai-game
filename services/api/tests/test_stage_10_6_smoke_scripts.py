@@ -134,6 +134,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_cash_draining_deal_counteroffer" in source
     assert "orange_mutual_completion_deal_rejection" in source
     assert "orange_monopoly_breakup_deal_rejection" in source
+    assert "orange_monopoly_breakup_property_swap_rejection" in source
     assert "FOURTH_PLAYER_ID" in source
     assert 'PlayerSetup(id=str(FOURTH_PLAYER_ID), name="Marie", kind="ai")' in source
     assert "BUY_HOUSE" in source
@@ -1574,6 +1575,44 @@ def test_live_codex_strategy_smoke_monopoly_breakup_deal_has_rejection_guidance(
     assert guidance["deal_evaluations"][0]["risk"]["kind"] == "actor_street_group_breakup"
     assert guidance["deal_evaluations"][0]["risk"]["minimum_cash_value_floor"] == 540
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 240
+
+
+def test_live_codex_strategy_smoke_monopoly_breakup_property_swap_has_rejection_guidance() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_monopoly_breakup_property_swap_rejection"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        negotiation_messages=module._negotiation_messages(case),
+        deals=module._deals(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+    assert guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.BREAKUP_PROPERTY_SWAP_DEAL_ID): "reject"
+    }
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"] == {
+        "deal_id": str(module.BREAKUP_PROPERTY_SWAP_DEAL_ID),
+        "decision": "reject",
+        "message": "I reject because this would break up my complete set below fair value.",
+    }
+    evaluation = guidance["deal_evaluations"][0]
+    assert evaluation["reason_code"] == (
+        "transfers_property_that_breaks_actor_complete_street_group_below_floor"
+    )
+    risk = evaluation["risk"]
+    assert risk["kind"] == "actor_street_group_breakup"
+    assert risk["property_id"] == "property_tennessee_avenue"
+    assert risk["minimum_cash_value_floor"] == 540
+    assert risk["actor_receives_property_value_total"] == 60
+    assert risk["total_compensation_value"] == 60
+    assert risk["compensation_value_gap"] == 480
 
 
 def test_live_codex_strategy_smoke_mutual_completion_deal_rejects_stronger_opponent_set() -> None:
