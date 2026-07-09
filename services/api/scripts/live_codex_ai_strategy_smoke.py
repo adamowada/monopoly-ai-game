@@ -138,6 +138,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_purchase_blocks_opponent_color_group_with_thin_cash,
         ),
         StrategySmokeCase(
+            name="purchase_blocks_opponent_utility_group_with_thin_cash",
+            game_id=UUID("00000000-0000-0000-0000-00000000b232"),
+            decision_type="action_decision",
+            state_factory=_purchase_blocks_opponent_utility_group_state,
+            verifier=_verify_purchase_blocks_opponent_utility_group_with_thin_cash,
+        ),
+        StrategySmokeCase(
             name="healthy_cash_avoids_mortgage",
             game_id=UUID("00000000-0000-0000-0000-00000000b208"),
             decision_type="action_decision",
@@ -479,6 +486,19 @@ def _verify_purchase_blocks_opponent_color_group_with_thin_cash(parsed: dict[str
     assert payload.get("property_id") == "property_virginia_avenue"
     if "price" in payload:
         assert payload.get("price") == 160
+
+
+def _verify_purchase_blocks_opponent_utility_group_with_thin_cash(
+    parsed: dict[str, Any],
+) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BUY_PROPERTY", f"expected BUY_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_water_works"
+    if "price" in payload:
+        assert payload.get("price") == 150
 
 
 def _verify_healthy_cash_avoids_mortgage(parsed: dict[str, Any]) -> None:
@@ -1447,6 +1467,21 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "purchase_blocks_opponent_utility_group_with_thin_cash":
+        return (
+            {
+                "id": "live-strategy-buy-utility-to-block-opponent-set",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Ada owns property_electric_company, "
+                    "Grace has $300, and Grace landed on unowned property_water_works. "
+                    "Buying Water Works for $150 leaves $150 and blocks Ada from completing "
+                    "Utilities. purchase_guidance recommendation is "
+                    "buy_property_to_block_opponent_group_completion. Choose BUY_PROPERTY "
+                    "rather than START_AUCTION."
+                ),
+            },
+        )
     if case.name == "multiple_near_monopolies_prioritizes_orange_negotiation":
         return (
             {
@@ -1891,6 +1926,33 @@ def _purchase_blocks_opponent_color_group_state(game_id: UUID) -> GameState:
             "owner_id": str(OTHER_PLAYER_ID),
         }
         if item.property_id in opponent_owned_property_ids
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "property_ownership": ownership,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _purchase_blocks_opponent_utility_group_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-purchase-blocks-opponent-utility-group")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 300
+    players[0]["position"] = 28
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(OTHER_PLAYER_ID),
+        }
+        if item.property_id == "property_electric_company"
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]
