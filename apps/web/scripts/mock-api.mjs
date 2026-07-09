@@ -14,7 +14,13 @@ const propertyGroupData = classicData.property_groups;
 const auctionFallbackPropertyId = "property_mediterranean_avenue";
 const aiStepPathSuffix = "/ai/step";
 const activeNegotiationStatuses = new Set(["opened", "active", "countered"]);
-const debugCurrentPhaseOptions = new Set(["START_TURN", "PRE_ROLL_MANAGEMENT", "PURCHASE_OR_AUCTION", "END_TURN"]);
+const debugCurrentPhaseOptions = new Set([
+  "START_TURN",
+  "PRE_ROLL_MANAGEMENT",
+  "PURCHASE_OR_AUCTION",
+  "PAYMENT_RESOLUTION",
+  "END_TURN",
+]);
 const targetedTradeCashFloor = 300;
 const developmentCashReserve = 300;
 const auctionCashReserve = 300;
@@ -480,6 +486,34 @@ function configureDebugAllocations(game) {
         continue;
       }
       setPropertyOwnership(game, entry.property_id, { mortgaged: entry.mortgaged });
+    }
+  }
+
+  if (isObject(allocations.pending_debt)) {
+    const debt = allocations.pending_debt;
+    const debtor =
+      Number.isInteger(debt.debtor_seat_order) && game.players[debt.debtor_seat_order]
+        ? game.players[debt.debtor_seat_order]
+        : null;
+    const creditor =
+      debt.creditor_seat_order === null || debt.creditor_seat_order === undefined
+        ? null
+        : Number.isInteger(debt.creditor_seat_order) && game.players[debt.creditor_seat_order]
+          ? game.players[debt.creditor_seat_order]
+          : undefined;
+    if (debtor && creditor !== undefined && Number.isInteger(debt.amount) && debt.amount > 0) {
+      game.pending_debt = {
+        id: `${game.id}-debug-debt-1`,
+        debtor_player_id: debtor.id,
+        creditor_player_id: creditor?.id ?? null,
+        property_id: typeof debt.property_id === "string" ? debt.property_id : null,
+        space_id: typeof debt.space_id === "string" ? debt.space_id : null,
+        amount: debt.amount,
+        reason: typeof debt.reason === "string" && debt.reason.trim().length > 0 ? debt.reason.trim() : "debug debt",
+      };
+      game.current_player_index = debtor.seat_order;
+      game.current_phase = "PAYMENT_RESOLUTION";
+      game.updated_at = nowIso();
     }
   }
 }
@@ -1966,6 +2000,9 @@ function genericSellHouseLegalActionsFor(game, actor, existingSellPropertyIds = 
     for (const candidate of improved.filter(({ level }) => level === maxLevel)) {
       const proceeds = Math.floor((candidate.property.house_cost ?? group.house_cost ?? 0) / 2);
       if (proceeds <= 0) {
+        continue;
+      }
+      if (candidate.level >= 5 && game.bank_inventory.houses < 4) {
         continue;
       }
       candidates.push({
@@ -4007,6 +4044,15 @@ function acceptBuyHouse(game, action) {
   if (!actor || (actor.state.cash ?? 0) < cost) {
     return rejectAction(game, action, "illegal_action", "insufficient cash to buy improvement", "payload.cost");
   }
+  if (ownership.hotel || ownership.hotels > 0) {
+    return rejectAction(game, action, "illegal_action", "property already has a hotel", "payload.property_id");
+  }
+  if (ownership.houses < 4 && game.bank_inventory.houses < 1) {
+    return rejectAction(game, action, "bank_inventory_shortage", "no bank houses are available", "payload.property_id");
+  }
+  if (ownership.houses >= 4 && game.bank_inventory.hotels < 1) {
+    return rejectAction(game, action, "bank_inventory_shortage", "no bank hotels are available", "payload.property_id");
+  }
   const events = [];
   const cashEvent = acceptPlayerCashDelta(game, actorPlayerId, -cost);
   if (cashEvent) {
@@ -4031,6 +4077,9 @@ function acceptSellHouse(game, action) {
   const actorPlayerId = action.actor_id;
   const property = propertyById(propertyId);
   const proceeds = managementPayloadAmount(action, "proceeds", Math.floor((property?.house_cost ?? 0) / 2));
+  if (ownership.hotel && game.bank_inventory.houses < 4) {
+    return rejectAction(game, action, "bank_inventory_shortage", "bank needs four houses to exchange a hotel sale", "payload.property_id");
+  }
   const events = [];
   const cashEvent = acceptPlayerCashDelta(game, actorPlayerId, proceeds);
   if (cashEvent) {

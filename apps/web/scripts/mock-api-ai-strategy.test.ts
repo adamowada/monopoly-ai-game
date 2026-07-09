@@ -1250,6 +1250,95 @@ describe("mock API AI strategy", () => {
     expect(state.state.players.find((player) => player.id === game.players[1].id)?.position).toBe(39);
   });
 
+  it("forces bankruptcy instead of selling a hotel when the bank lacks exchange houses", async () => {
+    const baseUrl = await startMockApi();
+    const houseScarcityImprovements = [
+      "property_mediterranean_avenue",
+      "property_baltic_avenue",
+      "property_oriental_avenue",
+      "property_vermont_avenue",
+      "property_connecticut_avenue",
+      "property_st_charles_place",
+      "property_states_avenue",
+      "property_virginia_avenue",
+    ].map((property_id) => ({ property_id, houses: 4, hotel: false }));
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-hotel-sale-house-shortage",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          current_phase: "PAYMENT_RESOLUTION",
+          current_player_seat_order: 0,
+          player_cash: [
+            { seat_order: 0, cash: 0 },
+            { seat_order: 1, cash: 1500 },
+          ],
+          pending_debt: {
+            amount: 100,
+            creditor_seat_order: null,
+            debtor_seat_order: 0,
+            reason: "debug hotel sale shortage",
+          },
+          property_owners: [
+            { property_id: "property_boardwalk", seat_order: 0 },
+            ...houseScarcityImprovements.map((entry) => ({ property_id: entry.property_id, seat_order: 1 })),
+          ],
+          property_improvements: [
+            { property_id: "property_boardwalk", houses: 0, hotel: true },
+            ...houseScarcityImprovements,
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+
+    const legalActions = await getJson<LegalActionsPayload>(
+      baseUrl,
+      `/games/${game.id}/legal-actions?actor_player_id=${encodeURIComponent(ada.id)}`,
+    );
+    expect(legalActions.legal_actions.map((action) => action.type)).not.toContain("SELL_HOUSE");
+    expect(legalActions.legal_actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "DECLARE_BANKRUPTCY",
+          payload: expect.objectContaining({
+            amount: 100,
+            forced: true,
+            reason: "debug hotel sale shortage",
+          }),
+        }),
+      ]),
+    );
+
+    const aiStep = await stepAi(baseUrl, game.id, ada.id);
+
+    expect(aiStep.status).toBe("accepted");
+    expect(aiStep.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "BANKRUPTCY_DECLARED",
+          payload: expect.objectContaining({
+            amount: 100,
+            forced: true,
+            player_id: ada.id,
+          }),
+        }),
+      ]),
+    );
+    expect(aiStep.accepted_events.map((event) => event.event_type)).not.toContain("BANK_INVENTORY_SET");
+  });
+
   it("applies a debug current player to seeded turn state", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {
