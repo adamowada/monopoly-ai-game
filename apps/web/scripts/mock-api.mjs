@@ -2349,7 +2349,11 @@ function applyMockAiAuctionStep(game, payload, decision) {
 
 function chooseMockTurnAiAction(game, playerId) {
   const legalActions = legalActionsFor(game, playerId);
-  const priority = ["SETTLE_DEBT", "BUY_PROPERTY", "END_TURN", "ROLL_DICE"];
+  const debt = game.pending_debt;
+  const hasActiveDebt = game.current_phase === "PAYMENT_RESOLUTION" && debt?.debtor_player_id === playerId;
+  const priority = hasActiveDebt
+    ? ["SETTLE_DEBT", "SELL_HOUSE", "MORTGAGE_PROPERTY", "END_TURN", "ROLL_DICE"]
+    : ["BUY_HOUSE", "UNMORTGAGE_PROPERTY", "BUY_PROPERTY", "END_TURN", "ROLL_DICE"];
   for (const type of priority) {
     const action = legalActions.find((candidate) => candidate.type === type);
     if (action) {
@@ -2371,6 +2375,10 @@ function acceptMockAiTurnAction(game, action) {
   }
   if (action.type === "END_TURN") {
     return acceptEndTurn(game, action);
+  }
+  const managementResponse = acceptManagementAction(game, action);
+  if (managementResponse) {
+    return managementResponse;
   }
   return {
     status: "rejected",
