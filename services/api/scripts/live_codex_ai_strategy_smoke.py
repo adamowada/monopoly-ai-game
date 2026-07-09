@@ -341,6 +341,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_orange_near_monopoly_deal_proposal,
         ),
         StrategySmokeCase(
+            name="orange_cash_limited_deal_proposal",
+            game_id=UUID("00000000-0000-0000-0000-00000000b245"),
+            decision_type="deal_proposal",
+            state_factory=_cash_limited_orange_near_monopoly_state,
+            verifier=_verify_orange_cash_limited_deal_proposal,
+        ),
+        StrategySmokeCase(
             name="dark_blue_near_monopoly_deal_proposal",
             game_id=UUID("00000000-0000-0000-0000-00000000b22e"),
             decision_type="deal_proposal",
@@ -919,6 +926,35 @@ def _verify_orange_near_monopoly_deal_proposal(parsed: dict[str, Any]) -> None:
         term.get("from_player_id") == str(AI_PLAYER_ID)
         and term.get("to_player_id") == str(OTHER_PLAYER_ID)
         and 180 <= int(term.get("amount", 0)) <= 270
+        for term in cash_terms
+    )
+    assert any(
+        term.get("from_player_id") == str(OTHER_PLAYER_ID)
+        and term.get("to_player_id") == str(AI_PLAYER_ID)
+        and term.get("property_id") == "property_tennessee_avenue"
+        for term in property_terms
+    )
+
+
+def _verify_orange_cash_limited_deal_proposal(parsed: dict[str, Any]) -> None:
+    deal = _dict(parsed.get("deal"))
+    terms = _dict(deal.get("terms"))
+    instruments = [_dict(term) for term in terms.get("terms", [])]
+    cash_terms = [term for term in instruments if term.get("kind") == "immediate_cash_transfer"]
+    property_terms = [
+        term for term in instruments if term.get("kind") == "immediate_property_transfer"
+    ]
+
+    assert parsed.get("decision_type") == "deal_proposal"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert deal.get("recipient_player_ids") == [str(OTHER_PLAYER_ID)]
+    assert terms.get("kind") == "structured_deal"
+    assert terms.get("deal_schema_version") == 1
+    assert terms.get("participants") == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert any(
+        term.get("from_player_id") == str(AI_PLAYER_ID)
+        and term.get("to_player_id") == str(OTHER_PLAYER_ID)
+        and 180 <= int(term.get("amount", 0)) <= 200
         for term in cash_terms
     )
     assert any(
@@ -1551,6 +1587,15 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
             "negotiation_id": str(NEGOTIATION_ID),
             "requested_decision": "Propose a structured deal to acquire Water Works.",
         }
+    if case.name == "orange_cash_limited_deal_proposal":
+        return {
+            "mode": "live_strategy_smoke",
+            "negotiation_id": str(NEGOTIATION_ID),
+            "requested_decision": (
+                "Propose a structured deal to acquire Tennessee Avenue while "
+                "preserving Grace's cash reserve."
+            ),
+        }
     return {
         "mode": "live_strategy_smoke",
         "negotiation_id": str(NEGOTIATION_ID),
@@ -1976,6 +2021,22 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "message_type": "freeform_message",
                 "body": (
                     "I want Short Line Railroad to complete Railroads and can offer fair cash now."
+                ),
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:01Z",
+            },
+        )
+    if case.name == "orange_cash_limited_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-cash-limited-orange-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(AI_PLAYER_ID),
+                "recipient_player_id": str(OTHER_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": (
+                    "I want Tennessee Avenue to complete Orange, but I need to preserve "
+                    "my cash reserve."
                 ),
                 "payload": {"message_type": "freeform_message"},
                 "created_at": "2026-07-08T00:00:01Z",
@@ -2772,6 +2833,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "of property_water_works from Ada to Grace. Offer cash between $150 and $225. "
                     "Use deal_proposal_guidance.deal_payload_template as the base proposal. "
                     "Do not trade away property_electric_company."
+                ),
+            },
+        )
+    if case.name == "orange_cash_limited_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-cash-limited-orange-deal-shape",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this deal_proposal, Grace has $500 and must preserve a $300 "
+                    "cash reserve, so current_cash_budget_ceiling is $200. Use "
+                    "deal_proposal_guidance.deal_payload_template as the base proposal "
+                    "and offer $190 for property_tennessee_avenue, with no cash term "
+                    "above $200."
                 ),
             },
         )
@@ -3838,6 +3913,14 @@ def _orange_near_monopoly_state(game_id: UUID) -> GameState:
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _cash_limited_orange_near_monopoly_state(game_id: UUID) -> GameState:
+    state = _orange_near_monopoly_state(game_id)
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 500
+    ownership = [item.model_dump(mode="python") for item in state.property_ownership]
     return _state_with_debug_values(state, players=players, ownership=ownership)
 
 
