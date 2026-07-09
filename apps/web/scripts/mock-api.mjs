@@ -3680,8 +3680,7 @@ function activeAuctionPlayerIds(game) {
   return game.players.filter((player) => player.status === "active").map((player) => player.id);
 }
 
-function shouldCloseAuction(game) {
-  const auction = game.active_auction;
+function shouldCloseAuctionState(game, auction) {
   if (!auction) {
     return false;
   }
@@ -3690,6 +3689,33 @@ function shouldCloseAuction(game) {
     return unpassedPlayerIds.length === 0;
   }
   return unpassedPlayerIds.filter((playerId) => playerId !== auction.high_bidder_id).length === 0;
+}
+
+function shouldCloseAuction(game) {
+  return shouldCloseAuctionState(game, game.active_auction);
+}
+
+function auctionCloseValidationError(game, auction) {
+  if (!auction?.high_bidder_id || !Number.isInteger(auction.high_bid_amount)) {
+    return null;
+  }
+
+  const winner = playerById(game, auction.high_bidder_id);
+  if (!winner || winner.status !== "active") {
+    return {
+      field: "active_auction.high_bidder_id",
+      message: "auction winner cannot settle the winning bid",
+      reasonCode: "auction_winner_cannot_pay",
+    };
+  }
+  if ((winner.state.cash ?? 0) < auction.high_bid_amount) {
+    return {
+      field: "active_auction.high_bid_amount",
+      message: `${winner.name} cannot pay the $${auction.high_bid_amount} winning auction bid`,
+      reasonCode: "auction_winner_cannot_pay",
+    };
+  }
+  return null;
 }
 
 function activeAuctionSetEvent(game, actorPlayerId, auction) {
@@ -3839,11 +3865,22 @@ function acceptBidAuction(game, action) {
     };
   }
 
-  game.active_auction = {
+  const nextAuction = {
     ...auction,
     high_bidder_id: actor.id,
     high_bid_amount: amount,
   };
+  if (shouldCloseAuctionState(game, nextAuction)) {
+    const closeError = auctionCloseValidationError(game, nextAuction);
+    if (closeError) {
+      return {
+        statusCode: 422,
+        payload: rejectAction(game, action, closeError.reasonCode, closeError.message, closeError.field),
+      };
+    }
+  }
+
+  game.active_auction = nextAuction;
   const events = [activeAuctionSetEvent(game, actor.id, game.active_auction)];
   if (shouldCloseAuction(game)) {
     events.push(...closeAuctionEvents(game, actor.id));
@@ -3876,10 +3913,21 @@ function acceptPassAuction(game, action) {
     };
   }
 
-  game.active_auction = {
+  const nextAuction = {
     ...auction,
     passed_player_ids: [...auction.passed_player_ids, actor.id],
   };
+  if (shouldCloseAuctionState(game, nextAuction)) {
+    const closeError = auctionCloseValidationError(game, nextAuction);
+    if (closeError) {
+      return {
+        statusCode: 422,
+        payload: rejectAction(game, action, closeError.reasonCode, closeError.message, closeError.field),
+      };
+    }
+  }
+
+  game.active_auction = nextAuction;
   const events = [activeAuctionSetEvent(game, actor.id, game.active_auction)];
   if (shouldCloseAuction(game)) {
     events.push(...closeAuctionEvents(game, actor.id));

@@ -43,6 +43,12 @@ type ActionAcceptedPayload = {
   status: string;
 };
 
+type ActionRejectedPayload = {
+  reason_code: string;
+  status: string;
+  validation_errors: Array<{ message: string }>;
+};
+
 type LegalActionsPayload = {
   legal_actions: Array<{
     type: string;
@@ -205,6 +211,30 @@ async function submitGameAction(
   });
   const body = (await response.json()) as ActionAcceptedPayload;
   expect(response.ok, JSON.stringify(body)).toBe(true);
+  return body;
+}
+
+async function submitGameActionRejected(
+  baseUrl: string,
+  gameId: string,
+  action: { actor_id: string; payload: Record<string, unknown>; type: string },
+  expectedStatus: number,
+): Promise<ActionRejectedPayload> {
+  const state = await getJson<{ event_sequence: number; state_hash: string }>(baseUrl, `/games/${gameId}/state`);
+  const response = await fetch(`${baseUrl}/games/${gameId}/actions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "Idempotency-Key": `${action.type}-${state.event_sequence}-${Math.random().toString(36).slice(2)}`,
+    },
+    body: JSON.stringify({
+      ...action,
+      expected_event_sequence: state.event_sequence,
+      expected_state_hash: state.state_hash,
+    }),
+  });
+  const body = (await response.json()) as ActionRejectedPayload;
+  expect(response.status, JSON.stringify(body)).toBe(expectedStatus);
   return body;
 }
 
@@ -566,6 +596,94 @@ describe("mock API AI strategy", () => {
       ]),
     );
     expect(strategicBid.accepted_events.map((event) => event.event_type)).not.toContain("AUCTION_RESULT");
+  });
+
+  it("refuses to close an auction if the high bidder can no longer pay", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-auction-winner-cash-race",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Linus", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          current_phase: "PURCHASE_OR_AUCTION",
+          player_positions: [{ seat_order: 0, position: 1 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const grace = game.players[1];
+    const linus = game.players[2];
+
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: ada.id,
+      type: "START_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue" },
+    });
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: grace.id,
+      type: "BID_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue", amount: 120 },
+    });
+    await postJson<MockGame>(baseUrl, `/__test/games/${game.id}/players/1/cash`, { cash: 50 });
+    await submitGameAction(baseUrl, game.id, {
+      actor_id: linus.id,
+      type: "PASS_AUCTION",
+      payload: { property_id: "property_mediterranean_avenue" },
+    });
+
+    const rejectedClose = await submitGameActionRejected(
+      baseUrl,
+      game.id,
+      {
+        actor_id: ada.id,
+        type: "PASS_AUCTION",
+        payload: { property_id: "property_mediterranean_avenue" },
+      },
+      422,
+    );
+
+    expect(rejectedClose).toEqual(expect.objectContaining({ reason_code: "auction_winner_cannot_pay" }));
+    expect(rejectedClose.validation_errors[0]?.message).toContain("cannot pay");
+
+    const stateAfterRejection = await getJson<{
+      state: {
+        active_auction: {
+          high_bid_amount: number;
+          high_bidder_id: string;
+          passed_player_ids: string[];
+          property_id: string;
+        } | null;
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ owner_id: string | null; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterRejection.state.active_auction).toEqual(
+      expect.objectContaining({
+        high_bid_amount: 120,
+        high_bidder_id: grace.id,
+        passed_player_ids: [linus.id],
+        property_id: "property_mediterranean_avenue",
+      }),
+    );
+    expect(stateAfterRejection.state.players.find((player) => player.id === grace.id)?.cash).toBe(50);
+    expect(stateAfterRejection.state.property_ownership).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner_id: null, property_id: "property_mediterranean_avenue" }),
+      ]),
+    );
   });
 
   it("mortgages assets to settle debt before forced bankruptcy", async () => {
