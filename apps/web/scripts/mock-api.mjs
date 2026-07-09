@@ -1533,6 +1533,12 @@ function legalActionsFor(game, actorPlayerId) {
     const debt = game.pending_debt;
     if (debt?.debtor_player_id === actor.id) {
       if ((actor.state.cash ?? 0) < debt.amount) {
+        const liquidationActions = propertyManagementLegalActionsFor(game).filter((action) =>
+          ["SELL_HOUSE", "MORTGAGE_PROPERTY"].includes(action.type),
+        );
+        if (liquidationActions.length > 0) {
+          return liquidationActions;
+        }
         return [
           legalAction(
             game,
@@ -2862,7 +2868,7 @@ function chooseMockTurnAiAction(game, playerId) {
   const debt = game.pending_debt;
   const hasActiveDebt = game.current_phase === "PAYMENT_RESOLUTION" && debt?.debtor_player_id === playerId;
   const priority = hasActiveDebt
-    ? ["SETTLE_DEBT", "DECLARE_BANKRUPTCY", "SELL_HOUSE", "MORTGAGE_PROPERTY", "END_TURN", "ROLL_DICE"]
+    ? ["SETTLE_DEBT", "SELL_HOUSE", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY", "END_TURN", "ROLL_DICE"]
     : ["BUY_HOUSE", "UNMORTGAGE_PROPERTY", "BUY_PROPERTY", "END_TURN", "ROLL_DICE"];
   for (const type of priority) {
     const action = legalActions.find((candidate) => candidate.type === type);
