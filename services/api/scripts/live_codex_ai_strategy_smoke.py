@@ -4218,6 +4218,14 @@ def _opponent_railroad_near_set_state(game_id: UUID) -> GameState:
     return _state_with_debug_values(state, players=players, ownership=ownership)
 
 
+def _cash_starved_opponent_railroad_near_set_state(game_id: UUID) -> GameState:
+    state = _opponent_railroad_near_set_state(game_id)
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 450
+    ownership = [item.model_dump(mode="python") for item in state.property_ownership]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
 def _opponent_utility_near_set_state(game_id: UUID) -> GameState:
     state = _base_state(game_id, seed="live-strategy-block-opponent-utility-near-set")
     players = [player.model_dump(mode="python") for player in state.players]
@@ -4240,6 +4248,14 @@ def _opponent_utility_near_set_state(game_id: UUID) -> GameState:
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _cash_starved_opponent_utility_near_set_state(game_id: UUID) -> GameState:
+    state = _opponent_utility_near_set_state(game_id)
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 425
+    ownership = [item.model_dump(mode="python") for item in state.property_ownership]
     return _state_with_debug_values(state, players=players, ownership=ownership)
 
 

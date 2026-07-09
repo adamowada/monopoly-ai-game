@@ -783,6 +783,91 @@ def test_context_pack_defers_blocking_opponent_near_monopoly_when_cash_cannot_su
     assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
 
 
+def test_context_pack_defers_blocking_opponent_railroad_set_when_cash_cannot_support_offer() -> None:
+    state = _state_with_opponent_railroad_near_set(ai_cash=450)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "block_opponent_railroad_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "railroad",
+            "group_name": "Railroads",
+            "property_group_kind": "railroad",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "target_property_id": "property_short_line_railroad",
+            "target_property_name": "Short Line Railroad",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "cash_budget_floor": 200,
+            "cash_budget_ceiling": 150,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
+def test_context_pack_defers_blocking_opponent_utility_set_when_cash_cannot_support_offer() -> None:
+    state = _state_with_opponent_utility_near_set(ai_cash=425)
+    pack = build_ai_context_pack(state, player_id=AI_PLAYER_ID, decision_type="open_negotiation")
+
+    guidance = pack["negotiation_strategy_guidance"]
+
+    assert guidance["recommended_decision_types"] == []
+    assert guidance["trade_opportunities"] == []
+    assert "open_negotiation_payload_template" not in guidance
+    assert guidance["deferred_trade_opportunities"] == [
+        {
+            "kind": "block_opponent_utility_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "utility",
+            "group_name": "Utilities",
+            "property_group_kind": "utility",
+            "opponent_player_id": str(THIRD_PLAYER_ID),
+            "opponent_player_name": "Lin",
+            "target_property_id": "property_electric_company",
+            "target_property_name": "Electric Company",
+            "target_owner_id": str(OTHER_PLAYER_ID),
+            "target_owner_name": "Ada",
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 125,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        },
+        {
+            "kind": "block_opponent_utility_group",
+            "priority": "deferred_until_cash_offer_is_credible",
+            "group": "utility",
+            "group_name": "Utilities",
+            "property_group_kind": "utility",
+            "opponent_player_id": str(OTHER_PLAYER_ID),
+            "opponent_player_name": "Ada",
+            "target_property_id": "property_water_works",
+            "target_property_name": "Water Works",
+            "target_owner_id": str(THIRD_PLAYER_ID),
+            "target_owner_name": "Lin",
+            "cash_budget_floor": 150,
+            "cash_budget_ceiling": 125,
+            "healthy_cash_floor": 300,
+            "reason": (
+                "Available cash above the healthy reserve cannot cover the target property's blocking value."
+            ),
+        }
+    ]
+    assert "Wait on near-monopoly negotiations" in guidance["guidance"][0]
+
+
 def test_context_pack_recommends_rejecting_lowball_deal_that_completes_opponent_monopoly() -> None:
     state = _state_with_orange_near_monopoly()
     pack = build_ai_context_pack(
@@ -3119,6 +3204,56 @@ def _state_with_opponent_orange_near_monopoly() -> GameState:
         "property_st_james_place": str(OTHER_PLAYER_ID),
         "property_new_york_avenue": str(OTHER_PLAYER_ID),
         "property_tennessee_avenue": str(THIRD_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, third_player),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_opponent_railroad_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    third_player = state.players[2].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_reading_railroad": str(OTHER_PLAYER_ID),
+        "property_pennsylvania_railroad": str(OTHER_PLAYER_ID),
+        "property_b_and_o_railroad": str(OTHER_PLAYER_ID),
+        "property_short_line_railroad": str(THIRD_PLAYER_ID),
+    }
+    return state.model_copy(
+        update={
+            "players": (ai_player, other_player, third_player),
+            "property_ownership": tuple(
+                ownership.model_copy(
+                    update={"owner_id": owner_by_property_id[ownership.property_id]}
+                )
+                if ownership.property_id in owner_by_property_id
+                else ownership
+                for ownership in state.property_ownership
+            ),
+        }
+    )
+
+
+def _state_with_opponent_utility_near_set(*, ai_cash: int = 1500) -> GameState:
+    state = _state()
+    ai_player = state.players[0].model_copy(update={"cash": ai_cash})
+    other_player = state.players[1].model_copy(update={"cash": 1500})
+    third_player = state.players[2].model_copy(update={"cash": 1500})
+    owner_by_property_id = {
+        "property_electric_company": str(OTHER_PLAYER_ID),
+        "property_water_works": str(THIRD_PLAYER_ID),
     }
     return state.model_copy(
         update={
