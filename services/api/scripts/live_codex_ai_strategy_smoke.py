@@ -215,6 +215,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_auction_bid_to_complete_color_group,
         ),
         StrategySmokeCase(
+            name="auction_bid_to_complete_utility_group",
+            game_id=UUID("00000000-0000-0000-0000-00000000b233"),
+            decision_type="action_decision",
+            state_factory=_auction_utility_group_completion_state,
+            verifier=_verify_auction_bid_to_complete_utility_group,
+        ),
+        StrategySmokeCase(
             name="auction_bid_to_block_opponent_color_group",
             game_id=UUID("00000000-0000-0000-0000-00000000b225"),
             decision_type="action_decision",
@@ -594,6 +601,19 @@ def _verify_auction_bid_to_complete_color_group(parsed: dict[str, Any]) -> None:
     assert action.get("type") == "BID_AUCTION", f"expected BID_AUCTION, got {action.get('type')}"
     assert payload.get("property_id") == "property_tennessee_avenue"
     assert 181 <= amount <= 270, f"expected a bid within group-completion valuation, got {amount}"
+
+
+def _verify_auction_bid_to_complete_utility_group(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+    amount = int(payload.get("amount", 0))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BID_AUCTION", f"expected BID_AUCTION, got {action.get('type')}"
+    assert payload.get("property_id") == "property_water_works"
+    assert 151 <= amount <= 225, (
+        f"expected a bid within utility-completion valuation, got {amount}"
+    )
 
 
 def _verify_auction_bid_to_block_opponent_color_group(parsed: dict[str, Any]) -> None:
@@ -1254,6 +1274,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "property_tennessee_avenue completes Orange, so valuation_basis is "
                     "property_group_completion_premium and the ceiling is $270. BID_AUCTION "
                     "within $181 to $270 instead of passing."
+                ),
+            },
+        )
+    if case.name == "auction_bid_to_complete_utility_group":
+        return (
+            {
+                "id": "live-strategy-bid-auction-to-complete-utility-group",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace owns property_electric_company. "
+                    "property_water_works completes Utilities, so valuation_basis is "
+                    "property_group_completion_premium and the ceiling is $225. BID_AUCTION "
+                    "within $151 to $225 instead of passing."
                 ),
             },
         )
@@ -2215,6 +2248,35 @@ def _auction_color_group_completion_state(game_id: UUID) -> GameState:
                 "property_id": "property_tennessee_avenue",
                 "high_bidder_id": str(OTHER_PLAYER_ID),
                 "high_bid_amount": 180,
+                "passed_player_ids": [],
+            },
+        }
+    )
+
+
+def _auction_utility_group_completion_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-auction-complete-utility-group")
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id == "property_electric_company"
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "property_ownership": ownership,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+            "active_auction": {
+                "property_id": "property_water_works",
+                "high_bidder_id": str(OTHER_PLAYER_ID),
+                "high_bid_amount": 150,
                 "passed_player_ids": [],
             },
         }
