@@ -104,10 +104,12 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "dark_blue_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_negotiation" in source
     assert "railroad_near_set_negotiation" in source
+    assert "utility_near_set_negotiation" in source
     assert "multiple_near_monopolies_prioritizes_orange_negotiation" in source
     assert "block_opponent_orange_near_monopoly_negotiation" in source
     assert "orange_near_monopoly_deal_proposal" in source
     assert "dark_blue_near_monopoly_deal_proposal" in source
+    assert "utility_near_set_deal_proposal" in source
     assert "orange_bad_deal_rejection" in source
     assert "orange_good_deal_acceptance" in source
     assert "orange_overpriced_deal_rejection" in source
@@ -148,6 +150,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "property_park_place" in source
     assert "property_short_line_railroad" in source
     assert "property_pennsylvania_railroad" in source
+    assert "property_electric_company" in source
+    assert "property_water_works" in source
     assert "open_negotiation" in source
     assert "deal_proposal" in source
     assert "immediate_cash_transfer" in source
@@ -583,6 +587,38 @@ def test_live_codex_strategy_smoke_negotiates_for_railroad_set_completion() -> N
     assert guidance["trade_opportunities"][0]["property_group_kind"] == "railroad"
 
 
+def test_live_codex_strategy_smoke_negotiates_for_utility_set_completion() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["utility_near_set_negotiation"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["negotiation_strategy_guidance"]
+    assert guidance["recommended_decision_types"] == ["open_negotiation"]
+    assert guidance["open_negotiation_payload_template"]["participant_player_ids"] == [
+        str(module.AI_PLAYER_ID),
+        str(module.OTHER_PLAYER_ID),
+    ]
+    context = guidance["open_negotiation_payload_template"]["context"]
+    assert context["topic"] == "Trade for Water Works to complete Utilities"
+    assert context["target_property_id"] == "property_water_works"
+    assert context["target_owner_id"] == str(module.OTHER_PLAYER_ID)
+    assert context["suggested_offer"] == {
+        "cash_budget_floor": 150,
+        "cash_budget_ceiling": 225,
+        "avoid_trading_away_group_property_ids": ["property_electric_company"],
+    }
+    assert guidance["trade_opportunities"][0]["kind"] == "complete_utility_group"
+    assert guidance["trade_opportunities"][0]["property_group_kind"] == "utility"
+
+
 def test_live_codex_strategy_smoke_negotiates_for_dark_blue_completion() -> None:
     module = _load_live_strategy_smoke_module()
     cases = {case.name: case for case in module._strategy_cases()}
@@ -717,6 +753,53 @@ def test_live_codex_strategy_smoke_dark_blue_deal_proposal_uses_context_pack_tem
             "from_player_id": str(module.OTHER_PLAYER_ID),
             "to_player_id": str(module.AI_PLAYER_ID),
             "property_id": "property_park_place",
+        },
+    ]
+
+
+def test_live_codex_strategy_smoke_utility_deal_proposal_uses_context_pack_template() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["utility_near_set_deal_proposal"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_proposal_guidance"]
+    assert guidance["recommended_decision_types"] == ["deal_proposal"]
+    template = guidance["proposal_templates"][0]
+    assert template["target_property_id"] == "property_water_works"
+    assert template["target_property_name"] == "Water Works"
+    assert template["cash_budget_floor"] == 150
+    assert template["cash_budget_ceiling"] == 225
+    assert template["recommended_cash_offer"] == 187
+    assert template["avoid_trading_away_group_property_ids"] == [
+        "property_electric_company"
+    ]
+    deal_payload = template["deal_payload_template"]
+    assert deal_payload["recipient_player_ids"] == [str(module.OTHER_PLAYER_ID)]
+    assert deal_payload["terms"]["participants"] == [
+        str(module.AI_PLAYER_ID),
+        str(module.OTHER_PLAYER_ID),
+    ]
+    assert deal_payload["terms"]["terms"] == [
+        {
+            "kind": "immediate_cash_transfer",
+            "from_player_id": str(module.AI_PLAYER_ID),
+            "to_player_id": str(module.OTHER_PLAYER_ID),
+            "amount": 187,
+        },
+        {
+            "kind": "immediate_property_transfer",
+            "from_player_id": str(module.OTHER_PLAYER_ID),
+            "to_player_id": str(module.AI_PLAYER_ID),
+            "property_id": "property_water_works",
         },
     ]
 

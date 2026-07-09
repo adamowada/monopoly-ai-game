@@ -257,6 +257,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_railroad_near_set_negotiation,
         ),
         StrategySmokeCase(
+            name="utility_near_set_negotiation",
+            game_id=UUID("00000000-0000-0000-0000-00000000b22f"),
+            decision_type="open_negotiation",
+            state_factory=_utility_near_set_state,
+            verifier=_verify_utility_near_set_negotiation,
+        ),
+        StrategySmokeCase(
             name="multiple_near_monopolies_prioritizes_orange_negotiation",
             game_id=UUID("00000000-0000-0000-0000-00000000b216"),
             decision_type="open_negotiation",
@@ -283,6 +290,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             decision_type="deal_proposal",
             state_factory=_dark_blue_near_monopoly_state,
             verifier=_verify_dark_blue_near_monopoly_deal_proposal,
+        ),
+        StrategySmokeCase(
+            name="utility_near_set_deal_proposal",
+            game_id=UUID("00000000-0000-0000-0000-00000000b230"),
+            decision_type="deal_proposal",
+            state_factory=_utility_near_set_state,
+            verifier=_verify_utility_near_set_deal_proposal,
         ),
         StrategySmokeCase(
             name="orange_bad_deal_rejection",
@@ -615,6 +629,18 @@ def _verify_railroad_near_set_negotiation(parsed: dict[str, Any]) -> None:
     assert context.get("target_owner_id") == str(OTHER_PLAYER_ID)
 
 
+def _verify_utility_near_set_negotiation(parsed: dict[str, Any]) -> None:
+    negotiation = _dict(parsed.get("negotiation"))
+    participant_player_ids = [
+        str(player_id) for player_id in negotiation.get("participant_player_ids", [])
+    ]
+    context = _dict(negotiation.get("context"))
+    assert parsed.get("decision_type") == "open_negotiation"
+    assert participant_player_ids == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert context.get("target_property_id") == "property_water_works"
+    assert context.get("target_owner_id") == str(OTHER_PLAYER_ID)
+
+
 def _verify_block_opponent_orange_near_monopoly_negotiation(parsed: dict[str, Any]) -> None:
     negotiation = _dict(parsed.get("negotiation"))
     participant_player_ids = [
@@ -684,6 +710,35 @@ def _verify_dark_blue_near_monopoly_deal_proposal(parsed: dict[str, Any]) -> Non
         term.get("from_player_id") == str(OTHER_PLAYER_ID)
         and term.get("to_player_id") == str(AI_PLAYER_ID)
         and term.get("property_id") == "property_park_place"
+        for term in property_terms
+    )
+
+
+def _verify_utility_near_set_deal_proposal(parsed: dict[str, Any]) -> None:
+    deal = _dict(parsed.get("deal"))
+    terms = _dict(deal.get("terms"))
+    instruments = [_dict(term) for term in terms.get("terms", [])]
+    cash_terms = [term for term in instruments if term.get("kind") == "immediate_cash_transfer"]
+    property_terms = [
+        term for term in instruments if term.get("kind") == "immediate_property_transfer"
+    ]
+
+    assert parsed.get("decision_type") == "deal_proposal"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert deal.get("recipient_player_ids") == [str(OTHER_PLAYER_ID)]
+    assert terms.get("kind") == "structured_deal"
+    assert terms.get("deal_schema_version") == 1
+    assert terms.get("participants") == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert any(
+        term.get("from_player_id") == str(AI_PLAYER_ID)
+        and term.get("to_player_id") == str(OTHER_PLAYER_ID)
+        and 150 <= int(term.get("amount", 0)) <= 225
+        for term in cash_terms
+    )
+    assert any(
+        term.get("from_player_id") == str(OTHER_PLAYER_ID)
+        and term.get("to_player_id") == str(AI_PLAYER_ID)
+        and term.get("property_id") == "property_water_works"
         for term in property_terms
     )
 
@@ -891,6 +946,12 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
             "negotiation_id": str(NEGOTIATION_ID),
             "requested_decision": "Propose a structured deal to acquire Park Place.",
         }
+    if case.name == "utility_near_set_deal_proposal":
+        return {
+            "mode": "live_strategy_smoke",
+            "negotiation_id": str(NEGOTIATION_ID),
+            "requested_decision": "Propose a structured deal to acquire Water Works.",
+        }
     return {
         "mode": "live_strategy_smoke",
         "negotiation_id": str(NEGOTIATION_ID),
@@ -934,6 +995,35 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
                             "cash_budget_ceiling": 525,
                             "avoid_trading_away_group_property_ids": [
                                 "property_boardwalk"
+                            ],
+                        },
+                    },
+                },
+                "created_at": "2026-07-08T00:00:00Z",
+            },
+        )
+    if case.name == "utility_near_set_deal_proposal":
+        return (
+            {
+                "id": str(NEGOTIATION_ID),
+                "opened_by_player_id": str(AI_PLAYER_ID),
+                "status": "active",
+                "phase": "START_TURN",
+                "round_number": 1,
+                "context": {
+                    "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+                    "current_deal_id": current_deal_id,
+                    "context": {
+                        "topic": "Trade for Water Works to complete Utilities",
+                        "target_property_id": "property_water_works",
+                        "target_property_name": "Water Works",
+                        "target_owner_id": str(OTHER_PLAYER_ID),
+                        "target_owner_name": "Ada",
+                        "suggested_offer": {
+                            "cash_budget_floor": 150,
+                            "cash_budget_ceiling": 225,
+                            "avoid_trading_away_group_property_ids": [
+                                "property_electric_company"
                             ],
                         },
                     },
@@ -1045,6 +1135,19 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "recipient_player_id": str(OTHER_PLAYER_ID),
                 "message_type": "freeform_message",
                 "body": "I want Park Place to complete Dark Blue and can offer fair cash now.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:01Z",
+            },
+        )
+    if case.name == "utility_near_set_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-utility-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(AI_PLAYER_ID),
+                "recipient_player_id": str(OTHER_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I want Water Works to complete Utilities and can offer fair cash now.",
                 "payload": {"message_type": "freeform_message"},
                 "created_at": "2026-07-08T00:00:01Z",
             },
@@ -1337,6 +1440,19 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "utility_near_set_negotiation":
+        return (
+            {
+                "id": "live-strategy-utility-near-set-negotiation",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this open_negotiation decision, Grace owns "
+                    "property_electric_company while Ada owns property_water_works. "
+                    "Open negotiation with Ada for Water Works to complete Utilities, "
+                    "with a credible cash offer range from $150 to $225."
+                ),
+            },
+        )
     if case.name == "dark_blue_near_monopoly_negotiation":
         return (
             {
@@ -1494,6 +1610,20 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "of property_park_place from Ada to Grace. Offer cash between $350 and $525. "
                     "Use deal_proposal_guidance.deal_payload_template as the base proposal. "
                     "Do not trade away property_boardwalk."
+                ),
+            },
+        )
+    if case.name == "utility_near_set_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-utility-deal-shape",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this deal_proposal, propose structured_deal terms containing "
+                    "immediate_cash_transfer from Grace to Ada and immediate_property_transfer "
+                    "of property_water_works from Ada to Grace. Offer cash between $150 and $225. "
+                    "Use deal_proposal_guidance.deal_payload_template as the base proposal. "
+                    "Do not trade away property_electric_company."
                 ),
             },
         )
@@ -2111,6 +2241,30 @@ def _railroad_near_set_state(game_id: UUID) -> GameState:
         "property_pennsylvania_railroad": str(AI_PLAYER_ID),
         "property_b_and_o_railroad": str(AI_PLAYER_ID),
         "property_short_line_railroad": str(OTHER_PLAYER_ID),
+    }
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": owner_by_property_id[item.property_id],
+            "mortgaged": False,
+            "houses": 0,
+            "hotel": False,
+        }
+        if item.property_id in owner_by_property_id
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return _state_with_debug_values(state, players=players, ownership=ownership)
+
+
+def _utility_near_set_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-utility-near-set")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 1500
+    players[1]["cash"] = 1500
+    owner_by_property_id = {
+        "property_electric_company": str(AI_PLAYER_ID),
+        "property_water_works": str(OTHER_PLAYER_ID),
     }
     ownership = [
         {
