@@ -1625,6 +1625,72 @@ function auctionLegalActionsFor(game, actor) {
   return actions;
 }
 
+function nextDevelopmentRentGain(property, houses) {
+  if (property?.kind !== "street" || !Array.isArray(property.rents)) {
+    return 0;
+  }
+  if (houses >= 4) {
+    return (property.rents[5] ?? property.rents.at(-1) ?? 0) - (property.rents[4] ?? 0);
+  }
+  return (property.rents[houses + 1] ?? 0) - (property.rents[houses] ?? 0);
+}
+
+function genericDevelopmentLegalActionsFor(game, actor, existingBuildPropertyIds = new Set()) {
+  if (!actor || (actor.state.cash ?? 0) <= 0) {
+    return [];
+  }
+  const candidates = [];
+  for (const group of propertyGroupData) {
+    if (group.kind !== "street" || !Array.isArray(group.property_ids) || group.property_ids.length === 0) {
+      continue;
+    }
+    const properties = group.property_ids.map((propertyId) => propertyById(propertyId)).filter(Boolean);
+    const ownerships = properties.map((property) => propertyOwnership(game, property.id));
+    if (
+      properties.length !== group.property_ids.length ||
+      ownerships.some((ownership) => !ownership || ownership.owner_id !== actor.id || ownership.mortgaged)
+    ) {
+      continue;
+    }
+    const buildable = properties
+      .map((property, index) => ({ ownership: ownerships[index], property }))
+      .filter(({ ownership, property }) => {
+        if (!ownership || ownership.hotel || existingBuildPropertyIds.has(property.id)) {
+          return false;
+        }
+        const cost = property.house_cost ?? group.house_cost ?? 0;
+        if ((actor.state.cash ?? 0) < cost || cost <= 0) {
+          return false;
+        }
+        return ownership.houses < 4 ? game.bank_inventory.houses > 0 : game.bank_inventory.hotels > 0;
+      });
+    if (buildable.length === 0) {
+      continue;
+    }
+    const minHouses = Math.min(...buildable.map(({ ownership }) => ownership.houses ?? 0));
+    const evenBuildable = buildable.filter(({ ownership }) => (ownership.houses ?? 0) === minHouses);
+    const best = [...evenBuildable].sort((left, right) => {
+      const leftGain = nextDevelopmentRentGain(left.property, left.ownership.houses ?? 0);
+      const rightGain = nextDevelopmentRentGain(right.property, right.ownership.houses ?? 0);
+      return rightGain - leftGain || (right.property.price ?? 0) - (left.property.price ?? 0);
+    })[0];
+    if (!best) {
+      continue;
+    }
+    candidates.push({
+      action: legalAction(game, "BUY_HOUSE", {
+        property_id: best.property.id,
+        cost: best.property.house_cost ?? group.house_cost,
+      }),
+      groupScore: properties.reduce((total, property) => total + nextDevelopmentRentGain(property, best.ownership.houses ?? 0), 0),
+      propertyScore: nextDevelopmentRentGain(best.property, best.ownership.houses ?? 0),
+    });
+  }
+  return candidates
+    .sort((left, right) => right.groupScore - left.groupScore || right.propertyScore - left.propertyScore)
+    .map((candidate) => candidate.action);
+}
+
 function propertyManagementLegalActionsFor(game) {
   if (game.seed.startsWith("stage-5-property-management-reject")) {
     return [legalAction(game, "BUY_HOUSE", { property_id: "property_baltic_avenue", cost: 50 })];
@@ -1647,6 +1713,12 @@ function propertyManagementLegalActionsFor(game) {
   ) {
     actions.push(legalAction(game, "BUY_HOUSE", { property_id: "property_mediterranean_avenue", cost: 50 }));
   }
+  const existingBuildPropertyIds = new Set(
+    actions
+      .filter((action) => action.type === "BUY_HOUSE" && typeof action.payload?.property_id === "string")
+      .map((action) => action.payload.property_id),
+  );
+  actions.push(...genericDevelopmentLegalActionsFor(game, actor, existingBuildPropertyIds));
   if (baltic?.owner_id === actor?.id && !baltic.mortgaged && mediterranean?.houses === 0 && !mediterranean?.hotel) {
     actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_baltic_avenue", proceeds: 30 }));
   }

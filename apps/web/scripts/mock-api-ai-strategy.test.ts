@@ -450,6 +450,69 @@ describe("mock API AI strategy", () => {
     expect(stateAfterDevelopment.state.players.find((player) => player.id === ada.id)?.cash).toBe(1392);
   });
 
+  it("develops a debug-allocated orange monopoly before rolling", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-orange-monopoly-development",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_st_james_place", seat_order: 0 },
+            { property_id: "property_tennessee_avenue", seat_order: 0 },
+            { property_id: "property_new_york_avenue", seat_order: 0 },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+
+    const developmentStep = await stepAi(baseUrl, game.id, ada.id);
+
+    expect(developmentStep.status).toBe("accepted");
+    expect(developmentStep.accepted_events.map((event) => event.event_type)).not.toContain("DICE_ROLLED");
+    expect(developmentStep.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "PLAYER_CASH_DELTA",
+          payload: expect.objectContaining({ amount: -100, player_id: ada.id }),
+        }),
+        expect.objectContaining({
+          event_type: "PROPERTY_IMPROVEMENTS_SET",
+          payload: expect.objectContaining({
+            property_id: "property_new_york_avenue",
+            houses: 1,
+            hotel: false,
+          }),
+        }),
+      ]),
+    );
+
+    const stateAfterDevelopment = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ houses?: number; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterDevelopment.state.players.find((player) => player.id === ada.id)?.cash).toBe(1400);
+    expect(
+      stateAfterDevelopment.state.property_ownership.find(
+        (ownership) => ownership.property_id === "property_new_york_avenue",
+      ),
+    ).toEqual(expect.objectContaining({ houses: 1 }));
+  });
+
   it("applies debug allocations and withholds unaffordable AI build actions", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {
