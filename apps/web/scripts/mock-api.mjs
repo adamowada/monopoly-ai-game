@@ -1692,6 +1692,53 @@ function genericDevelopmentLegalActionsFor(game, actor, existingBuildPropertyIds
     .map((candidate) => candidate.action);
 }
 
+function propertyGroupHasImprovements(game, property) {
+  const group = propertyGroupData.find((candidate) => candidate.id === property?.group);
+  if (!group || group.kind !== "street" || !Array.isArray(group.property_ids)) {
+    return false;
+  }
+  return group.property_ids.some((propertyId) => {
+    const ownership = propertyOwnership(game, propertyId);
+    return Boolean(ownership && ((ownership.houses ?? 0) > 0 || ownership.hotel));
+  });
+}
+
+function genericMortgageLegalActionsFor(game, actor, existingMortgagePropertyIds = new Set()) {
+  if (!actor) {
+    return [];
+  }
+  return game.property_ownership
+    .flatMap((ownership) => {
+      if (
+        ownership.owner_id !== actor.id ||
+        ownership.mortgaged ||
+        (ownership.houses ?? 0) > 0 ||
+        ownership.hotel ||
+        existingMortgagePropertyIds.has(ownership.property_id)
+      ) {
+        return [];
+      }
+      const property = propertyById(ownership.property_id);
+      if (!property || !Number.isInteger(property.mortgage_value) || property.mortgage_value <= 0) {
+        return [];
+      }
+      if (propertyGroupHasImprovements(game, property)) {
+        return [];
+      }
+      return [
+        {
+          action: legalAction(game, "MORTGAGE_PROPERTY", {
+            property_id: property.id,
+            proceeds: property.mortgage_value,
+          }),
+          proceeds: property.mortgage_value,
+        },
+      ];
+    })
+    .sort((left, right) => right.proceeds - left.proceeds)
+    .map((candidate) => candidate.action);
+}
+
 function propertyManagementLegalActionsFor(game) {
   if (game.seed.startsWith("stage-5-property-management-reject")) {
     return [legalAction(game, "BUY_HOUSE", { property_id: "property_baltic_avenue", cost: 50 })];
@@ -1732,6 +1779,12 @@ function propertyManagementLegalActionsFor(game) {
   if (isStage105Seed(game.seed) && readingRailroad?.owner_id === actor?.id && !readingRailroad.mortgaged) {
     actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_reading_railroad", proceeds: 100 }));
   }
+  const existingMortgagePropertyIds = new Set(
+    actions
+      .filter((action) => action.type === "MORTGAGE_PROPERTY" && typeof action.payload?.property_id === "string")
+      .map((action) => action.payload.property_id),
+  );
+  actions.push(...genericMortgageLegalActionsFor(game, actor, existingMortgagePropertyIds));
   return actions;
 }
 
