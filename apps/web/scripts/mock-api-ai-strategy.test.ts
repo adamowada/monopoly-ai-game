@@ -1091,6 +1091,59 @@ describe("mock API AI strategy", () => {
     );
   });
 
+  it("starts an auction instead of trying an unaffordable property purchase", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-low-cash-purchase-auction",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          current_phase: "PURCHASE_OR_AUCTION",
+          player_cash: [
+            { seat_order: 0, cash: 100 },
+            { seat_order: 1, cash: 1500 },
+          ],
+          player_positions: [{ seat_order: 0, position: 39 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+
+    const legalActions = await getJson<LegalActionsPayload>(
+      baseUrl,
+      `/games/${game.id}/legal-actions?actor_player_id=${encodeURIComponent(ada.id)}`,
+    );
+    expect(legalActions.legal_actions).toEqual([
+      expect.objectContaining({
+        type: "START_AUCTION",
+        payload: expect.objectContaining({ property_id: "property_boardwalk" }),
+      }),
+    ]);
+
+    const aiStep = await stepAi(baseUrl, game.id, ada.id);
+
+    expect(aiStep.status).toBe("accepted");
+    expect(aiStep.accepted_events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "ACTIVE_AUCTION_SET",
+          payload: expect.objectContaining({ active: true, property_id: "property_boardwalk" }),
+        }),
+      ]),
+    );
+  });
+
   it("unmortgages a generic debug-allocated property before rolling when cash allows", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {

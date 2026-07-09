@@ -1669,8 +1669,11 @@ function legalActionsFor(game, actorPlayerId) {
       return [];
     }
     const price = propertyById(propertyId)?.price;
+    const canBuyProperty = Number.isInteger(price) && (actor.state.cash ?? 0) >= price;
     return [
-      legalAction(game, "BUY_PROPERTY", { property_id: propertyId, ...(price ? { price } : {}) }, actor.id),
+      ...(canBuyProperty
+        ? [legalAction(game, "BUY_PROPERTY", { property_id: propertyId, price }, actor.id)]
+        : []),
       legalAction(game, "START_AUCTION", { property_id: propertyId }, actor.id),
     ];
   }
@@ -3297,7 +3300,7 @@ function chooseMockTurnAiAction(game, playerId) {
   const hasActiveDebt = game.current_phase === "PAYMENT_RESOLUTION" && debt?.debtor_player_id === playerId;
   const priority = hasActiveDebt
     ? ["SETTLE_DEBT", "SELL_HOUSE", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY", "END_TURN", "ROLL_DICE"]
-    : ["BUY_HOUSE", "UNMORTGAGE_PROPERTY", "BUY_PROPERTY", "END_TURN", "ROLL_DICE"];
+    : ["BUY_HOUSE", "UNMORTGAGE_PROPERTY", "BUY_PROPERTY", "START_AUCTION", "END_TURN", "ROLL_DICE"];
   for (const type of priority) {
     const action = legalActions.find((candidate) => candidate.type === type);
     if (action) {
@@ -3313,6 +3316,24 @@ function acceptMockAiTurnAction(game, action) {
   }
   if (action.type === "BUY_PROPERTY") {
     return acceptBuyProperty(game, action);
+  }
+  if (action.type === "START_AUCTION") {
+    const auctionResponse = acceptAuctionAction(game, action);
+    if (auctionResponse?.payload.status === "accepted") {
+      return {
+        status: "accepted",
+        accepted_events: auctionResponse.payload.accepted_events,
+      };
+    }
+    return {
+      status: "rejected",
+      reason_code: auctionResponse?.payload.reason_code ?? "auction_action_rejected",
+      validation_errors: auctionResponse?.payload.validation_errors ?? [
+        aiValidationError("auction_action_rejected", "mock auction action was rejected", "action"),
+      ],
+      accepted_events: [],
+      rejected_action_id: auctionResponse?.payload.rejected_action_id ?? null,
+    };
   }
   if (action.type === "SETTLE_DEBT") {
     return acceptSettleDebt(game, action);
