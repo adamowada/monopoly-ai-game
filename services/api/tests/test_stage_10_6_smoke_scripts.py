@@ -125,6 +125,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "utility_bad_deal_rejection" in source
     assert "orange_bad_deal_rejection" in source
     assert "orange_good_deal_acceptance" in source
+    assert "orange_cash_return_deal_acceptance" in source
     assert "orange_overpriced_deal_rejection" in source
     assert "orange_overpriced_deal_counteroffer" in source
     assert "railroad_overpriced_deal_counteroffer" in source
@@ -1234,6 +1235,46 @@ def test_live_codex_strategy_smoke_good_deal_has_context_pack_acceptance_guidanc
     )
     assert guidance["deal_evaluations"][0]["opportunity"]["maximum_cash_value_ceiling"] == 270
     assert guidance["deal_evaluations"][0]["opportunity"]["cash_after_payment"] == 1280
+
+
+def test_live_codex_strategy_smoke_cash_return_deal_accepts_fair_net_price() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_cash_return_deal_acceptance"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        negotiation_messages=module._negotiation_messages(case),
+        deals=module._deals(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["deal_evaluation_guidance"]
+    assert guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.CASH_RETURN_DEAL_ID): "accept"
+    }
+    assert guidance["recommended_accept_reject_actions"][0]["accept_reject_payload_template"] == {
+        "deal_id": str(module.CASH_RETURN_DEAL_ID),
+        "decision": "accept",
+        "message": "I accept because this deal completes my set within value and liquidity limits.",
+    }
+    evaluation = guidance["deal_evaluations"][0]
+    assert evaluation["recommendation"] == "accept"
+    assert evaluation["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_with_affordable_cash"
+    )
+    assert evaluation["actor_receives_cash_total"] == 200
+    assert evaluation["actor_pays_cash_total"] == 400
+    opportunity = evaluation["opportunity"]
+    assert opportunity["property_id"] == "property_tennessee_avenue"
+    assert opportunity["maximum_cash_value_ceiling"] == 270
+    assert opportunity["net_cash_payment"] == 200
+    assert opportunity["cash_after_net_payment"] == 300
+    assert opportunity["cash_after_payment"] == 100
 
 
 def test_live_codex_strategy_smoke_fair_railroad_deal_has_acceptance_guidance() -> None:
