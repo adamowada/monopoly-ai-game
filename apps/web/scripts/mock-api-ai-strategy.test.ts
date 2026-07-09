@@ -137,6 +137,17 @@ async function postJson<T>(baseUrl: string, path: string, payload: unknown): Pro
   return body;
 }
 
+async function postJsonRejected<T>(baseUrl: string, path: string, payload: unknown, expectedStatus: number): Promise<T> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = (await response.json()) as T;
+  expect(response.status, JSON.stringify(body)).toBe(expectedStatus);
+  return body;
+}
+
 async function getJson<T>(baseUrl: string, path: string): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`);
   const body = (await response.json()) as T;
@@ -1894,6 +1905,196 @@ describe("mock API AI strategy", () => {
       ]),
     );
     expect(stateAfterRejection.state.players.find((player) => player.id === ada.id)?.cash).toBe(1500);
+    expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
+  });
+
+  it("rejects a cash offer when the buyer cannot pay the proposed amount", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-unpayable-cash-offer",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          player_cash: [
+            { seat_order: 0, cash: 100 },
+            { seat_order: 1, cash: 1500 },
+            { seat_order: 2, cash: 1500 },
+          ],
+          property_owners: [{ property_id: "property_reading_railroad", seat_order: 2 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "complete_railroad_group",
+      group: "railroad",
+      group_name: "Railroads",
+      property_group_kind: "railroad",
+      actor_owned_property_ids: [],
+      actor_owned_property_names: [],
+      target_property_id: "property_reading_railroad",
+      target_property_name: "Reading Railroad",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Ada wants Reading Railroad but must not make an impossible cash promise.",
+    });
+    const unpayable = await createDeal(baseUrl, game.id, {
+      negotiation_id: opened.negotiation?.id,
+      proposer_player_id: ada.id,
+      participant_player_ids: [ada.id, lin.id],
+      parent_deal_id: null,
+      terms: [
+        {
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 500,
+        },
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_reading_railroad",
+        },
+      ],
+    });
+
+    const rejected = await acceptRejectAi(baseUrl, game.id, lin.id, opened.negotiation?.id ?? "", unpayable.deal.id);
+
+    expect(rejected.status).toBe("done");
+    expect(rejected.outcome).toEqual(
+      expect.objectContaining({
+        decision: "reject",
+        reason: expect.stringContaining("cannot pay"),
+      }),
+    );
+    expect(rejected.deal).toEqual(expect.objectContaining({ id: unpayable.deal.id, status: "rejected" }));
+
+    const stateAfterRejection = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ owner_id: string | null; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterRejection.state.property_ownership).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner_id: lin.id, property_id: "property_reading_railroad" }),
+      ]),
+    );
+    expect(stateAfterRejection.state.players.find((player) => player.id === ada.id)?.cash).toBe(100);
+    expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
+  });
+
+  it("refuses to execute an accepted negotiation when a payer no longer has the cash", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-unpayable-execute",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          player_cash: [
+            { seat_order: 0, cash: 100 },
+            { seat_order: 1, cash: 1500 },
+            { seat_order: 2, cash: 1500 },
+          ],
+          property_owners: [{ property_id: "property_reading_railroad", seat_order: 2 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "complete_railroad_group",
+      group: "railroad",
+      group_name: "Railroads",
+      property_group_kind: "railroad",
+      actor_owned_property_ids: [],
+      actor_owned_property_names: [],
+      target_property_id: "property_reading_railroad",
+      target_property_name: "Reading Railroad",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Ada wants Reading Railroad but cannot pay this deal.",
+    });
+    const unpayable = await createDeal(baseUrl, game.id, {
+      negotiation_id: opened.negotiation?.id,
+      proposer_player_id: ada.id,
+      participant_player_ids: [ada.id, lin.id],
+      parent_deal_id: null,
+      terms: [
+        {
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 500,
+        },
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_reading_railroad",
+        },
+      ],
+    });
+    await postJson<{ deal: { id: string; status: string }; status: string }>(
+      baseUrl,
+      `/games/${game.id}/deals/${unpayable.deal.id}/accept`,
+      {},
+    );
+
+    const rejectedExecution = await postJsonRejected<{
+      reason_code: string;
+      validation_errors: Array<{ message: string }>;
+    }>(baseUrl, `/games/${game.id}/negotiations/${opened.negotiation?.id ?? ""}/execute`, {}, 409);
+
+    expect(rejectedExecution).toEqual(
+      expect.objectContaining({
+        reason_code: "insufficient_cash_for_deal",
+      }),
+    );
+    expect(rejectedExecution.validation_errors[0]?.message).toContain("cannot pay");
+
+    const stateAfterRejection = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ owner_id: string | null; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterRejection.state.property_ownership).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner_id: lin.id, property_id: "property_reading_railroad" }),
+      ]),
+    );
+    expect(stateAfterRejection.state.players.find((player) => player.id === ada.id)?.cash).toBe(100);
     expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
   });
 

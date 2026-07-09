@@ -1400,6 +1400,13 @@ function executeAcceptedNegotiation(game, negotiation) {
       ),
     };
   }
+  const unpayableReason = unpayableDealCashReason(game, deal);
+  if (unpayableReason) {
+    return {
+      statusCode: 409,
+      payload: negotiationValidationError("insufficient_cash_for_deal", unpayableReason, "terms"),
+    };
+  }
 
   const acceptedEvents = [];
   for (const term of deal.terms) {
@@ -2795,6 +2802,43 @@ function dealCashTransferAmount(deal, fromPlayerId, toPlayerId) {
   }, 0);
 }
 
+function dealOutgoingCashTransferAmount(deal, fromPlayerId) {
+  return deal.terms.reduce((total, term) => {
+    if (
+      isObject(term) &&
+      (term.kind === "cash_transfer" || term.kind === "immediate_cash_transfer") &&
+      term.from_player_id === fromPlayerId &&
+      Number.isInteger(term.amount)
+    ) {
+      return total + term.amount;
+    }
+    return total;
+  }, 0);
+}
+
+function unpayableDealCashReason(game, deal) {
+  const payerIds = [
+    ...new Set(
+      deal.terms.flatMap((term) =>
+        isObject(term) &&
+        (term.kind === "cash_transfer" || term.kind === "immediate_cash_transfer") &&
+        typeof term.from_player_id === "string"
+          ? [term.from_player_id]
+          : [],
+      ),
+    ),
+  ];
+  for (const payerId of payerIds) {
+    const player = playerById(game, payerId);
+    const outgoingCash = dealOutgoingCashTransferAmount(deal, payerId);
+    const cash = player?.state.cash ?? 0;
+    if (!player || outgoingCash > cash) {
+      return `${player?.name ?? "Player"} cannot pay $${outgoingCash} in this deal`;
+    }
+  }
+  return null;
+}
+
 function propertyCompletesPlayerGroup(game, playerId, property) {
   const group = propertyGroupData.find((candidate) => candidate.id === property.group);
   if (!group || !Array.isArray(group.property_ids) || group.property_ids.length <= 1) {
@@ -2835,6 +2879,11 @@ function sellerGroupRetentionOfferFloor(game, sellerPlayerId, buyerPlayerId, pro
 }
 
 function aiDealRejectionReason(game, deal, responderPlayerId) {
+  const unpayableReason = unpayableDealCashReason(game, deal);
+  if (unpayableReason) {
+    return unpayableReason;
+  }
+
   for (const term of deal.terms) {
     if (
       !isObject(term) ||
