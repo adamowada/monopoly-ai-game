@@ -17,6 +17,7 @@ type AiStepPayload = {
   }>;
   deal?: {
     id?: string;
+    parent_deal_id?: string | null;
     status?: string;
     terms?: Array<Record<string, unknown>>;
   } | null;
@@ -191,6 +192,25 @@ function proposeDealAi(baseUrl: string, gameId: string, playerId: string, negoti
   });
 }
 
+function counterofferAi(
+  baseUrl: string,
+  gameId: string,
+  playerId: string,
+  negotiationId: string,
+  selectedDealId: string,
+): Promise<AiStepPayload> {
+  return postJson<AiStepPayload>(baseUrl, `/games/${gameId}/ai/step`, {
+    player_id: playerId,
+    decision_type: "counteroffer",
+    negotiation_id: negotiationId,
+    mandatory: false,
+    request_context: {
+      mode: "auto_negotiation",
+      selected_deal_id: selectedDealId,
+    },
+  });
+}
+
 function acceptRejectAi(
   baseUrl: string,
   gameId: string,
@@ -208,6 +228,18 @@ function acceptRejectAi(
       selected_deal_id: selectedDealId,
     },
   });
+}
+
+function createDeal(
+  baseUrl: string,
+  gameId: string,
+  payload: Record<string, unknown>,
+): Promise<{ deal: { id: string; status: string; terms: Array<Record<string, unknown>> }; status: string }> {
+  return postJson<{ deal: { id: string; status: string; terms: Array<Record<string, unknown>> }; status: string }>(
+    baseUrl,
+    `/games/${gameId}/deals`,
+    payload,
+  );
 }
 
 afterEach(async () => {
@@ -507,5 +539,110 @@ describe("mock API AI strategy", () => {
     );
     expect(stateAfterExecution.state.players.find((player) => player.id === ada.id)?.cash).toBe(1280);
     expect(stateAfterExecution.state.players.find((player) => player.id === lin.id)?.cash).toBe(1720);
+  });
+
+  it("counters an overpriced targeted property deal and retires the old proposal", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-overpriced-counteroffer",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_st_james_place", seat_order: 0 },
+            { property_id: "property_new_york_avenue", seat_order: 0 },
+            { property_id: "property_tennessee_avenue", seat_order: 2 },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "complete_street_group",
+      group: "orange",
+      group_name: "Orange",
+      property_group_kind: "street",
+      actor_owned_property_ids: ["property_st_james_place", "property_new_york_avenue"],
+      actor_owned_property_names: ["St. James Place", "New York Avenue"],
+      target_property_id: "property_tennessee_avenue",
+      target_property_name: "Tennessee Avenue",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Completing Orange unlocks development and materially raises rent pressure.",
+    });
+
+    const overpriced = await createDeal(baseUrl, game.id, {
+      negotiation_id: opened.negotiation?.id,
+      proposer_player_id: lin.id,
+      participant_player_ids: [ada.id, lin.id],
+      parent_deal_id: null,
+      terms: [
+        {
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 400,
+        },
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_tennessee_avenue",
+        },
+      ],
+    });
+
+    const countered = await counterofferAi(baseUrl, game.id, ada.id, opened.negotiation?.id ?? "", overpriced.deal.id);
+
+    expect(countered.status).toBe("done");
+    expect(countered.deal).toEqual(
+      expect.objectContaining({
+        parent_deal_id: overpriced.deal.id,
+        status: "proposed",
+      }),
+    );
+    expect(countered.deal?.terms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 220,
+        }),
+      ]),
+    );
+
+    const dealsAfterCounter = await getJson<{
+      deals: Array<{ id: string; parent_deal_id?: string | null; status: string }>;
+    }>(baseUrl, `/games/${game.id}/deals`);
+    expect(dealsAfterCounter.deals.find((deal) => deal.id === overpriced.deal.id)).toEqual(
+      expect.objectContaining({ status: "rejected" }),
+    );
+    expect(dealsAfterCounter.deals.find((deal) => deal.id === countered.deal?.id)).toEqual(
+      expect.objectContaining({ parent_deal_id: overpriced.deal.id, status: "proposed" }),
+    );
+
+    const accepted = await acceptRejectAi(baseUrl, game.id, lin.id, opened.negotiation?.id ?? "", countered.deal?.id ?? "");
+    expect(accepted.deal).toEqual(
+      expect.objectContaining({
+        id: countered.deal?.id,
+        status: "accepted",
+      }),
+    );
   });
 });

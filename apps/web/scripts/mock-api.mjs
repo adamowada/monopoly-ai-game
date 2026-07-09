@@ -1150,6 +1150,7 @@ function validateDealPayload(game, payload) {
 function createDealRecord(game, payload) {
   const createdAt = nowIso();
   const negotiationDeals = game.deals.filter((deal) => deal.negotiation_id === payload.negotiation_id);
+  const parentDeal = payload.parent_deal_id ? dealById(game, payload.parent_deal_id) : null;
   game.deal_counter += 1;
   const deal = {
     id: `${game.id}-deal-${game.deal_counter}`,
@@ -1170,6 +1171,18 @@ function createDealRecord(game, payload) {
   game.deals.unshift(deal);
   const negotiation = negotiationById(game, payload.negotiation_id);
   if (negotiation) {
+    if (parentDeal && parentDeal.status === "proposed") {
+      parentDeal.status = "rejected";
+      parentDeal.rejected_at = createdAt;
+      parentDeal.updated_at = createdAt;
+      const priorAcceptances = negotiation.acceptances?.[parentDeal.id] ?? [];
+      if (priorAcceptances.length > 0) {
+        negotiation.invalidated_acceptances = {
+          ...(negotiation.invalidated_acceptances ?? {}),
+          [parentDeal.id]: priorAcceptances,
+        };
+      }
+    }
     negotiation.status = payload.parent_deal_id ? "countered" : "active";
     negotiation.round_number = Math.max(negotiation.round_number, deal.version);
     negotiation.current_deal_id = deal.id;
@@ -1179,6 +1192,26 @@ function createDealRecord(game, payload) {
   }
   game.updated_at = createdAt;
   return deal;
+}
+
+function selectedDealIdFromPayload(payload) {
+  const requestContext = isObject(payload.request_context) ? payload.request_context : {};
+  return typeof requestContext.selected_deal_id === "string" && requestContext.selected_deal_id.length > 0
+    ? requestContext.selected_deal_id
+    : null;
+}
+
+function proposedNegotiationDealForPayload(game, negotiation, payload) {
+  const selectedDealId = selectedDealIdFromPayload(payload);
+  if (selectedDealId) {
+    const selectedDeal = dealById(game, selectedDealId);
+    return selectedDeal?.negotiation_id === negotiation.id && selectedDeal.status === "proposed" ? selectedDeal : null;
+  }
+  const currentDeal = dealById(game, negotiation.current_deal_id);
+  if (currentDeal?.status === "proposed") {
+    return currentDeal;
+  }
+  return game.deals.find((deal) => deal.negotiation_id === negotiation.id && deal.status === "proposed") ?? null;
 }
 
 function validateDealMutation(game, dealId, action) {
@@ -2429,7 +2462,7 @@ function applyMockAiNegotiationStep(game, payload, decision) {
   }
 
   if (payload.decision_type === "deal_proposal" || payload.decision_type === "counteroffer") {
-    const currentDeal = game.deals.find((deal) => deal.negotiation_id === negotiation.id && deal.status === "proposed") ?? null;
+    const currentDeal = proposedNegotiationDealForPayload(game, negotiation, payload);
     const deal = createDealRecord(game, {
       negotiation_id: negotiation.id,
       proposer_player_id: payload.player_id,
@@ -2450,7 +2483,7 @@ function applyMockAiNegotiationStep(game, payload, decision) {
   }
 
   if (payload.decision_type === "accept_reject") {
-    const deal = game.deals.find((item) => item.negotiation_id === negotiation.id && item.status === "proposed") ?? null;
+    const deal = proposedNegotiationDealForPayload(game, negotiation, payload);
     if (!deal) {
       const errors = [aiValidationError("deal_not_found", "AI response requires a proposed deal", "deal_id")];
       const rejection = createRejectedAction(
