@@ -2700,6 +2700,16 @@ function monopolyCompletionOfferFloor(game, buyerPlayerId, property) {
   return targetedTradeOfferAmount(game, buyerPlayerId, property, `complete_${property.kind}_group`);
 }
 
+function sellerGroupRetentionOfferFloor(game, sellerPlayerId, buyerPlayerId, property) {
+  const group = propertyGroupData.find((candidate) => candidate.id === property.group);
+  const sellerOtherOwnedCount = propertyGroupOwnershipCount(game, group, sellerPlayerId, property.id);
+  if (sellerOtherOwnedCount <= 0) {
+    return 0;
+  }
+  const blockValue = targetedTradeOfferAmount(game, buyerPlayerId, property, `block_opponent_${property.kind}_group`);
+  return Math.max(property.price, blockValue);
+}
+
 function aiDealRejectionReason(game, deal, responderPlayerId) {
   for (const term of deal.terms) {
     if (
@@ -2730,13 +2740,19 @@ function aiDealRejectionReason(game, deal, responderPlayerId) {
     }
     const buyerPlayerId = typeof term.to_player_id === "string" ? term.to_player_id : null;
     const property = propertyById(term.property_id);
-    if (!buyerPlayerId || !property || !propertyCompletesPlayerGroup(game, buyerPlayerId, property)) {
+    if (!buyerPlayerId || !property) {
       continue;
     }
     const offeredCash = dealCashTransferAmount(deal, buyerPlayerId, responderPlayerId);
-    const strategicFloor = monopolyCompletionOfferFloor(game, buyerPlayerId, property);
-    if (strategicFloor < property.price || offeredCash < strategicFloor) {
-      return `cash offer $${offeredCash} below strategic floor $${strategicFloor} for ${property.name}`;
+    if (propertyCompletesPlayerGroup(game, buyerPlayerId, property)) {
+      const strategicFloor = monopolyCompletionOfferFloor(game, buyerPlayerId, property);
+      if (strategicFloor < property.price || offeredCash < strategicFloor) {
+        return `cash offer $${offeredCash} below strategic floor $${strategicFloor} for ${property.name}`;
+      }
+    }
+    const retentionFloor = sellerGroupRetentionOfferFloor(game, responderPlayerId, buyerPlayerId, property);
+    if (retentionFloor > 0 && offeredCash < retentionFloor) {
+      return `cash offer $${offeredCash} below seller group floor $${retentionFloor} for ${property.name}`;
     }
   }
   return null;
