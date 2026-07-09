@@ -18,6 +18,18 @@ type AiStepPayload = {
   status: string;
 };
 
+type LegalActionsPayload = {
+  legal_actions: Array<{
+    type: string;
+    payload: Record<string, unknown>;
+  }>;
+};
+
+type CreateGameOptions = {
+  seed?: string;
+  settings?: Record<string, unknown>;
+};
+
 let mockApiProcess: ChildProcess | null = null;
 let mockApiOutput = "";
 
@@ -106,14 +118,14 @@ async function getJson<T>(baseUrl: string, path: string): Promise<T> {
   return body;
 }
 
-function createGame(baseUrl: string): Promise<MockGame> {
+function createGame(baseUrl: string, options: CreateGameOptions = {}): Promise<MockGame> {
   return postJson<MockGame>(baseUrl, "/games", {
-    seed: "stage-10-5-two-human-full-round-ai-development",
+    seed: options.seed ?? "stage-10-5-two-human-full-round-ai-development",
     players: [
       { name: "Ada", kind: "ai" },
       { name: "Grace", kind: "ai" },
     ],
-    settings: {
+    settings: options.settings ?? {
       player_colors: [
         { seat_order: 0, color: "#0f766e" },
         { seat_order: 1, color: "#7c3aed" },
@@ -190,5 +202,66 @@ describe("mock API AI strategy", () => {
       state: { players: Array<{ cash: number; id: string }> };
     }>(baseUrl, `/games/${game.id}/state`);
     expect(stateAfterDevelopment.state.players.find((player) => player.id === ada.id)?.cash).toBe(1392);
+  });
+
+  it("applies debug allocations and withholds unaffordable AI build actions", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-low-cash-management",
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          player_cash: [
+            { seat_order: 0, cash: 40 },
+            { seat_order: 1, cash: 1500 },
+          ],
+          property_owners: [
+            { property_id: "property_mediterranean_avenue", seat_order: 0 },
+            { property_id: "property_baltic_avenue", seat_order: 0 },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+
+    const state = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ owner_id: string | null; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(state.state.players.find((player) => player.id === ada.id)?.cash).toBe(40);
+    expect(
+      state.state.property_ownership.filter((ownership) =>
+        ["property_mediterranean_avenue", "property_baltic_avenue"].includes(ownership.property_id),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner_id: ada.id, property_id: "property_mediterranean_avenue" }),
+        expect.objectContaining({ owner_id: ada.id, property_id: "property_baltic_avenue" }),
+      ]),
+    );
+
+    const legalActions = await getJson<LegalActionsPayload>(
+      baseUrl,
+      `/games/${game.id}/legal-actions?actor_player_id=${encodeURIComponent(ada.id)}`,
+    );
+    expect(legalActions.legal_actions.map((action) => action.type)).not.toContain("BUY_HOUSE");
+
+    const aiStep = await stepAi(baseUrl, game.id, ada.id);
+    expect(aiStep.accepted_events.map((event) => event.event_type)).toContain("DICE_ROLLED");
+    expect(aiStep.accepted_events.map((event) => event.event_type)).not.toContain("PROPERTY_IMPROVEMENTS_SET");
+
+    const stateAfterStep = await getJson<{
+      state: { players: Array<{ cash: number; id: string }> };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterStep.state.players.find((player) => player.id === ada.id)?.cash).toBe(40);
   });
 });

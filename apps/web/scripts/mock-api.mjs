@@ -278,6 +278,7 @@ function createGame(payload) {
   configureAiAuditSeed(game);
   configureStage105Seed(game);
   configureArtScreenshotSeed(game);
+  configureDebugAllocations(game);
   games.set(id, game);
   return game;
 }
@@ -337,6 +338,54 @@ function setPropertyOwnership(game, propertyId, patch) {
     ownership.houses = 0;
   } else {
     ownership.hotels = 0;
+  }
+}
+
+function configureDebugAllocations(game) {
+  const allocations = isObject(game.settings?.debug_allocations) ? game.settings.debug_allocations : null;
+  if (!allocations) {
+    return;
+  }
+
+  if (Array.isArray(allocations.player_cash)) {
+    for (const entry of allocations.player_cash) {
+      if (!isObject(entry) || !Number.isInteger(entry.seat_order) || !Number.isInteger(entry.cash)) {
+        continue;
+      }
+      const player = game.players[entry.seat_order];
+      if (!player || entry.cash < 0) {
+        continue;
+      }
+      player.state = {
+        ...player.state,
+        cash: entry.cash,
+      };
+      player.updated_at = nowIso();
+    }
+  }
+
+  if (Array.isArray(allocations.property_owners)) {
+    for (const entry of allocations.property_owners) {
+      if (!isObject(entry) || typeof entry.property_id !== "string") {
+        continue;
+      }
+      const ownerId =
+        entry.seat_order === null || entry.seat_order === undefined
+          ? null
+          : Number.isInteger(entry.seat_order) && game.players[entry.seat_order]
+            ? game.players[entry.seat_order].id
+            : undefined;
+      if (ownerId === undefined) {
+        continue;
+      }
+      setPropertyOwnership(game, entry.property_id, {
+        owner_id: ownerId,
+        mortgaged: false,
+        houses: 0,
+        hotel: false,
+        hotels: 0,
+      });
+    }
   }
 }
 
@@ -1402,25 +1451,33 @@ function propertyManagementLegalActionsFor(game) {
     return [legalAction(game, "BUY_HOUSE", { property_id: "property_baltic_avenue", cost: 50 })];
   }
 
+  const actor = activePlayer(game);
   const mediterranean = propertyOwnership(game, "property_mediterranean_avenue");
   const baltic = propertyOwnership(game, "property_baltic_avenue");
   const parkPlace = propertyOwnership(game, "property_park_place");
   const boardwalk = propertyOwnership(game, "property_boardwalk");
   const readingRailroad = propertyOwnership(game, "property_reading_railroad");
+  const actorCash = actor?.state.cash ?? 0;
   const actions = [];
-  if (mediterranean?.owner_id === activePlayer(game)?.id && !mediterranean.mortgaged && mediterranean.houses === 0 && !mediterranean.hotel) {
+  if (
+    mediterranean?.owner_id === actor?.id &&
+    !mediterranean.mortgaged &&
+    mediterranean.houses === 0 &&
+    !mediterranean.hotel &&
+    actorCash >= 50
+  ) {
     actions.push(legalAction(game, "BUY_HOUSE", { property_id: "property_mediterranean_avenue", cost: 50 }));
   }
-  if (baltic?.owner_id === activePlayer(game)?.id && !baltic.mortgaged && mediterranean?.houses === 0 && !mediterranean?.hotel) {
+  if (baltic?.owner_id === actor?.id && !baltic.mortgaged && mediterranean?.houses === 0 && !mediterranean?.hotel) {
     actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_baltic_avenue", proceeds: 30 }));
   }
-  if (parkPlace?.owner_id === activePlayer(game)?.id && parkPlace.mortgaged) {
+  if (parkPlace?.owner_id === actor?.id && parkPlace.mortgaged && actorCash >= 220) {
     actions.push(legalAction(game, "UNMORTGAGE_PROPERTY", { property_id: "property_park_place", cost: 220 }));
   }
-  if (boardwalk?.owner_id === activePlayer(game)?.id && !boardwalk.mortgaged && (boardwalk.hotel || boardwalk.houses > 0)) {
+  if (boardwalk?.owner_id === actor?.id && !boardwalk.mortgaged && (boardwalk.hotel || boardwalk.houses > 0)) {
     actions.push(legalAction(game, "SELL_HOUSE", { property_id: "property_boardwalk", proceeds: 100 }));
   }
-  if (isStage105Seed(game.seed) && readingRailroad?.owner_id === activePlayer(game)?.id && !readingRailroad.mortgaged) {
+  if (isStage105Seed(game.seed) && readingRailroad?.owner_id === actor?.id && !readingRailroad.mortgaged) {
     actions.push(legalAction(game, "MORTGAGE_PROPERTY", { property_id: "property_reading_railroad", proceeds: 100 }));
   }
   return actions;
@@ -2840,8 +2897,12 @@ function acceptBuyHouse(game, action) {
     return createManagementAcceptedResponse(game, []);
   }
   const actorPlayerId = action.actor_id;
+  const actor = playerById(game, actorPlayerId);
   const property = propertyById(propertyId);
   const cost = managementPayloadAmount(action, "cost", property?.house_cost ?? 0);
+  if (!actor || (actor.state.cash ?? 0) < cost) {
+    return rejectAction(game, action, "illegal_action", "insufficient cash to buy improvement", "payload.cost");
+  }
   const events = [];
   const cashEvent = acceptPlayerCashDelta(game, actorPlayerId, -cost);
   if (cashEvent) {
@@ -2903,6 +2964,10 @@ function acceptManagementAction(game, action) {
     const property = propertyById(propertyId);
     const fallbackCost = property?.mortgage_value ? property.mortgage_value + Math.ceil(property.mortgage_value / 10) : 0;
     const cost = managementPayloadAmount(action, "cost", fallbackCost);
+    const actor = playerById(game, action.actor_id);
+    if (!actor || (actor.state.cash ?? 0) < cost) {
+      return rejectAction(game, action, "illegal_action", "insufficient cash to unmortgage property", "payload.cost");
+    }
     const cashEvent = acceptPlayerCashDelta(game, action.actor_id, -cost);
     return createManagementAcceptedResponse(game, [
       ...(cashEvent ? [cashEvent] : []),
