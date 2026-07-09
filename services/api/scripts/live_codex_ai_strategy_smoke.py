@@ -117,6 +117,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_railroad_purchase_completes_set_with_thin_cash,
         ),
         StrategySmokeCase(
+            name="utility_purchase_completes_set_with_thin_cash",
+            game_id=UUID("00000000-0000-0000-0000-00000000b231"),
+            decision_type="action_decision",
+            state_factory=_utility_purchase_completes_set_state,
+            verifier=_verify_utility_purchase_completes_set_with_thin_cash,
+        ),
+        StrategySmokeCase(
             name="purchase_completes_color_group_with_thin_cash",
             game_id=UUID("00000000-0000-0000-0000-00000000b215"),
             decision_type="action_decision",
@@ -439,6 +446,17 @@ def _verify_railroad_purchase_completes_set_with_thin_cash(parsed: dict[str, Any
     assert payload.get("property_id") == "property_short_line_railroad"
     if "price" in payload:
         assert payload.get("price") == 200
+
+
+def _verify_utility_purchase_completes_set_with_thin_cash(parsed: dict[str, Any]) -> None:
+    action = _dict(parsed.get("action"))
+    payload = _dict(action.get("payload"))
+
+    assert parsed.get("decision_type") == "action_decision"
+    assert action.get("type") == "BUY_PROPERTY", f"expected BUY_PROPERTY, got {action.get('type')}"
+    assert payload.get("property_id") == "property_water_works"
+    if "price" in payload:
+        assert payload.get("price") == 150
 
 
 def _verify_purchase_completes_color_group_with_thin_cash(parsed: dict[str, Any]) -> None:
@@ -1386,6 +1404,21 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                 ),
             },
         )
+    if case.name == "utility_purchase_completes_set_with_thin_cash":
+        return (
+            {
+                "id": "live-strategy-buy-utility-to-complete-set",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this action_decision, Grace owns property_electric_company, "
+                    "has $300, and landed on unowned property_water_works. Buying Water "
+                    "Works for $150 leaves $150 and completes Utilities, doubling utility "
+                    "rent multipliers. purchase_guidance recommendation is "
+                    "buy_property_to_complete_group. Choose BUY_PROPERTY rather than "
+                    "START_AUCTION."
+                ),
+            },
+        )
     if case.name == "purchase_completes_color_group_with_thin_cash":
         return (
             {
@@ -1775,6 +1808,33 @@ def _railroad_purchase_completes_set_state(game_id: UUID) -> GameState:
             "owner_id": str(AI_PLAYER_ID),
         }
         if item.property_id in owned_property_ids
+        else item.model_dump(mode="python")
+        for item in state.property_ownership
+    ]
+    return GameState.model_validate(
+        {
+            **state.model_dump(mode="python"),
+            "players": players,
+            "property_ownership": ownership,
+            "turn": {
+                **state.turn.model_dump(mode="python"),
+                "phase": TurnPhase.PURCHASE_OR_AUCTION,
+            },
+        }
+    )
+
+
+def _utility_purchase_completes_set_state(game_id: UUID) -> GameState:
+    state = _base_state(game_id, seed="live-strategy-utility-purchase-completes-set")
+    players = [player.model_dump(mode="python") for player in state.players]
+    players[0]["cash"] = 300
+    players[0]["position"] = 28
+    ownership = [
+        {
+            **item.model_dump(mode="python"),
+            "owner_id": str(AI_PLAYER_ID),
+        }
+        if item.property_id == "property_electric_company"
         else item.model_dump(mode="python")
         for item in state.property_ownership
     ]
