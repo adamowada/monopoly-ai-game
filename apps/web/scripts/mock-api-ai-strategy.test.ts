@@ -696,6 +696,65 @@ describe("mock API AI strategy", () => {
     expect(stateAfterStep.state.players.find((player) => player.id === ada.id)?.cash).toBe(40);
   });
 
+  it("applies debug starting property improvements to seeded game state", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-starting-improvements",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_mediterranean_avenue", seat_order: 0 },
+            { property_id: "property_baltic_avenue", seat_order: 0 },
+            { property_id: "property_boardwalk", seat_order: 1 },
+          ],
+          property_improvements: [
+            { property_id: "property_mediterranean_avenue", houses: 3, hotel: false },
+            { property_id: "property_boardwalk", houses: 0, hotel: true },
+            { property_id: "property_reading_railroad", houses: 4, hotel: false },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const grace = game.players[1];
+
+    const state = await getJson<{
+      state: {
+        bank_inventory: { hotels: number; houses: number };
+        property_ownership: Array<{
+          hotel?: boolean;
+          hotels?: number;
+          houses?: number;
+          owner_id: string | null;
+          property_id: string;
+        }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+
+    expect(
+      state.state.property_ownership.find((ownership) => ownership.property_id === "property_mediterranean_avenue"),
+    ).toEqual(expect.objectContaining({ houses: 3, hotel: false, hotels: 0, owner_id: ada.id }));
+    expect(
+      state.state.property_ownership.find((ownership) => ownership.property_id === "property_boardwalk"),
+    ).toEqual(expect.objectContaining({ houses: 0, hotel: true, hotels: 1, owner_id: grace.id }));
+    expect(
+      state.state.property_ownership.find((ownership) => ownership.property_id === "property_reading_railroad"),
+    ).toEqual(expect.objectContaining({ houses: 0, hotel: false, hotels: 0, owner_id: null }));
+    expect(state.state.bank_inventory).toEqual({ houses: 29, hotels: 11 });
+  });
+
   it("uses targeted trade opportunities when opening mock AI debug negotiations", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {

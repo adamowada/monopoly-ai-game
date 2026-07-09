@@ -344,6 +344,26 @@ function setPropertyOwnership(game, propertyId, patch) {
   }
 }
 
+function refreshBankInventoryFromOwnership(game) {
+  let usedHouses = 0;
+  let usedHotels = 0;
+  for (const ownership of game.property_ownership) {
+    const property = propertyById(ownership.property_id);
+    if (property?.kind !== "street") {
+      continue;
+    }
+    if (ownership.hotel || ownership.hotels > 0) {
+      usedHotels += 1;
+    } else {
+      usedHouses += Math.max(0, ownership.houses ?? 0);
+    }
+  }
+  game.bank_inventory = {
+    houses: Math.max(0, 32 - usedHouses),
+    hotels: Math.max(0, 12 - usedHotels),
+  };
+}
+
 function configureDebugAllocations(game) {
   const allocations = isObject(game.settings?.debug_allocations) ? game.settings.debug_allocations : null;
   if (!allocations) {
@@ -389,6 +409,32 @@ function configureDebugAllocations(game) {
         hotels: 0,
       });
     }
+  }
+
+  if (Array.isArray(allocations.property_improvements)) {
+    for (const entry of allocations.property_improvements) {
+      if (!isObject(entry) || typeof entry.property_id !== "string") {
+        continue;
+      }
+      const property = propertyById(entry.property_id);
+      const ownership = propertyOwnership(game, entry.property_id);
+      if (!property || property.kind !== "street" || !ownership?.owner_id) {
+        continue;
+      }
+      const hotel = entry.hotel === true;
+      const houses = hotel
+        ? 0
+        : Number.isInteger(entry.houses)
+          ? Math.max(0, Math.min(4, entry.houses))
+          : 0;
+      setPropertyOwnership(game, entry.property_id, {
+        mortgaged: false,
+        houses,
+        hotel,
+        hotels: hotel ? 1 : 0,
+      });
+    }
+    refreshBankInventoryFromOwnership(game);
   }
 }
 

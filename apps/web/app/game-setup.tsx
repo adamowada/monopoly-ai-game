@@ -1,6 +1,6 @@
 "use client";
 
-import { BOARD_SPACES, PROPERTIES_BY_ID, PROPERTY_GROUPS } from "@monopoly-ai-game/schemas";
+import { BOARD_SPACES, PROPERTIES_BY_ID, PROPERTY_GROUPS, type StaticDataProperty } from "@monopoly-ai-game/schemas";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -20,16 +20,28 @@ type SetupPlayer = {
   icon: string;
 };
 
+type DebugPropertyImprovementValue = "" | "1" | "2" | "3" | "4" | "hotel";
+
 const playerColors = ["#0f766e", "#2563eb", "#7c3aed", "#dc2626", "#ca8a04"];
 const hexColorPattern = /^#[0-9a-fA-F]{6}$/;
 const defaultStartingCash = "1500";
 const maxDebugStartingCash = 100_000;
+const debugPropertyImprovementValues = new Set(["", "1", "2", "3", "4", "hotel"]);
+const debugPropertyImprovementOptions: Array<{ value: DebugPropertyImprovementValue; label: string }> = [
+  { value: "", label: "No buildings" },
+  { value: "1", label: "1 house" },
+  { value: "2", label: "2 houses" },
+  { value: "3", label: "3 houses" },
+  { value: "4", label: "4 houses" },
+  { value: "hotel", label: "Hotel" },
+];
+const debugPropertiesById = PROPERTIES_BY_ID as Readonly<Record<string, StaticDataProperty | undefined>>;
 const debugPropertyOptions = BOARD_SPACES.flatMap((space) => {
   if (!space.property_id) {
     return [];
   }
   const property = PROPERTIES_BY_ID[space.property_id];
-  return property ? [{ id: property.id, name: property.name }] : [];
+  return property ? [{ id: property.id, kind: property.kind, name: property.name }] : [];
 });
 const debugPropertySetOptions = PROPERTY_GROUPS.map((group) => ({
   id: group.id,
@@ -69,6 +81,10 @@ export const AI_PLAYER_NAMES = [
   "Chloe",
   "Samuel",
 ];
+
+function debugPropertyById(propertyId: string): StaticDataProperty | null {
+  return debugPropertiesById[propertyId] ?? null;
+}
 
 function generateSeed(): string {
   return `setup-${Date.now().toString(36)}-${Math.floor(Math.random() * 100_000)
@@ -139,6 +155,7 @@ function validateSetup(
   debugEnabled: boolean,
   debugCash: Record<string, string>,
   debugPropertyOwners: Record<string, string>,
+  debugPropertyImprovements: Record<string, string>,
 ): string[] {
   const messages: string[] = [];
   const names = players.map((player) => player.name.trim());
@@ -191,6 +208,20 @@ function validateSetup(
         break;
       }
     }
+    for (const [propertyId, improvementValue] of Object.entries(debugPropertyImprovements)) {
+      if (improvementValue === "") {
+        continue;
+      }
+      const property = debugPropertyById(propertyId);
+      if (!property || property.kind !== "street" || !debugPropertyImprovementValues.has(improvementValue)) {
+        messages.push("Debug property improvements must be houses or hotel on street properties");
+        break;
+      }
+      if (!validSeatValues.has(debugPropertyOwners[propertyId] ?? "")) {
+        messages.push("Debug property improvements require a configured owner");
+        break;
+      }
+    }
   }
 
   return messages;
@@ -205,6 +236,7 @@ export function GameSetupPanel() {
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [debugCash, setDebugCash] = useState<Record<string, string>>({});
   const [debugPropertyOwners, setDebugPropertyOwners] = useState<Record<string, string>>({});
+  const [debugPropertyImprovements, setDebugPropertyImprovements] = useState<Record<string, string>>({});
   const [messages, setMessages] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -259,6 +291,21 @@ export function GameSetupPanel() {
 
   function setDebugPropertyOwner(propertyId: string, seatOrder: string) {
     setDebugPropertyOwners((current) => ({ ...current, [propertyId]: seatOrder }));
+    if (seatOrder === "") {
+      setDebugPropertyImprovements((current) => {
+        const next = { ...current };
+        delete next[propertyId];
+        return next;
+      });
+    }
+  }
+
+  function debugPropertyImprovement(propertyId: string): string {
+    return debugPropertyImprovements[propertyId] ?? "";
+  }
+
+  function setDebugPropertyImprovement(propertyId: string, improvement: string) {
+    setDebugPropertyImprovements((current) => ({ ...current, [propertyId]: improvement }));
   }
 
   function debugPropertySetOwnerValue(propertyIds: readonly string[]): string {
@@ -275,6 +322,15 @@ export function GameSetupPanel() {
       }
       return next;
     });
+    if (seatOrder === "") {
+      setDebugPropertyImprovements((current) => {
+        const next = { ...current };
+        for (const propertyId of propertyIds) {
+          delete next[propertyId];
+        }
+        return next;
+      });
+    }
   }
 
   function debugAllocationSettings() {
@@ -282,6 +338,21 @@ export function GameSetupPanel() {
       return {};
     }
     const validSeatValues = new Set(players.map((_, index) => String(index)));
+    const propertyImprovements = Object.entries(debugPropertyImprovements)
+      .filter(([propertyId, improvement]) => {
+        const property = debugPropertyById(propertyId);
+        return (
+          improvement !== "" &&
+          property?.kind === "street" &&
+          debugPropertyImprovementValues.has(improvement) &&
+          validSeatValues.has(debugPropertyOwners[propertyId] ?? "")
+        );
+      })
+      .map(([propertyId, improvement]) => ({
+        property_id: propertyId,
+        houses: improvement === "hotel" ? 0 : Number.parseInt(improvement, 10),
+        hotel: improvement === "hotel",
+      }));
     return {
       debug_allocations: {
         player_cash: players.map((player, seatOrder) => ({
@@ -294,6 +365,7 @@ export function GameSetupPanel() {
             property_id: propertyId,
             seat_order: Number.parseInt(seatOrder, 10),
           })),
+        ...(propertyImprovements.length > 0 ? { property_improvements: propertyImprovements } : {}),
       },
     };
   }
@@ -307,6 +379,7 @@ export function GameSetupPanel() {
       debugEnabled,
       debugCash,
       debugPropertyOwners,
+      debugPropertyImprovements,
     );
     if (validationMessages.length > 0) {
       setMessages(validationMessages);
@@ -592,24 +665,47 @@ export function GameSetupPanel() {
                   <div className="grid gap-2">
                     <div className="text-xs font-black uppercase text-[#6f604c]">Property owners</div>
                     <div className="grid max-h-80 gap-2 overflow-y-auto pr-1">
-                      {debugPropertyOptions.map((property) => (
-                        <label key={property.id} className="grid gap-1 text-sm font-bold text-[#2f2418]">
-                          {property.name}
-                          <select
-                            aria-label={`${property.name} owner`}
-                            onChange={(event) => setDebugPropertyOwner(property.id, event.target.value)}
-                            value={debugPropertyOwners[property.id] ?? ""}
-                            className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
-                          >
-                            <option value="">Bank</option>
-                            {players.map((player, seatOrder) => (
-                              <option key={player.id} value={seatOrder}>
-                                {player.name.trim() || `Player ${seatOrder + 1}`}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ))}
+                      {debugPropertyOptions.map((property) => {
+                        const ownerValue = debugPropertyOwners[property.id] ?? "";
+                        return (
+                          <div key={property.id} className="grid gap-2 rounded border border-[#b99768]/50 bg-white/55 p-2">
+                            <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                              {property.name}
+                              <select
+                                aria-label={`${property.name} owner`}
+                                onChange={(event) => setDebugPropertyOwner(property.id, event.target.value)}
+                                value={ownerValue}
+                                className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20"
+                              >
+                                <option value="">Bank</option>
+                                {players.map((player, seatOrder) => (
+                                  <option key={player.id} value={seatOrder}>
+                                    {player.name.trim() || `Player ${seatOrder + 1}`}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            {property.kind === "street" ? (
+                              <label className="grid gap-1 text-sm font-bold text-[#2f2418]">
+                                Improvements
+                                <select
+                                  aria-label={`${property.name} improvements`}
+                                  disabled={ownerValue === ""}
+                                  onChange={(event) => setDebugPropertyImprovement(property.id, event.target.value)}
+                                  value={debugPropertyImprovement(property.id)}
+                                  className="rounded-md border border-[#b99768] bg-white px-3 py-2 text-sm text-[#2f2418] outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20 disabled:bg-[#e8dfcd] disabled:text-[#6f604c]"
+                                >
+                                  {debugPropertyImprovementOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

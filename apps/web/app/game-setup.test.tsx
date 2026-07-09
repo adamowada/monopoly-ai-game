@@ -245,6 +245,48 @@ describe("GameSetupPanel", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/games/game-created", { scroll: true }));
   });
 
+  it("sends optional debug street improvements for richer scenario setup", async () => {
+    createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
+    render(<GameSetupPanel />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 1 name" }), {
+      target: { value: "Ada" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Player 2 name" }), {
+      target: { value: "Grace" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Enable debug setup" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Mediterranean Avenue owner" }), {
+      target: { value: "0" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Mediterranean Avenue improvements" }), {
+      target: { value: "3" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Boardwalk owner" }), {
+      target: { value: "1" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Boardwalk improvements" }), {
+      target: { value: "hotel" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create game" }));
+
+    await waitFor(() => {
+      expect(createGameMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            debug_allocations: expect.objectContaining({
+              property_improvements: [
+                { property_id: "property_mediterranean_avenue", houses: 3, hotel: false },
+                { property_id: "property_boardwalk", houses: 0, hotel: true },
+              ],
+            }),
+          }),
+        }),
+      );
+    });
+  });
+
   it("can allocate an entire debug property set for faster AI scenario setup", async () => {
     createGameMock.mockResolvedValue({ state: "loaded", game: gameMetadata() });
     render(<GameSetupPanel />);
