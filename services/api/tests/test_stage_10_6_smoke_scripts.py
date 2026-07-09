@@ -129,6 +129,7 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_overpriced_deal_counteroffer" in source
     assert "railroad_overpriced_deal_counteroffer" in source
     assert "utility_overpriced_deal_counteroffer" in source
+    assert "orange_boardwalk_swap_deal_counteroffer" in source
     assert "orange_cash_draining_deal_rejection" in source
     assert "orange_cash_draining_deal_counteroffer" in source
     assert "orange_monopoly_breakup_deal_rejection" in source
@@ -1496,6 +1497,51 @@ def test_live_codex_strategy_smoke_non_street_counteroffers_have_context_pack_gu
             "property_id": "property_water_works",
         },
     ]
+
+
+def test_live_codex_strategy_smoke_property_swap_counteroffer_keeps_premium_property() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    case = cases["orange_boardwalk_swap_deal_counteroffer"]
+    state = case.state_factory(case.game_id)
+    pack = module.build_ai_context_pack(
+        state,
+        player_id=str(case.actor_player_id),
+        decision_type=case.decision_type,
+        negotiations=module._negotiations(case),
+        negotiation_messages=module._negotiation_messages(case),
+        deals=module._deals(case),
+        rule_snippets=module._strategy_rule_snippets(case),
+    )
+
+    guidance = pack["counteroffer_guidance"]
+    assert guidance["recommended_decision_types"] == ["counteroffer"]
+    template = guidance["counteroffer_templates"][0]
+    payload = template["counteroffer_payload_template"]
+    assert template["responds_to_deal_id"] == str(module.BOARDWALK_SWAP_DEAL_ID)
+    assert template["reason_code"] == (
+        "receives_property_that_completes_actor_street_group_above_value_ceiling"
+    )
+    assert template["target_property_id"] == "property_tennessee_avenue"
+    assert template["current_payment_value"] == 400
+    assert template["current_cash_amount"] == 0
+    assert template["recommended_cash_amount"] == 270
+    assert payload["terms"]["terms"] == [
+        {
+            "kind": "immediate_cash_transfer",
+            "from_player_id": str(module.AI_PLAYER_ID),
+            "to_player_id": str(module.OTHER_PLAYER_ID),
+            "amount": 270,
+        },
+        {
+            "kind": "immediate_property_transfer",
+            "from_player_id": str(module.OTHER_PLAYER_ID),
+            "to_player_id": str(module.AI_PLAYER_ID),
+            "property_id": "property_tennessee_avenue",
+        },
+    ]
+    assert "property_boardwalk" not in json.dumps(payload["terms"])
 
 
 def test_live_codex_strategy_smoke_monopoly_breakup_deal_has_rejection_guidance() -> None:
