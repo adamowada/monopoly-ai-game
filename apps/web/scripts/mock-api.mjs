@@ -1407,6 +1407,13 @@ function executeAcceptedNegotiation(game, negotiation) {
       payload: negotiationValidationError("insufficient_cash_for_deal", unpayableReason, "terms"),
     };
   }
+  const untransferablePropertyReason = untransferableDealPropertyReason(game, deal);
+  if (untransferablePropertyReason) {
+    return {
+      statusCode: 409,
+      payload: negotiationValidationError("property_group_has_improvements", untransferablePropertyReason, "terms"),
+    };
+  }
 
   const acceptedEvents = [];
   for (const term of deal.terms) {
@@ -2839,6 +2846,22 @@ function unpayableDealCashReason(game, deal) {
   return null;
 }
 
+function untransferableDealPropertyReason(game, deal) {
+  for (const term of deal.terms) {
+    if (
+      !isObject(term) ||
+      (term.kind !== "property_transfer" && term.kind !== "immediate_property_transfer")
+    ) {
+      continue;
+    }
+    const property = propertyById(term.property_id);
+    if (property && propertyGroupHasImprovements(game, property)) {
+      return `${property.name} cannot transfer while its color group has improvements`;
+    }
+  }
+  return null;
+}
+
 function propertyCompletesPlayerGroup(game, playerId, property) {
   const group = propertyGroupData.find((candidate) => candidate.id === property.group);
   if (!group || !Array.isArray(group.property_ids) || group.property_ids.length <= 1) {
@@ -2882,6 +2905,10 @@ function aiDealRejectionReason(game, deal, responderPlayerId) {
   const unpayableReason = unpayableDealCashReason(game, deal);
   if (unpayableReason) {
     return unpayableReason;
+  }
+  const untransferablePropertyReason = untransferableDealPropertyReason(game, deal);
+  if (untransferablePropertyReason) {
+    return untransferablePropertyReason;
   }
 
   for (const term of deal.terms) {

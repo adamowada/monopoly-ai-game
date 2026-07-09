@@ -2098,6 +2098,113 @@ describe("mock API AI strategy", () => {
     expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
   });
 
+  it("refuses to execute a property transfer from an improved color group", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-improved-group-execute",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_st_james_place", seat_order: 2 },
+            { property_id: "property_tennessee_avenue", seat_order: 2 },
+            { property_id: "property_new_york_avenue", seat_order: 2 },
+          ],
+          property_improvements: [{ property_id: "property_new_york_avenue", houses: 1, hotel: false }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "block_opponent_street_group",
+      group: "orange",
+      group_name: "Orange",
+      property_group_kind: "street",
+      actor_owned_property_ids: [],
+      actor_owned_property_names: [],
+      opponent_player_id: lin.id,
+      opponent_player_name: lin.name,
+      opponent_owned_property_ids: [
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+      ],
+      opponent_owned_property_names: ["St. James Place", "Tennessee Avenue", "New York Avenue"],
+      target_property_id: "property_tennessee_avenue",
+      target_property_name: "Tennessee Avenue",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Execution must not dismantle an improved Orange set.",
+    });
+    const invalidTransfer = await createDeal(baseUrl, game.id, {
+      negotiation_id: opened.negotiation?.id,
+      proposer_player_id: ada.id,
+      participant_player_ids: [ada.id, lin.id],
+      parent_deal_id: null,
+      terms: [
+        {
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 900,
+        },
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_tennessee_avenue",
+        },
+      ],
+    });
+    await postJson<{ deal: { id: string; status: string }; status: string }>(
+      baseUrl,
+      `/games/${game.id}/deals/${invalidTransfer.deal.id}/accept`,
+      {},
+    );
+
+    const rejectedExecution = await postJsonRejected<{
+      reason_code: string;
+      validation_errors: Array<{ message: string }>;
+    }>(baseUrl, `/games/${game.id}/negotiations/${opened.negotiation?.id ?? ""}/execute`, {}, 409);
+
+    expect(rejectedExecution).toEqual(
+      expect.objectContaining({
+        reason_code: "property_group_has_improvements",
+      }),
+    );
+    expect(rejectedExecution.validation_errors[0]?.message).toContain("improvements");
+
+    const stateAfterRejection = await getJson<{
+      state: {
+        players: Array<{ cash: number; id: string }>;
+        property_ownership: Array<{ houses?: number; owner_id: string | null; property_id: string }>;
+      };
+    }>(baseUrl, `/games/${game.id}/state`);
+    expect(stateAfterRejection.state.property_ownership).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ owner_id: lin.id, property_id: "property_tennessee_avenue" }),
+        expect.objectContaining({ houses: 1, owner_id: lin.id, property_id: "property_new_york_avenue" }),
+      ]),
+    );
+    expect(stateAfterRejection.state.players.find((player) => player.id === ada.id)?.cash).toBe(1500);
+    expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
+  });
+
   it("rejects a cash offer that would break the seller's completed monopoly", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {
