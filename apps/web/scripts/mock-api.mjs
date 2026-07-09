@@ -1352,6 +1352,18 @@ function validateDealMutation(game, dealId, action) {
   return { deal, error: null };
 }
 
+function dealAcceptanceValidationError(game, deal) {
+  const unpayableReason = unpayableDealCashReason(game, deal);
+  if (unpayableReason) {
+    return negotiationValidationError("insufficient_cash_for_deal", unpayableReason, "terms");
+  }
+  const untransferablePropertyReason = untransferableDealPropertyReason(game, deal);
+  if (untransferablePropertyReason) {
+    return negotiationValidationError("property_group_has_improvements", untransferablePropertyReason, "terms");
+  }
+  return null;
+}
+
 function acceptDealRecord(game, deal) {
   const acceptedAt = nowIso();
   deal.status = "accepted";
@@ -4021,6 +4033,47 @@ function setMockPlayerPosition(gameId, seatOrder, position) {
   return { state: "updated", game };
 }
 
+function setMockPlayerCash(gameId, seatOrder, cash) {
+  const game = games.get(gameId);
+  if (!game) {
+    return { state: "missing-game" };
+  }
+  const player = game.players.find((candidate) => candidate.seat_order === seatOrder);
+  if (!player) {
+    return { state: "missing-player" };
+  }
+  const updatedAt = nowIso();
+  player.state = {
+    ...player.state,
+    cash,
+  };
+  player.updated_at = updatedAt;
+  game.updated_at = updatedAt;
+  return { state: "updated", game };
+}
+
+function setMockPropertyImprovements(gameId, propertyId, houses, hotel) {
+  const game = games.get(gameId);
+  if (!game) {
+    return { state: "missing-game" };
+  }
+  const property = propertyById(propertyId);
+  if (!property) {
+    return { state: "missing-property" };
+  }
+  if (property.kind !== "street") {
+    return { state: "invalid-property-kind" };
+  }
+  const ownership = propertyOwnership(game, propertyId);
+  if (!ownership) {
+    return { state: "missing-ownership" };
+  }
+  setPropertyOwnership(game, propertyId, { houses: hotel ? 0 : houses, hotel });
+  refreshBankInventoryFromOwnership(game);
+  game.updated_at = nowIso();
+  return { state: "updated", game };
+}
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
@@ -4070,6 +4123,71 @@ const server = createServer(async (request, response) => {
       }
       if (result.state === "missing-player") {
         json(response, 404, { error: "player not found" });
+        return;
+      }
+
+      json(response, 200, result.game);
+      return;
+    } catch {
+      json(response, 400, { detail: [validationError("request body must be valid JSON")] });
+      return;
+    }
+  }
+
+  const cashMatch = url.pathname.match(/^\/__test\/games\/([^/]+)\/players\/(\d+)\/cash$/);
+  if (request.method === "POST" && cashMatch) {
+    try {
+      const payload = await readBody(request);
+      const cash = payload.cash;
+      if (!Number.isInteger(cash) || cash < 0) {
+        json(response, 422, { detail: [validationError("cash must be a nonnegative integer", "cash")] });
+        return;
+      }
+
+      const gameId = decodeURIComponent(cashMatch[1]);
+      const seatOrder = Number.parseInt(cashMatch[2], 10);
+      const result = setMockPlayerCash(gameId, seatOrder, cash);
+      if (result.state === "missing-game") {
+        json(response, 404, { error: "game not found" });
+        return;
+      }
+      if (result.state === "missing-player") {
+        json(response, 404, { error: "player not found" });
+        return;
+      }
+
+      json(response, 200, result.game);
+      return;
+    } catch {
+      json(response, 400, { detail: [validationError("request body must be valid JSON")] });
+      return;
+    }
+  }
+
+  const improvementsMatch = url.pathname.match(/^\/__test\/games\/([^/]+)\/properties\/([^/]+)\/improvements$/);
+  if (request.method === "POST" && improvementsMatch) {
+    try {
+      const payload = await readBody(request);
+      const houses = payload.houses;
+      const hotel = payload.hotel === true;
+      if (!Number.isInteger(houses) || houses < 0 || houses > 4) {
+        json(response, 422, { detail: [validationError("houses must be an integer from 0 through 4", "houses")] });
+        return;
+      }
+
+      const gameId = decodeURIComponent(improvementsMatch[1]);
+      const propertyId = decodeURIComponent(improvementsMatch[2]);
+      const result = setMockPropertyImprovements(gameId, propertyId, houses, hotel);
+      if (result.state === "missing-game") {
+        json(response, 404, { error: "game not found" });
+        return;
+      }
+      if (result.state === "missing-property" || result.state === "missing-ownership") {
+        json(response, 404, { error: "property not found" });
+        return;
+      }
+      if (result.state === "invalid-property-kind") {
+        json(response, 422, { detail: [validationError("improvements require a street property", "property_id")] });
         return;
       }
 
@@ -4405,6 +4523,11 @@ const server = createServer(async (request, response) => {
     const result = validateDealMutation(game, dealId, "accept");
     if (result.error) {
       json(response, 409, result.error);
+      return;
+    }
+    const acceptanceValidation = dealAcceptanceValidationError(game, result.deal);
+    if (acceptanceValidation) {
+      json(response, 409, acceptanceValidation);
       return;
     }
     json(response, 200, { status: "ok", deal: acceptDealRecord(game, result.deal) });

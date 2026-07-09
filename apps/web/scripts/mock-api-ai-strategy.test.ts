@@ -2000,10 +2000,10 @@ describe("mock API AI strategy", () => {
     expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
   });
 
-  it("refuses to execute an accepted negotiation when a payer no longer has the cash", async () => {
+  it("refuses to accept a direct deal when a payer cannot cover outgoing cash", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {
-      seed: "stage-10-5-debug-unpayable-execute",
+      seed: "stage-10-5-debug-unpayable-direct-accept",
       players: [
         { name: "Ada", kind: "ai" },
         { name: "Grace", kind: "ai" },
@@ -2065,11 +2065,87 @@ describe("mock API AI strategy", () => {
         },
       ],
     });
+
+    const rejectedAccept = await postJsonRejected<{
+      reason_code: string;
+      validation_errors: Array<{ message: string }>;
+    }>(baseUrl, `/games/${game.id}/deals/${unpayable.deal.id}/accept`, {}, 409);
+
+    expect(rejectedAccept).toEqual(expect.objectContaining({ reason_code: "insufficient_cash_for_deal" }));
+    expect(rejectedAccept.validation_errors[0]?.message).toContain("cannot pay");
+  });
+
+  it("refuses to execute an accepted negotiation when a payer no longer has the cash", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-unpayable-execute",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          player_cash: [
+            { seat_order: 0, cash: 600 },
+            { seat_order: 1, cash: 1500 },
+            { seat_order: 2, cash: 1500 },
+          ],
+          property_owners: [{ property_id: "property_reading_railroad", seat_order: 2 }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "complete_railroad_group",
+      group: "railroad",
+      group_name: "Railroads",
+      property_group_kind: "railroad",
+      actor_owned_property_ids: [],
+      actor_owned_property_names: [],
+      target_property_id: "property_reading_railroad",
+      target_property_name: "Reading Railroad",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Ada wants Reading Railroad but cannot pay this deal.",
+    });
+    const unpayable = await createDeal(baseUrl, game.id, {
+      negotiation_id: opened.negotiation?.id,
+      proposer_player_id: ada.id,
+      participant_player_ids: [ada.id, lin.id],
+      parent_deal_id: null,
+      terms: [
+        {
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 500,
+        },
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_reading_railroad",
+        },
+      ],
+    });
     await postJson<{ deal: { id: string; status: string }; status: string }>(
       baseUrl,
       `/games/${game.id}/deals/${unpayable.deal.id}/accept`,
       {},
     );
+    await postJson<MockGame>(baseUrl, `/__test/games/${game.id}/players/0/cash`, { cash: 100 });
 
     const rejectedExecution = await postJsonRejected<{
       reason_code: string;
@@ -2098,6 +2174,89 @@ describe("mock API AI strategy", () => {
     expect(stateAfterRejection.state.players.find((player) => player.id === lin.id)?.cash).toBe(1500);
   });
 
+  it("refuses to accept a direct deal that transfers from an improved color group", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-improved-group-direct-accept",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_st_james_place", seat_order: 2 },
+            { property_id: "property_tennessee_avenue", seat_order: 2 },
+            { property_id: "property_new_york_avenue", seat_order: 2 },
+          ],
+          property_improvements: [{ property_id: "property_new_york_avenue", houses: 1, hotel: false }],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+    const opened = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "block_opponent_street_group",
+      group: "orange",
+      group_name: "Orange",
+      property_group_kind: "street",
+      actor_owned_property_ids: [],
+      actor_owned_property_names: [],
+      opponent_player_id: lin.id,
+      opponent_player_name: lin.name,
+      opponent_owned_property_ids: [
+        "property_st_james_place",
+        "property_tennessee_avenue",
+        "property_new_york_avenue",
+      ],
+      opponent_owned_property_names: ["St. James Place", "Tennessee Avenue", "New York Avenue"],
+      target_property_id: "property_tennessee_avenue",
+      target_property_name: "Tennessee Avenue",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Direct accept must not dismantle an improved Orange set.",
+    });
+    const invalidTransfer = await createDeal(baseUrl, game.id, {
+      negotiation_id: opened.negotiation?.id,
+      proposer_player_id: ada.id,
+      participant_player_ids: [ada.id, lin.id],
+      parent_deal_id: null,
+      terms: [
+        {
+          kind: "immediate_cash_transfer",
+          from_player_id: ada.id,
+          to_player_id: lin.id,
+          amount: 900,
+        },
+        {
+          kind: "immediate_property_transfer",
+          from_player_id: lin.id,
+          to_player_id: ada.id,
+          property_id: "property_tennessee_avenue",
+        },
+      ],
+    });
+
+    const rejectedAccept = await postJsonRejected<{
+      reason_code: string;
+      validation_errors: Array<{ message: string }>;
+    }>(baseUrl, `/games/${game.id}/deals/${invalidTransfer.deal.id}/accept`, {}, 409);
+
+    expect(rejectedAccept).toEqual(expect.objectContaining({ reason_code: "property_group_has_improvements" }));
+    expect(rejectedAccept.validation_errors[0]?.message).toContain("improvements");
+  });
+
   it("refuses to execute a property transfer from an improved color group", async () => {
     const baseUrl = await startMockApi();
     const game = await createGame(baseUrl, {
@@ -2123,7 +2282,6 @@ describe("mock API AI strategy", () => {
             { property_id: "property_tennessee_avenue", seat_order: 2 },
             { property_id: "property_new_york_avenue", seat_order: 2 },
           ],
-          property_improvements: [{ property_id: "property_new_york_avenue", houses: 1, hotel: false }],
         },
       },
     });
@@ -2176,6 +2334,10 @@ describe("mock API AI strategy", () => {
       `/games/${game.id}/deals/${invalidTransfer.deal.id}/accept`,
       {},
     );
+    await postJson<MockGame>(baseUrl, `/__test/games/${game.id}/properties/property_new_york_avenue/improvements`, {
+      houses: 1,
+      hotel: false,
+    });
 
     const rejectedExecution = await postJsonRejected<{
       reason_code: string;
