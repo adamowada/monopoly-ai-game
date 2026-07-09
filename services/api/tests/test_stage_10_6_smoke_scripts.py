@@ -127,6 +127,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "orange_good_deal_acceptance" in source
     assert "orange_overpriced_deal_rejection" in source
     assert "orange_overpriced_deal_counteroffer" in source
+    assert "railroad_overpriced_deal_counteroffer" in source
+    assert "utility_overpriced_deal_counteroffer" in source
     assert "orange_cash_draining_deal_rejection" in source
     assert "orange_cash_draining_deal_counteroffer" in source
     assert "orange_monopoly_breakup_deal_rejection" in source
@@ -1409,6 +1411,91 @@ def test_live_codex_strategy_smoke_counteroffer_has_context_pack_guidance() -> N
     assert cash_draining_template["negotiation_id"] == str(module.NEGOTIATION_ID)
     assert cash_draining_template["target_property_id"] == "property_tennessee_avenue"
     assert cash_draining_template["recommended_cash_amount"] == 200
+
+
+def test_live_codex_strategy_smoke_non_street_counteroffers_have_context_pack_guidance() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    railroad_case = cases["railroad_overpriced_deal_counteroffer"]
+    railroad_state = railroad_case.state_factory(railroad_case.game_id)
+    railroad_pack = module.build_ai_context_pack(
+        railroad_state,
+        player_id=str(railroad_case.actor_player_id),
+        decision_type=railroad_case.decision_type,
+        negotiations=module._negotiations(railroad_case),
+        negotiation_messages=module._negotiation_messages(railroad_case),
+        deals=module._deals(railroad_case),
+        rule_snippets=module._strategy_rule_snippets(railroad_case),
+    )
+
+    railroad_guidance = railroad_pack["counteroffer_guidance"]
+    assert railroad_guidance["recommended_decision_types"] == ["counteroffer"]
+    railroad_template = railroad_guidance["counteroffer_templates"][0]
+    railroad_payload = railroad_template["counteroffer_payload_template"]
+    assert railroad_template["responds_to_deal_id"] == str(
+        module.OVERPRICED_RAILROAD_DEAL_ID
+    )
+    assert railroad_template["reason_code"] == (
+        "receives_property_that_completes_actor_railroad_group_above_value_ceiling"
+    )
+    assert railroad_template["target_property_id"] == "property_short_line_railroad"
+    assert railroad_template["recommended_cash_amount"] == 300
+    assert railroad_template["maximum_cash_value_ceiling"] == 300
+    assert railroad_payload["terms"]["terms"] == [
+        {
+            "kind": "immediate_cash_transfer",
+            "from_player_id": str(module.AI_PLAYER_ID),
+            "to_player_id": str(module.OTHER_PLAYER_ID),
+            "amount": 300,
+        },
+        {
+            "kind": "immediate_property_transfer",
+            "from_player_id": str(module.OTHER_PLAYER_ID),
+            "to_player_id": str(module.AI_PLAYER_ID),
+            "property_id": "property_short_line_railroad",
+        },
+    ]
+
+    utility_case = cases["utility_overpriced_deal_counteroffer"]
+    utility_state = utility_case.state_factory(utility_case.game_id)
+    utility_pack = module.build_ai_context_pack(
+        utility_state,
+        player_id=str(utility_case.actor_player_id),
+        decision_type=utility_case.decision_type,
+        negotiations=module._negotiations(utility_case),
+        negotiation_messages=module._negotiation_messages(utility_case),
+        deals=module._deals(utility_case),
+        rule_snippets=module._strategy_rule_snippets(utility_case),
+    )
+
+    utility_guidance = utility_pack["counteroffer_guidance"]
+    assert utility_guidance["recommended_decision_types"] == ["counteroffer"]
+    utility_template = utility_guidance["counteroffer_templates"][0]
+    utility_payload = utility_template["counteroffer_payload_template"]
+    assert utility_template["responds_to_deal_id"] == str(
+        module.OVERPRICED_UTILITY_DEAL_ID
+    )
+    assert utility_template["reason_code"] == (
+        "receives_property_that_completes_actor_utility_group_above_value_ceiling"
+    )
+    assert utility_template["target_property_id"] == "property_water_works"
+    assert utility_template["recommended_cash_amount"] == 225
+    assert utility_template["maximum_cash_value_ceiling"] == 225
+    assert utility_payload["terms"]["terms"] == [
+        {
+            "kind": "immediate_cash_transfer",
+            "from_player_id": str(module.AI_PLAYER_ID),
+            "to_player_id": str(module.OTHER_PLAYER_ID),
+            "amount": 225,
+        },
+        {
+            "kind": "immediate_property_transfer",
+            "from_player_id": str(module.OTHER_PLAYER_ID),
+            "to_player_id": str(module.AI_PLAYER_ID),
+            "property_id": "property_water_works",
+        },
+    ]
 
 
 def test_live_codex_strategy_smoke_monopoly_breakup_deal_has_rejection_guidance() -> None:
