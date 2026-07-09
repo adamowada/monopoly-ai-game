@@ -2109,9 +2109,36 @@ function sampleAiDealTerms(game, negotiation, proposerPlayerId) {
   ];
 }
 
+function tradeOpportunityContext(payload) {
+  const requestContext = isObject(payload.request_context) ? payload.request_context : {};
+  const tradeOpportunity = isObject(requestContext.trade_opportunity) ? requestContext.trade_opportunity : null;
+  if (!tradeOpportunity) {
+    return null;
+  }
+  const targetOwnerId = typeof tradeOpportunity.target_owner_id === "string" ? tradeOpportunity.target_owner_id : null;
+  const targetPropertyName =
+    typeof tradeOpportunity.target_property_name === "string" ? tradeOpportunity.target_property_name : null;
+  const groupName = typeof tradeOpportunity.group_name === "string" ? tradeOpportunity.group_name : null;
+  if (!targetOwnerId || !targetPropertyName || !groupName) {
+    return null;
+  }
+  const kind = typeof tradeOpportunity.kind === "string" ? tradeOpportunity.kind : "";
+  const actionVerb = kind.startsWith("block_opponent_") ? "block" : "complete";
+  const strategicReason =
+    typeof tradeOpportunity.strategic_reason === "string" ? tradeOpportunity.strategic_reason : "";
+  return {
+    participant_player_ids: [payload.player_id, targetOwnerId],
+    topic: `Trade for ${targetPropertyName} to ${actionVerb} ${groupName}`,
+    context: strategicReason || `Targeted AI trade for ${targetPropertyName}.`,
+  };
+}
+
 function applyMockAiNegotiationStep(game, payload, decision) {
   if (payload.decision_type === "open_negotiation") {
-    const recipient = game.players.find((player) => player.id !== payload.player_id && player.status === "active");
+    const tradeContext = tradeOpportunityContext(payload);
+    const recipient = tradeContext
+      ? playerById(game, tradeContext.participant_player_ids[1])
+      : game.players.find((player) => player.id !== payload.player_id && player.status === "active");
     if (!recipient) {
       const errors = [aiValidationError("participant_not_in_game", "open_negotiation requires another active player", "participant_player_ids")];
       const rejection = createRejectedAction(
@@ -2135,9 +2162,9 @@ function applyMockAiNegotiationStep(game, payload, decision) {
 
     const negotiation = createNegotiationRecord(game, {
       opened_by_player_id: payload.player_id,
-      participant_player_ids: [payload.player_id, recipient.id],
-      topic: "AI opened negotiation",
-      context: "Mock AI open_negotiation decision.",
+      participant_player_ids: tradeContext?.participant_player_ids ?? [payload.player_id, recipient.id],
+      topic: tradeContext?.topic ?? "AI opened negotiation",
+      context: tradeContext?.context ?? "Mock AI open_negotiation decision.",
     });
     decision.status = "accepted";
     decision.negotiation_id = negotiation.id;

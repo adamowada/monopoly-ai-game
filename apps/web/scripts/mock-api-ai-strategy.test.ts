@@ -15,6 +15,11 @@ type AiStepPayload = {
     event_type: string;
     payload: Record<string, unknown>;
   }>;
+  negotiation?: {
+    context?: string;
+    participant_player_ids?: string[];
+    topic?: string;
+  } | null;
   status: string;
 };
 
@@ -26,6 +31,7 @@ type LegalActionsPayload = {
 };
 
 type CreateGameOptions = {
+  players?: Array<{ kind: "ai" | "human"; name: string }>;
   seed?: string;
   settings?: Record<string, unknown>;
 };
@@ -119,17 +125,18 @@ async function getJson<T>(baseUrl: string, path: string): Promise<T> {
 }
 
 function createGame(baseUrl: string, options: CreateGameOptions = {}): Promise<MockGame> {
+  const players = options.players ?? [
+    { name: "Ada", kind: "ai" },
+    { name: "Grace", kind: "ai" },
+  ];
   return postJson<MockGame>(baseUrl, "/games", {
     seed: options.seed ?? "stage-10-5-two-human-full-round-ai-development",
-    players: [
-      { name: "Ada", kind: "ai" },
-      { name: "Grace", kind: "ai" },
-    ],
+    players,
     settings: options.settings ?? {
-      player_colors: [
-        { seat_order: 0, color: "#0f766e" },
-        { seat_order: 1, color: "#7c3aed" },
-      ],
+      player_colors: players.map((_, index) => ({
+        seat_order: index,
+        color: ["#0f766e", "#7c3aed", "#2563eb", "#dc2626", "#ca8a04"][index] ?? "#525252",
+      })),
       negotiation_cutoffs: {
         max_rounds: 8,
         max_proposals_per_player: 12,
@@ -144,6 +151,24 @@ function stepAi(baseUrl: string, gameId: string, playerId: string): Promise<AiSt
     decision_type: "action_decision",
     mandatory: true,
     mode: "auto",
+  });
+}
+
+function openNegotiationAi(
+  baseUrl: string,
+  gameId: string,
+  playerId: string,
+  tradeOpportunity: Record<string, unknown>,
+): Promise<AiStepPayload> {
+  return postJson<AiStepPayload>(baseUrl, `/games/${gameId}/ai/step`, {
+    player_id: playerId,
+    decision_type: "open_negotiation",
+    mandatory: false,
+    request_context: {
+      mode: "auto_negotiation",
+      selected_deal_id: null,
+      trade_opportunity: tradeOpportunity,
+    },
   });
 }
 
@@ -263,5 +288,72 @@ describe("mock API AI strategy", () => {
       state: { players: Array<{ cash: number; id: string }> };
     }>(baseUrl, `/games/${game.id}/state`);
     expect(stateAfterStep.state.players.find((player) => player.id === ada.id)?.cash).toBe(40);
+  });
+
+  it("uses targeted trade opportunities when opening mock AI debug negotiations", async () => {
+    const baseUrl = await startMockApi();
+    const game = await createGame(baseUrl, {
+      seed: "stage-10-5-debug-near-monopoly-negotiation",
+      players: [
+        { name: "Ada", kind: "ai" },
+        { name: "Grace", kind: "ai" },
+        { name: "Lin", kind: "ai" },
+      ],
+      settings: {
+        player_colors: [
+          { seat_order: 0, color: "#0f766e" },
+          { seat_order: 1, color: "#7c3aed" },
+          { seat_order: 2, color: "#2563eb" },
+        ],
+        negotiation_cutoffs: {
+          max_rounds: 8,
+          max_proposals_per_player: 12,
+        },
+        debug_allocations: {
+          property_owners: [
+            { property_id: "property_st_james_place", seat_order: 0 },
+            { property_id: "property_new_york_avenue", seat_order: 0 },
+            { property_id: "property_tennessee_avenue", seat_order: 2 },
+          ],
+        },
+      },
+    });
+    const ada = game.players[0];
+    const lin = game.players[2];
+
+    const result = await openNegotiationAi(baseUrl, game.id, ada.id, {
+      kind: "complete_street_group",
+      group: "orange",
+      group_name: "Orange",
+      property_group_kind: "street",
+      actor_owned_property_ids: ["property_st_james_place", "property_new_york_avenue"],
+      actor_owned_property_names: ["St. James Place", "New York Avenue"],
+      target_property_id: "property_tennessee_avenue",
+      target_property_name: "Tennessee Avenue",
+      target_owner_id: lin.id,
+      target_owner_name: lin.name,
+      participants: [ada.id, lin.id],
+      strategic_reason: "Completing Orange unlocks development and materially raises rent pressure.",
+    });
+
+    expect(result.status).toBe("done");
+    expect(result.negotiation).toEqual(
+      expect.objectContaining({
+        participant_player_ids: [ada.id, lin.id],
+        topic: "Trade for Tennessee Avenue to complete Orange",
+        context: expect.stringContaining("Completing Orange unlocks development"),
+      }),
+    );
+
+    const negotiations = await getJson<{ negotiations: Array<{ participant_player_ids: string[]; topic: string }> }>(
+      baseUrl,
+      `/games/${game.id}/negotiations`,
+    );
+    expect(negotiations.negotiations[0]).toEqual(
+      expect.objectContaining({
+        participant_player_ids: [ada.id, lin.id],
+        topic: "Trade for Tennessee Avenue to complete Orange",
+      }),
+    );
   });
 });
