@@ -2867,6 +2867,9 @@ function aiDealRejectionReason(game, deal, responderPlayerId) {
     if (!buyerPlayerId || !property) {
       continue;
     }
+    if (propertyGroupHasImprovements(game, property)) {
+      return `${property.name} cannot transfer while its color group has improvements`;
+    }
     const offeredCash = dealCashTransferAmount(deal, buyerPlayerId, responderPlayerId);
     if (propertyCompletesPlayerGroup(game, buyerPlayerId, property)) {
       const strategicFloor = monopolyCompletionOfferFloor(game, buyerPlayerId, property);
