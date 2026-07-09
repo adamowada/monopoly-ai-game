@@ -376,6 +376,22 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_utility_good_deal_acceptance,
         ),
         StrategySmokeCase(
+            name="railroad_bad_deal_rejection",
+            game_id=UUID("00000000-0000-0000-0000-00000000b23c"),
+            decision_type="accept_reject",
+            state_factory=_railroad_near_set_state,
+            verifier=_verify_railroad_bad_deal_rejection,
+            actor_player_id=OTHER_PLAYER_ID,
+        ),
+        StrategySmokeCase(
+            name="utility_bad_deal_rejection",
+            game_id=UUID("00000000-0000-0000-0000-00000000b23d"),
+            decision_type="accept_reject",
+            state_factory=_utility_near_set_state,
+            verifier=_verify_utility_bad_deal_rejection,
+            actor_player_id=OTHER_PLAYER_ID,
+        ),
+        StrategySmokeCase(
             name="orange_bad_deal_rejection",
             game_id=UUID("00000000-0000-0000-0000-00000000b204"),
             decision_type="accept_reject",
@@ -995,6 +1011,28 @@ def _verify_utility_good_deal_acceptance(parsed: dict[str, Any]) -> None:
     )
 
 
+def _verify_railroad_bad_deal_rejection(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(LOWBALL_RAILROAD_DEAL_ID)
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
+
+
+def _verify_utility_bad_deal_rejection(parsed: dict[str, Any]) -> None:
+    accept_reject = _dict(parsed.get("accept_reject"))
+
+    assert parsed.get("decision_type") == "accept_reject"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert accept_reject.get("deal_id") == str(LOWBALL_UTILITY_DEAL_ID)
+    assert accept_reject.get("decision") == "reject", (
+        f"expected reject, got {accept_reject.get('decision')}"
+    )
+
+
 def _verify_orange_overpriced_deal_rejection(parsed: dict[str, Any]) -> None:
     accept_reject = _dict(parsed.get("accept_reject"))
 
@@ -1167,6 +1205,34 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
                     "price while preserving liquidity."
                 ),
             }
+        if case.name == "railroad_bad_deal_rejection":
+            return {
+                "mode": "live_strategy_smoke",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "deal_id": str(LOWBALL_RAILROAD_DEAL_ID),
+                "requested_decision": (
+                    "Respond to the current offer. Grace offers Ada $1 for Short Line "
+                    "Railroad, which would complete Grace's railroad set."
+                ),
+                "strategic_position": (
+                    "Ada owns Short Line Railroad and should protect railroad-set leverage "
+                    "unless paid a fair premium."
+                ),
+            }
+        if case.name == "utility_bad_deal_rejection":
+            return {
+                "mode": "live_strategy_smoke",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "deal_id": str(LOWBALL_UTILITY_DEAL_ID),
+                "requested_decision": (
+                    "Respond to the current offer. Grace offers Ada $1 for Water Works, "
+                    "which would complete Grace's utility set."
+                ),
+                "strategic_position": (
+                    "Ada owns Water Works and should protect utility-set leverage unless "
+                    "paid a fair premium."
+                ),
+            }
         return {
             "mode": "live_strategy_smoke",
             "negotiation_id": str(NEGOTIATION_ID),
@@ -1235,6 +1301,10 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         current_deal_id = str(FAIR_RAILROAD_DEAL_ID)
     elif case.name == "utility_good_deal_acceptance":
         current_deal_id = str(FAIR_UTILITY_DEAL_ID)
+    elif case.name == "railroad_bad_deal_rejection":
+        current_deal_id = str(LOWBALL_RAILROAD_DEAL_ID)
+    elif case.name == "utility_bad_deal_rejection":
+        current_deal_id = str(LOWBALL_UTILITY_DEAL_ID)
     elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         current_deal_id = str(OVERPRICED_DEAL_ID)
     elif case.name in {"orange_cash_draining_deal_rejection", "orange_cash_draining_deal_counteroffer"}:
@@ -1270,7 +1340,11 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
                 "created_at": "2026-07-08T00:00:00Z",
             },
         )
-    if case.name in {"utility_near_set_deal_proposal", "utility_good_deal_acceptance"}:
+    if case.name in {
+        "utility_near_set_deal_proposal",
+        "utility_good_deal_acceptance",
+        "utility_bad_deal_rejection",
+    }:
         return (
             {
                 "id": str(NEGOTIATION_ID),
@@ -1299,7 +1373,11 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
                 "created_at": "2026-07-08T00:00:00Z",
             },
         )
-    if case.name in {"railroad_near_set_deal_proposal", "railroad_good_deal_acceptance"}:
+    if case.name in {
+        "railroad_near_set_deal_proposal",
+        "railroad_good_deal_acceptance",
+        "railroad_bad_deal_rejection",
+    }:
         return (
             {
                 "id": str(NEGOTIATION_ID),
@@ -1406,6 +1484,32 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "recipient_player_id": str(AI_PLAYER_ID),
                 "message_type": "freeform_message",
                 "body": "I can sell Water Works for $187 so you complete Utilities.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
+    if case.name == "railroad_bad_deal_rejection":
+        return (
+            {
+                "id": "live-strategy-lowball-railroad-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(AI_PLAYER_ID),
+                "recipient_player_id": str(OTHER_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I will pay $1 for Short Line Railroad so I can complete Railroads.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:02Z",
+            },
+        )
+    if case.name == "utility_bad_deal_rejection":
+        return (
+            {
+                "id": "live-strategy-lowball-utility-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(AI_PLAYER_ID),
+                "recipient_player_id": str(OTHER_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": "I will pay $1 for Water Works so I can complete Utilities.",
                 "payload": {"message_type": "freeform_message"},
                 "created_at": "2026-07-08T00:00:02Z",
             },
@@ -1524,6 +1628,14 @@ def _deals(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
         deal_id = FAIR_UTILITY_DEAL_ID
         terms = _fair_utility_deal_terms()
         proposer_id = OTHER_PLAYER_ID
+    elif case.name == "railroad_bad_deal_rejection":
+        deal_id = LOWBALL_RAILROAD_DEAL_ID
+        terms = _lowball_railroad_deal_terms()
+        proposer_id = AI_PLAYER_ID
+    elif case.name == "utility_bad_deal_rejection":
+        deal_id = LOWBALL_UTILITY_DEAL_ID
+        terms = _lowball_utility_deal_terms()
+        proposer_id = AI_PLAYER_ID
     elif case.name in {"orange_overpriced_deal_rejection", "orange_overpriced_deal_counteroffer"}:
         deal_id = OVERPRICED_DEAL_ID
         terms = _good_deal_terms(amount=400)
@@ -2032,6 +2144,32 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     ),
                 },
             )
+        if case.name == "railroad_bad_deal_rejection":
+            return (
+                {
+                    "id": "live-strategy-reject-lowball-railroad-enabler",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Ada owns Short Line Railroad. "
+                        "Reject a proposal that gives Short Line Railroad to Grace for only "
+                        "$1 because it completes Grace's railroad set and gives Ada far "
+                        "below the $300 strategic floor."
+                    ),
+                },
+            )
+        if case.name == "utility_bad_deal_rejection":
+            return (
+                {
+                    "id": "live-strategy-reject-lowball-utility-enabler",
+                    "source": "strategy-smoke",
+                    "text": (
+                        "For this accept_reject decision, Ada owns Water Works. Reject a "
+                        "proposal that gives Water Works to Grace for only $1 because it "
+                        "completes Grace's utility set and gives Ada far below the $225 "
+                        "strategic floor."
+                    ),
+                },
+            )
         if case.name == "orange_overpriced_deal_rejection":
             return (
                 {
@@ -2149,6 +2287,8 @@ CASH_DRAINING_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b305")
 BREAKUP_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b306")
 FAIR_RAILROAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b307")
 FAIR_UTILITY_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b308")
+LOWBALL_RAILROAD_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b309")
+LOWBALL_UTILITY_DEAL_ID = UUID("00000000-0000-0000-0000-00000000b30a")
 
 
 def _bad_deal_terms() -> dict[str, Any]:
@@ -2243,6 +2383,56 @@ def _fair_utility_deal_terms(*, amount: int = 187) -> dict[str, Any]:
             {
                 "kind": "immediate_property_transfer",
                 "instrument_id": "live-strategy-fair-water-works-transfer",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_water_works",
+            },
+        ],
+    }
+
+
+def _lowball_railroad_deal_terms(*, amount: int = 1) -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-lowball-railroad-completer",
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-lowball-railroad-cash",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "amount": amount,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-lowball-short-line-transfer",
+                "from_player_id": str(OTHER_PLAYER_ID),
+                "to_player_id": str(AI_PLAYER_ID),
+                "property_id": "property_short_line_railroad",
+            },
+        ],
+    }
+
+
+def _lowball_utility_deal_terms(*, amount: int = 1) -> dict[str, Any]:
+    return {
+        "kind": "structured_deal",
+        "deal_schema_version": 1,
+        "participants": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+        "terms_hash": "live-strategy-lowball-utility-completer",
+        "terms": [
+            {
+                "kind": "immediate_cash_transfer",
+                "instrument_id": "live-strategy-lowball-utility-cash",
+                "from_player_id": str(AI_PLAYER_ID),
+                "to_player_id": str(OTHER_PLAYER_ID),
+                "amount": amount,
+            },
+            {
+                "kind": "immediate_property_transfer",
+                "instrument_id": "live-strategy-lowball-water-works-transfer",
                 "from_player_id": str(OTHER_PLAYER_ID),
                 "to_player_id": str(AI_PLAYER_ID),
                 "property_id": "property_water_works",

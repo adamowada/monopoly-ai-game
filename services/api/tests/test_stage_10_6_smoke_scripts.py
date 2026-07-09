@@ -121,6 +121,8 @@ def test_live_codex_strategy_smoke_checks_monopoly_development_and_negotiation()
     assert "utility_near_set_deal_proposal" in source
     assert "railroad_good_deal_acceptance" in source
     assert "utility_good_deal_acceptance" in source
+    assert "railroad_bad_deal_rejection" in source
+    assert "utility_bad_deal_rejection" in source
     assert "orange_bad_deal_rejection" in source
     assert "orange_good_deal_acceptance" in source
     assert "orange_overpriced_deal_rejection" in source
@@ -964,6 +966,65 @@ def test_live_codex_strategy_smoke_bad_deal_has_context_pack_rejection_guidance(
     assert guidance["deal_evaluations"][0]["risk"]["property_id"] == "property_tennessee_avenue"
     assert guidance["deal_evaluations"][0]["risk"]["minimum_cash_value_floor"] == 270
     assert guidance["deal_evaluations"][0]["risk"]["cash_value_gap"] == 269
+
+
+def test_live_codex_strategy_smoke_non_street_lowball_deals_have_rejection_guidance() -> None:
+    module = _load_live_strategy_smoke_module()
+    cases = {case.name: case for case in module._strategy_cases()}
+
+    railroad_case = cases["railroad_bad_deal_rejection"]
+    railroad_state = railroad_case.state_factory(railroad_case.game_id)
+    railroad_pack = module.build_ai_context_pack(
+        railroad_state,
+        player_id=str(railroad_case.actor_player_id),
+        decision_type=railroad_case.decision_type,
+        negotiations=module._negotiations(railroad_case),
+        negotiation_messages=module._negotiation_messages(railroad_case),
+        deals=module._deals(railroad_case),
+        rule_snippets=module._strategy_rule_snippets(railroad_case),
+    )
+
+    railroad_guidance = railroad_pack["deal_evaluation_guidance"]
+    assert railroad_guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.LOWBALL_RAILROAD_DEAL_ID): "reject"
+    }
+    railroad_evaluation = railroad_guidance["deal_evaluations"][0]
+    assert railroad_evaluation["reason_code"] == (
+        "transfers_property_that_completes_opponent_railroad_group_below_floor"
+    )
+    railroad_risk = railroad_evaluation["risk"]
+    assert railroad_risk["kind"] == "opponent_railroad_group_completion"
+    assert railroad_risk["property_group_kind"] == "railroad"
+    assert railroad_risk["property_id"] == "property_short_line_railroad"
+    assert railroad_risk["minimum_cash_value_floor"] == 300
+    assert railroad_risk["cash_value_gap"] == 299
+
+    utility_case = cases["utility_bad_deal_rejection"]
+    utility_state = utility_case.state_factory(utility_case.game_id)
+    utility_pack = module.build_ai_context_pack(
+        utility_state,
+        player_id=str(utility_case.actor_player_id),
+        decision_type=utility_case.decision_type,
+        negotiations=module._negotiations(utility_case),
+        negotiation_messages=module._negotiation_messages(utility_case),
+        deals=module._deals(utility_case),
+        rule_snippets=module._strategy_rule_snippets(utility_case),
+    )
+
+    utility_guidance = utility_pack["deal_evaluation_guidance"]
+    assert utility_guidance["recommended_accept_reject_by_deal_id"] == {
+        str(module.LOWBALL_UTILITY_DEAL_ID): "reject"
+    }
+    utility_evaluation = utility_guidance["deal_evaluations"][0]
+    assert utility_evaluation["reason_code"] == (
+        "transfers_property_that_completes_opponent_utility_group_below_floor"
+    )
+    utility_risk = utility_evaluation["risk"]
+    assert utility_risk["kind"] == "opponent_utility_group_completion"
+    assert utility_risk["property_group_kind"] == "utility"
+    assert utility_risk["property_id"] == "property_water_works"
+    assert utility_risk["minimum_cash_value_floor"] == 225
+    assert utility_risk["cash_value_gap"] == 224
 
 
 def test_live_codex_strategy_smoke_deal_proposal_uses_context_pack_template() -> None:
