@@ -3217,6 +3217,23 @@ function chooseMockAuctionAiAction(game, playerId) {
   return bidAction;
 }
 
+function chooseMockPurchaseOrAuctionAction(game, playerId, legalActions) {
+  const buyAction = legalActions.find((action) => action.type === "BUY_PROPERTY") ?? null;
+  const auctionAction = legalActions.find((action) => action.type === "START_AUCTION") ?? null;
+  if (!buyAction) {
+    return auctionAction;
+  }
+  if (!auctionAction) {
+    return buyAction;
+  }
+  const propertyId = typeof buyAction.payload?.property_id === "string" ? buyAction.payload.property_id : null;
+  const property = propertyById(propertyId);
+  if (!property || !Number.isInteger(property.price)) {
+    return buyAction;
+  }
+  return property.price <= auctionBidCeiling(game, playerId, property.id) ? buyAction : auctionAction;
+}
+
 function applyMockAiAuctionStep(game, payload, decision) {
   const action = chooseMockAuctionAiAction(game, payload.player_id);
   if (!action) {
@@ -3298,6 +3315,9 @@ function chooseMockTurnAiAction(game, playerId) {
   const legalActions = legalActionsFor(game, playerId);
   const debt = game.pending_debt;
   const hasActiveDebt = game.current_phase === "PAYMENT_RESOLUTION" && debt?.debtor_player_id === playerId;
+  if (!hasActiveDebt && game.current_phase === "PURCHASE_OR_AUCTION") {
+    return chooseMockPurchaseOrAuctionAction(game, playerId, legalActions);
+  }
   const priority = hasActiveDebt
     ? ["SETTLE_DEBT", "SELL_HOUSE", "MORTGAGE_PROPERTY", "DECLARE_BANKRUPTCY", "END_TURN", "ROLL_DICE"]
     : ["BUY_HOUSE", "UNMORTGAGE_PROPERTY", "BUY_PROPERTY", "START_AUCTION", "END_TURN", "ROLL_DICE"];
