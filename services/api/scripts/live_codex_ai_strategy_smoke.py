@@ -348,6 +348,13 @@ def _strategy_cases() -> tuple[StrategySmokeCase, ...]:
             verifier=_verify_dark_blue_near_monopoly_deal_proposal,
         ),
         StrategySmokeCase(
+            name="railroad_near_set_deal_proposal",
+            game_id=UUID("00000000-0000-0000-0000-00000000b239"),
+            decision_type="deal_proposal",
+            state_factory=_railroad_near_set_state,
+            verifier=_verify_railroad_near_set_deal_proposal,
+        ),
+        StrategySmokeCase(
             name="utility_near_set_deal_proposal",
             game_id=UUID("00000000-0000-0000-0000-00000000b230"),
             decision_type="deal_proposal",
@@ -872,6 +879,35 @@ def _verify_dark_blue_near_monopoly_deal_proposal(parsed: dict[str, Any]) -> Non
     )
 
 
+def _verify_railroad_near_set_deal_proposal(parsed: dict[str, Any]) -> None:
+    deal = _dict(parsed.get("deal"))
+    terms = _dict(deal.get("terms"))
+    instruments = [_dict(term) for term in terms.get("terms", [])]
+    cash_terms = [term for term in instruments if term.get("kind") == "immediate_cash_transfer"]
+    property_terms = [
+        term for term in instruments if term.get("kind") == "immediate_property_transfer"
+    ]
+
+    assert parsed.get("decision_type") == "deal_proposal"
+    assert parsed.get("negotiation_id") == str(NEGOTIATION_ID)
+    assert deal.get("recipient_player_ids") == [str(OTHER_PLAYER_ID)]
+    assert terms.get("kind") == "structured_deal"
+    assert terms.get("deal_schema_version") == 1
+    assert terms.get("participants") == [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)]
+    assert any(
+        term.get("from_player_id") == str(AI_PLAYER_ID)
+        and term.get("to_player_id") == str(OTHER_PLAYER_ID)
+        and 200 <= int(term.get("amount", 0)) <= 300
+        for term in cash_terms
+    )
+    assert any(
+        term.get("from_player_id") == str(OTHER_PLAYER_ID)
+        and term.get("to_player_id") == str(AI_PLAYER_ID)
+        and term.get("property_id") == "property_short_line_railroad"
+        for term in property_terms
+    )
+
+
 def _verify_utility_near_set_deal_proposal(parsed: dict[str, Any]) -> None:
     deal = _dict(parsed.get("deal"))
     terms = _dict(deal.get("terms"))
@@ -1104,6 +1140,12 @@ def _caller_request_context(case: StrategySmokeCase) -> dict[str, Any]:
             "negotiation_id": str(NEGOTIATION_ID),
             "requested_decision": "Propose a structured deal to acquire Park Place.",
         }
+    if case.name == "railroad_near_set_deal_proposal":
+        return {
+            "mode": "live_strategy_smoke",
+            "negotiation_id": str(NEGOTIATION_ID),
+            "requested_decision": "Propose a structured deal to acquire Short Line Railroad.",
+        }
     if case.name == "utility_near_set_deal_proposal":
         return {
             "mode": "live_strategy_smoke",
@@ -1182,6 +1224,37 @@ def _negotiations(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]:
                             "cash_budget_ceiling": 225,
                             "avoid_trading_away_group_property_ids": [
                                 "property_electric_company"
+                            ],
+                        },
+                    },
+                },
+                "created_at": "2026-07-08T00:00:00Z",
+            },
+        )
+    if case.name == "railroad_near_set_deal_proposal":
+        return (
+            {
+                "id": str(NEGOTIATION_ID),
+                "opened_by_player_id": str(AI_PLAYER_ID),
+                "status": "active",
+                "phase": "START_TURN",
+                "round_number": 1,
+                "context": {
+                    "participant_player_ids": [str(AI_PLAYER_ID), str(OTHER_PLAYER_ID)],
+                    "current_deal_id": current_deal_id,
+                    "context": {
+                        "topic": "Trade for Short Line Railroad to complete Railroads",
+                        "target_property_id": "property_short_line_railroad",
+                        "target_property_name": "Short Line Railroad",
+                        "target_owner_id": str(OTHER_PLAYER_ID),
+                        "target_owner_name": "Ada",
+                        "suggested_offer": {
+                            "cash_budget_floor": 200,
+                            "cash_budget_ceiling": 300,
+                            "avoid_trading_away_group_property_ids": [
+                                "property_reading_railroad",
+                                "property_pennsylvania_railroad",
+                                "property_b_and_o_railroad",
                             ],
                         },
                     },
@@ -1306,6 +1379,21 @@ def _negotiation_messages(case: StrategySmokeCase) -> tuple[dict[str, Any], ...]
                 "recipient_player_id": str(OTHER_PLAYER_ID),
                 "message_type": "freeform_message",
                 "body": "I want Water Works to complete Utilities and can offer fair cash now.",
+                "payload": {"message_type": "freeform_message"},
+                "created_at": "2026-07-08T00:00:01Z",
+            },
+        )
+    if case.name == "railroad_near_set_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-railroad-message-1",
+                "negotiation_id": str(NEGOTIATION_ID),
+                "sender_player_id": str(AI_PLAYER_ID),
+                "recipient_player_id": str(OTHER_PLAYER_ID),
+                "message_type": "freeform_message",
+                "body": (
+                    "I want Short Line Railroad to complete Railroads and can offer fair cash now."
+                ),
                 "payload": {"message_type": "freeform_message"},
                 "created_at": "2026-07-08T00:00:01Z",
             },
@@ -1878,6 +1966,21 @@ def _strategy_rule_snippets(case: StrategySmokeCase) -> tuple[dict[str, str], ..
                     "of property_park_place from Ada to Grace. Offer cash between $350 and $525. "
                     "Use deal_proposal_guidance.deal_payload_template as the base proposal. "
                     "Do not trade away property_boardwalk."
+                ),
+            },
+        )
+    if case.name == "railroad_near_set_deal_proposal":
+        return (
+            {
+                "id": "live-strategy-railroad-deal-shape",
+                "source": "strategy-smoke",
+                "text": (
+                    "For this deal_proposal, propose structured_deal terms containing "
+                    "immediate_cash_transfer from Grace to Ada and immediate_property_transfer "
+                    "of property_short_line_railroad from Ada to Grace. Offer cash between "
+                    "$200 and $300. Use deal_proposal_guidance.deal_payload_template as the "
+                    "base proposal. Do not trade away property_reading_railroad, "
+                    "property_pennsylvania_railroad, or property_b_and_o_railroad."
                 ),
             },
         )
